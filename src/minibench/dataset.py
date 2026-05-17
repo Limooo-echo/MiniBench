@@ -10,8 +10,8 @@ from typing import Any
 class Task:
     id: str
     question: str
-    reference_answers: tuple[str, ...]
-    reference_regex: str | None
+    options: dict[str, str]
+    correct_option: str
     answer_extractors: tuple[str, ...]
     prompt_constraints: tuple[str, ...]
     tags: tuple[str, ...]
@@ -34,19 +34,24 @@ def task_from_dict(raw: dict[str, Any]) -> Task:
     if not isinstance(raw.get("question"), str) or not raw["question"]:
         raise ValueError(f"{raw['id']}: question must be a non-empty string")
 
-    reference_answers = _require_string_list(raw, "reference_answers")
-    if not reference_answers and raw.get("reference_regex") is None:
-        raise ValueError(f"{raw['id']}: provide reference_answers or reference_regex")
+    options = raw.get("options")
+    if not isinstance(options, dict):
+        raise ValueError(f"{raw['id']}: options must be an object")
+    expected_labels = {"A", "B", "C", "D"}
+    if set(options) != expected_labels:
+        raise ValueError(f"{raw['id']}: options must contain exactly A, B, C, and D")
+    if not all(isinstance(value, str) and value for value in options.values()):
+        raise ValueError(f"{raw['id']}: each option must be a non-empty string")
 
-    reference_regex = raw.get("reference_regex")
-    if reference_regex is not None and not isinstance(reference_regex, str):
-        raise ValueError(f"{raw['id']}: reference_regex must be null or a string")
+    correct_option = raw.get("correct_option")
+    if correct_option not in expected_labels:
+        raise ValueError(f"{raw['id']}: correct_option must be A, B, C, or D")
 
     return Task(
         id=raw["id"],
         question=raw["question"],
-        reference_answers=reference_answers,
-        reference_regex=reference_regex,
+        options={label: options[label] for label in ("A", "B", "C", "D")},
+        correct_option=correct_option,
         answer_extractors=_require_string_list(raw, "answer_extractors"),
         prompt_constraints=_require_string_list(raw, "prompt_constraints"),
         tags=_require_string_list(raw, "tags"),
@@ -75,4 +80,3 @@ def find_task(tasks: list[Task], task_id: str) -> Task:
         if task.id == task_id:
             return task
     raise KeyError(f"unknown task id: {task_id}")
-

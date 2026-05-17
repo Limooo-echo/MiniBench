@@ -1,22 +1,15 @@
-from __future__ import annotations
-
-import re
-
 from minibench.dataset import Task
-from minibench.extraction import normalize_answer
+from minibench.extraction import normalize_choice
 
 
 def score_answer(task: Task, extracted_answer: str | None) -> tuple[bool, str]:
     if extracted_answer is None:
         return False, "no_answer"
 
-    normalized = normalize_answer(extracted_answer).casefold()
-    references = {normalize_answer(answer).casefold() for answer in task.reference_answers}
-    if normalized in references:
-        return True, "exact"
+    choice = normalize_choice(extracted_answer)
+    if choice is None:
+        return False, "invalid_choice"
+    if choice == task.correct_option:
+        return True, "choice_match"
 
-    if task.reference_regex and re.fullmatch(task.reference_regex, extracted_answer.strip(), re.IGNORECASE):
-        return True, "reference_regex"
-
-    return False, "mismatch"
-
+    return False, "choice_mismatch"

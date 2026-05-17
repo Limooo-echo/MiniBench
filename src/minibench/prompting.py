@@ -10,13 +10,15 @@ The evaluator will parse your final output automatically."""
 
 def build_prompt(task: Task) -> str:
     constraints = "\n".join(f"- {constraint}" for constraint in task.prompt_constraints)
+    options = "\n".join(f"{label}. {text}" for label, text in task.options.items())
     return "\n\n".join(
         [
             SYSTEM_PROMPT,
             f"Task ID: {task.id}",
             f"Question: {task.question}",
+            "Options:",
+            options,
             "Constraints:",
             constraints,
         ]
     )
-

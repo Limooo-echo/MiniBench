@@ -17,14 +17,14 @@ class OracleAgent(Agent):
     name = "oracle"
 
     def generate(self, prompt: str, task: Task) -> str:
-        return json.dumps({"answer": task.reference_answers[0]}, ensure_ascii=False)
+        return json.dumps({"answer": task.correct_option}, ensure_ascii=False)
 
 
 class NoisyAgent(Agent):
     name = "noisy"
 
     def generate(self, prompt: str, task: Task) -> str:
-        answer = task.reference_answers[0]
+        answer = task.correct_option
         return f"I worked it out. answer: {answer}"
 
 
@@ -65,4 +65,3 @@ def make_agent(name: str, predictions: str | Path | None = None) -> Agent:
     if name == "noisy":
         return NoisyAgent()
     raise ValueError(f"unknown agent: {name}")
-

@@ -6,18 +6,19 @@ The first implementation follows this minimal loop:
 
 ```text
 question selection
+  -> four options labeled A-D
   -> constrained prompt
   -> agent output
   -> JSON extraction
   -> regex fallback
-  -> answer comparison
+  -> option-letter comparison
   -> run artifacts
 ```
 
 This intentionally starts smaller than AgentBoard. The current unit is a
-single-turn task, but the code separates dataset loading, prompting, extraction,
-scoring, and run writing so the task unit can later become a multi-step
-environment.
+single-turn multiple-choice task, but the code separates dataset loading,
+prompting, extraction, scoring, and run writing so the task unit can later become
+a multi-step environment.
 
 ## Borrowed Ideas
 
@@ -40,4 +41,3 @@ From SWE-bench:
 3. Add progress-rate scoring for intermediate states.
 4. Add weighted diagnostic dimensions over tags.
 5. Add real model adapters after deciding provider and key handling.
-
