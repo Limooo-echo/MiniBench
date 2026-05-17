@@ -45,6 +45,51 @@ $env:PYTHONPATH="src"
 python -m minibench.cli evaluate --predictions path\to\predictions.jsonl
 ```
 
+Run an OpenAI-compatible model provider:
+
+```powershell
+$env:PYTHONPATH="src"
+$env:DEEPSEEK_API_KEY="your_key_here"
+python -m minibench.cli evaluate --agent openai-compatible --provider deepseek
+```
+
+```powershell
+$env:PYTHONPATH="src"
+$env:DASHSCOPE_API_KEY="your_key_here"
+python -m minibench.cli evaluate --agent openai-compatible --provider qwen
+```
+
+Use a custom OpenAI-compatible endpoint:
+
+```powershell
+$env:PYTHONPATH="src"
+$env:MY_MODEL_API_KEY="your_key_here"
+python -m minibench.cli evaluate --agent openai-compatible --provider generic --model my-model --base-url https://example.com/v1 --api-key-env MY_MODEL_API_KEY
+```
+
+Run a SiliconFlow model:
+
+```powershell
+$env:PYTHONPATH="src"
+$env:SILICONFLOW_API_KEY="your_key_here"
+python -m minibench.cli evaluate --agent openai-compatible --provider siliconflow --model your-siliconflow-model-id
+```
+
+Provider shortcuts:
+
+- `deepseek`: `DEEPSEEK_API_KEY`, `https://api.deepseek.com`, default model `deepseek-v4-flash`.
+- `qwen`: `DASHSCOPE_API_KEY`, `https://dashscope.aliyuncs.com/compatible-mode/v1`, default model `qwen3.6-plus`.
+- `qwen-intl`: `DASHSCOPE_API_KEY`, `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, default model `qwen3.6-plus`.
+- `qwen-us`: `DASHSCOPE_API_KEY`, `https://dashscope-us.aliyuncs.com/compatible-mode/v1`, default model `qwen3.6-plus`.
+- `siliconflow`: `SILICONFLOW_API_KEY`, `https://api.siliconflow.cn/v1`, requires `--model`.
+
+You can pass provider-specific request fields with `--extra-body-json`, for
+example:
+
+```powershell
+python -m minibench.cli evaluate --agent openai-compatible --provider deepseek --extra-body-json '{\"reasoning_effort\":\"high\"}'
+```
+
 ## Dataset Format
 
 Each line in `data/tasks.jsonl` is one task:

@@ -34,10 +34,18 @@ From SWE-bench:
 - Store every run under an isolated output directory.
 - Make the evaluator independent of the model that produced predictions.
 
+## Model Adapter
+
+The first real model adapter is `openai-compatible`. It uses the chat
+completions request shape directly through the Python standard library, so the
+benchmark does not need an SDK dependency. Provider shortcuts fill in common
+defaults for DeepSeek, Qwen/DashScope, and SiliconFlow, while `generic` keeps the
+adapter open to local servers and other compatible APIs.
+
 ## Near-Term Roadmap
 
 1. Add an `Environment` interface with `reset`, `step`, and `state`.
 2. Save full trajectories for multi-step tasks.
 3. Add progress-rate scoring for intermediate states.
 4. Add weighted diagnostic dimensions over tags.
-5. Add real model adapters after deciding provider and key handling.
+5. Add provider-specific result metadata such as latency, token usage, and cost.
