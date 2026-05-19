@@ -92,27 +92,28 @@ python -m minibench.cli evaluate --agent openai-compatible --provider deepseek -
 
 ## Dataset Format
 
-Each line in `data/tasks.jsonl` is one task:
+Each line in `data/tasks.jsonl` is one task. See `docs/task-authoring.md` for
+the full authoring and tag schema.
 
 ```json
 {
   "id": "mb-choice-001",
-  "question": "Which number is the result of 17 * 23?",
+  "question": "Question text goes here.",
   "options": {
-    "A": "340",
-    "B": "391",
-    "C": "421",
-    "D": "529"
+    "A": "Option A",
+    "B": "Option B",
+    "C": "Option C",
+    "D": "Option D"
   },
   "correct_option": "B",
-  "answer_extractors": ["(?i)answer\\s*[:=]\\s*([ABCD])"],
-  "prompt_constraints": ["Return exactly one JSON object.", "Use the schema {\"answer\": \"A\"}."],
-  "tags": ["arithmetic", "multiple-choice"]
+  "tags": ["format:multiple-choice", "turn:single", "source:synthetic", "domain:tool-use", "skill:tool-selection", "difficulty:easy"]
 }
 ```
 
 Every task must contain exactly four options labeled `A`, `B`, `C`, and `D`.
 The evaluator extracts one option letter and compares it with `correct_option`.
+Default answer extractors and prompt constraints are applied when those fields
+are omitted.
 
 ## Output
 
@@ -126,5 +127,5 @@ Each evaluation creates a directory under `runs/`:
 
 - Add multi-step task environments with trajectories.
 - Track progress rate over intermediate states.
-- Add capability tags and weighted diagnostic scores.
-- Add real model adapters after API keys and model choices are settled.
+- Add weighted diagnostic scores over normalized tags.
+- Add provider-specific metadata such as latency, token usage, and cost.

@@ -6,6 +6,19 @@ from pathlib import Path
 from typing import Any
 
 
+DEFAULT_ANSWER_EXTRACTORS = (
+    r"(?i)answer\s*[:=]\s*([ABCD])",
+    r"(?i)final\s*answer\s*[:=]\s*([ABCD])",
+)
+
+DEFAULT_PROMPT_CONSTRAINTS = (
+    "Return exactly one JSON object.",
+    'Use the schema {"answer": "A"}.',
+    "The answer value must be one of A, B, C, or D.",
+    "Do not include markdown fences or extra commentary.",
+)
+
+
 @dataclass(frozen=True)
 class Task:
     id: str
@@ -26,6 +39,16 @@ def _require_string_list(raw: dict[str, Any], key: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError(f"{raw.get('id', '<unknown>')}: {key} must be a list of strings")
     return tuple(value)
+
+
+def _string_list_or_default(
+    raw: dict[str, Any],
+    key: str,
+    default: tuple[str, ...],
+) -> tuple[str, ...]:
+    if key not in raw:
+        return default
+    return _require_string_list(raw, key)
 
 
 def task_from_dict(raw: dict[str, Any]) -> Task:
@@ -52,8 +75,16 @@ def task_from_dict(raw: dict[str, Any]) -> Task:
         question=raw["question"],
         options={label: options[label] for label in ("A", "B", "C", "D")},
         correct_option=correct_option,
-        answer_extractors=_require_string_list(raw, "answer_extractors"),
-        prompt_constraints=_require_string_list(raw, "prompt_constraints"),
+        answer_extractors=_string_list_or_default(
+            raw,
+            "answer_extractors",
+            DEFAULT_ANSWER_EXTRACTORS,
+        ),
+        prompt_constraints=_string_list_or_default(
+            raw,
+            "prompt_constraints",
+            DEFAULT_PROMPT_CONSTRAINTS,
+        ),
         tags=_require_string_list(raw, "tags"),
     )
 

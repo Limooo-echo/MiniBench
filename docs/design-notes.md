@@ -42,6 +42,13 @@ benchmark does not need an SDK dependency. Provider shortcuts fill in common
 defaults for DeepSeek, Qwen/DashScope, and SiliconFlow, while `generic` keeps the
 adapter open to local servers and other compatible APIs.
 
+## Task Taxonomy
+
+The seed task set uses normalized `prefix:value` tags documented in
+`docs/task-authoring.md`. The required groups are `format`, `turn`, `source`,
+`domain`, `skill`, and `difficulty`, which keeps later AgentBoard-style
+diagnostic summaries straightforward.
+
 ## Near-Term Roadmap
 
 1. Add an `Environment` interface with `reset`, `step`, and `state`.
