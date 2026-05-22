@@ -79,6 +79,52 @@ $env:MY_MODEL_API_KEY="your_key_here"
 python -m minibench.cli evaluate --agent openai-compatible --provider generic --model my-model --base-url https://example.com/v1 --api-key-env MY_MODEL_API_KEY
 ```
 
+### Xiangqi + Pikafish
+
+The Xiangqi path keeps MiniBench as the test runner, `gym-xiangqi` as the rule
+environment, the OpenAI-compatible agent as the tested player, and Pikafish as
+the optional high-strength opponent for harder endgames.
+
+Run the simple one-step Xiangqi set:
+
+```powershell
+$env:PYTHONPATH="src"
+python -m minibench.cli evaluate-xiangqi --xiangqi-tasks data\xiangqi_tasks.jsonl --predictions path\to\xiangqi_predictions.jsonl
+```
+
+Clone and build Pikafish next to this repo:
+
+```powershell
+git clone https://github.com/official-pikafish/Pikafish.git ..\pikafish
+cd ..\pikafish\src
+make -j profile-build
+```
+
+If you used the GitHub source zip, the source folder is usually
+`D:\benchmark\pikafish\Pikafish-master`. Build from its `src` folder, or put a
+prebuilt `pikafish.exe` there.
+
+When running MiniBench from WSL, prefer compiling the Linux binary in WSL:
+
+```bash
+cd /mnt/d/benchmark/pikafish/Pikafish-master/src
+make -j"$(nproc)" build ARCH=x86-64
+```
+
+Then point MiniBench at the compiled binary and run the hard endgame set:
+
+```powershell
+$env:PYTHONPATH="src"
+$env:PIKAFISH_PATH="D:\benchmark\pikafish\Pikafish-master\src\pikafish.exe"
+$env:DEEPSEEK_API_KEY="your_key_here"
+python -m minibench.cli evaluate-xiangqi --xiangqi-tasks data\xiangqi_hard_tasks.jsonl --agent openai-compatible --provider deepseek --pikafish-depth 8
+```
+
+Each hard task can set `"opponent": "pikafish"` and `"agent_side": "ally"` or
+`"enemy"`. MiniBench alternates turns through `gym-xiangqi`; on the agent's
+turn it asks for a JSON action, and on the opponent's turn it asks Pikafish for
+a UCI best move and maps it back into the gym action space.
+
 ### Dataset Format
 
 Each line in `data/tasks.jsonl` is one task. See `docs/task-authoring.md` for
