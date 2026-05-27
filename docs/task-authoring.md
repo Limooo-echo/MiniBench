@@ -1,6 +1,7 @@
 # Task Authoring Guide
 
-This guide defines how to add multiple-choice tasks to `data/tasks.jsonl`.
+This guide defines how to add multiple-choice tasks to a contributor-specific
+JSONL file such as `data/tasks-limo.jsonl`.
 The current benchmark is intentionally simple: every task is a single-turn
 question with four options, and the evaluator scores only the selected option
 letter.
@@ -120,4 +121,3 @@ Use `show-prompt` to inspect a task:
 ```powershell
 python -m minibench.cli show-prompt mb-choice-051
 ```
-

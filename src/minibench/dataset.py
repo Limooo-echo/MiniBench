@@ -31,7 +31,7 @@ class Task:
 
 
 def default_tasks_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "data" / "tasks.jsonl"
+    return Path(__file__).resolve().parents[2] / "data" / "tasks-limo.jsonl"
 
 
 def _require_string_list(raw: dict[str, Any], key: str) -> tuple[str, ...]:
