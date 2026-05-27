@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import urllib.error
 import urllib.request
 
+from minibench.agents.base import Agent
+from minibench.agents.prompts import FINAL_ANSWER_SYSTEM_PROMPT
 from minibench.dataset import Task
 
 
@@ -46,28 +47,6 @@ PROVIDERS = {
 }
 
 
-class Agent:
-    name = "base"
-
-    def generate(self, prompt: str, task: Task) -> str:
-        raise NotImplementedError
-
-
-class OracleAgent(Agent):
-    name = "oracle"
-
-    def generate(self, prompt: str, task: Task) -> str:
-        return json.dumps({"answer": task.correct_option}, ensure_ascii=False)
-
-
-class NoisyAgent(Agent):
-    name = "noisy"
-
-    def generate(self, prompt: str, task: Task) -> str:
-        answer = task.correct_option
-        return f"I worked it out. answer: {answer}"
-
-
 class OpenAICompatibleAgent(Agent):
     name = "openai-compatible"
 
@@ -99,29 +78,43 @@ class OpenAICompatibleAgent(Agent):
             return base_url
         return f"{base_url}/chat/completions"
 
-    def build_payload(self, prompt: str) -> dict[str, object]:
+    def build_payload(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+    ) -> dict[str, object]:
         payload: dict[str, object] = {
             "model": self.model,
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You are answering a multiple-choice benchmark. "
-                        "Return exactly one JSON object like {\"answer\":\"A\"}."
-                    ),
+                    "content": system_prompt or FINAL_ANSWER_SYSTEM_PROMPT,
                 },
                 {"role": "user", "content": prompt},
             ],
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "temperature": self.temperature if temperature is None else temperature,
+            "max_tokens": self.max_tokens if max_tokens is None else max_tokens,
             "stream": False,
         }
-        if self.json_mode:
+        use_json_mode = self.json_mode if json_mode is None else json_mode
+        if use_json_mode:
             payload["response_format"] = {"type": "json_object"}
         payload.update(self.extra_body)
         return payload
 
-    def generate(self, prompt: str, task: Task) -> str:
+    def complete(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+    ) -> str:
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
             raise RuntimeError(
@@ -131,7 +124,15 @@ class OpenAICompatibleAgent(Agent):
 
         request = urllib.request.Request(
             self.endpoint,
-            data=json.dumps(self.build_payload(prompt)).encode("utf-8"),
+            data=json.dumps(
+                self.build_payload(
+                    prompt,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    json_mode=json_mode,
+                )
+            ).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -155,34 +156,8 @@ class OpenAICompatibleAgent(Agent):
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError(f"Unexpected chat completion response: {raw}") from exc
 
-
-class PredictionFileAgent(Agent):
-    name = "prediction-file"
-
-    def __init__(self, path: str | Path):
-        self.path = Path(path)
-        self.outputs = self._load_outputs()
-
-    def _load_outputs(self) -> dict[str, str]:
-        outputs: dict[str, str] = {}
-        with self.path.open("r", encoding="utf-8") as handle:
-            for line_number, line in enumerate(handle, start=1):
-                if not line.strip():
-                    continue
-                record = json.loads(line)
-                task_id = record.get("task_id") or record.get("id")
-                output = record.get("raw_output") or record.get("output")
-                if not isinstance(task_id, str) or not isinstance(output, str):
-                    raise ValueError(
-                        f"{self.path}:{line_number}: expected task_id and raw_output"
-                    )
-                outputs[task_id] = output
-        return outputs
-
     def generate(self, prompt: str, task: Task) -> str:
-        if task.id not in self.outputs:
-            raise KeyError(f"prediction file has no output for task {task.id}")
-        return self.outputs[task.id]
+        return self.complete(prompt)
 
 
 def resolve_provider(
@@ -210,43 +185,3 @@ def resolve_provider(
         base_url or config.base_url,
         api_key_env or config.api_key_env,
     )
-
-
-def make_agent(
-    name: str,
-    predictions: str | Path | None = None,
-    *,
-    provider: str = "generic",
-    model: str | None = None,
-    base_url: str | None = None,
-    api_key_env: str | None = None,
-    temperature: float = 0.0,
-    max_tokens: int = 64,
-    timeout: int = 60,
-    json_mode: bool = False,
-    extra_body: dict[str, object] | None = None,
-) -> Agent:
-    if predictions:
-        return PredictionFileAgent(predictions)
-    if name == "oracle":
-        return OracleAgent()
-    if name == "noisy":
-        return NoisyAgent()
-    if name == "openai-compatible":
-        resolved_model, resolved_base_url, resolved_api_key_env = resolve_provider(
-            provider,
-            model=model,
-            base_url=base_url,
-            api_key_env=api_key_env,
-        )
-        return OpenAICompatibleAgent(
-            model=resolved_model,
-            base_url=resolved_base_url,
-            api_key_env=resolved_api_key_env,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            json_mode=json_mode,
-            extra_body=extra_body,
-        )
-    raise ValueError(f"unknown agent: {name}")

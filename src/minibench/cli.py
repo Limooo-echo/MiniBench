@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from minibench.agents import make_agent
+from minibench.agents import AGENT_NAMES, make_agent
 from minibench.dataset import find_task, load_tasks
 from minibench.evaluation import evaluate_tasks, summarize, write_run
 from minibench.prompting import build_prompt
@@ -51,6 +51,10 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
             timeout=args.timeout,
             json_mode=args.json_mode,
             extra_body=_parse_extra_body_json(args.extra_body_json),
+            samples=args.samples,
+            reasoning_temperature=args.reasoning_temperature,
+            final_temperature=args.final_temperature,
+            max_reasoning_tokens=args.max_reasoning_tokens,
         )
         results = evaluate_tasks(tasks, agent)
     except (KeyError, RuntimeError, ValueError) as exc:
@@ -76,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate = subparsers.add_parser("evaluate", help="Run benchmark evaluation.")
     evaluate.add_argument(
         "--agent",
-        choices=["oracle", "noisy", "openai-compatible"],
+        choices=AGENT_NAMES,
         default="oracle",
     )
     evaluate.add_argument("--predictions", type=Path, default=None)
@@ -90,6 +94,10 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--api-key-env", default=None)
     evaluate.add_argument("--temperature", type=float, default=0.0)
     evaluate.add_argument("--max-tokens", type=int, default=64)
+    evaluate.add_argument("--samples", type=int, default=3)
+    evaluate.add_argument("--reasoning-temperature", type=float, default=0.7)
+    evaluate.add_argument("--final-temperature", type=float, default=0.0)
+    evaluate.add_argument("--max-reasoning-tokens", type=int, default=512)
     evaluate.add_argument("--timeout", type=int, default=60)
     evaluate.add_argument("--json-mode", action="store_true")
     evaluate.add_argument(
