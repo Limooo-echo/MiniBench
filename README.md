@@ -4,63 +4,135 @@
 
 ## English
 
-Mini Agent Bench is a small starter benchmark for agent evaluation. The current
-version focuses on a clean multiple-choice evaluation loop:
+Mini Agent Bench is a small, reproducible benchmark for comparing LLM and
+agent-style reasoning behavior. It now supports three task families:
 
-1. Load benchmark questions.
-2. Build a constrained prompt.
-3. Collect model or agent output.
-4. Prefer JSON parsing, then fall back to regex extraction.
-5. Compare the extracted option letter with the gold option.
-6. Write JSONL predictions and aggregate metrics.
+- Single-turn multiple-choice questions.
+- Xiangqi environment tasks, with optional Pikafish opponent play.
+- One-stroke graph puzzles, scored as Euler trail or Euler circuit solutions.
 
-The design borrows from AgentBoard and SWE-bench, but starts with the smallest
-useful unit. AgentBoard motivates process-aware metrics and diagnostic
-dimensions; SWE-bench motivates reproducible instances, prediction files, and
-separate evaluation artifacts.
+The project also supports several agent architectures under
+`src/minibench/agents/`, so the same benchmark data can be evaluated with
+different reasoning strategies.
 
 ### Quick Start
 
-Run the built-in oracle agent:
+Run the built-in oracle agent on the multiple-choice set:
 
 ```powershell
 $env:PYTHONPATH="src"
 python -m minibench.cli evaluate --agent oracle
 ```
 
-Run a noisier agent that exercises regex fallback extraction:
+Run tests:
 
 ```powershell
 $env:PYTHONPATH="src"
-python -m minibench.cli evaluate --agent noisy
+python -m unittest discover -s tests
 ```
 
-Inspect the prompt for one task:
+Inspect one multiple-choice prompt:
 
 ```powershell
 $env:PYTHONPATH="src"
 python -m minibench.cli show-prompt mb-choice-001
 ```
 
-Replay an existing predictions file:
+### Run In WSL
+
+If this repository is stored on a Windows drive, open WSL and enter the project
+through `/mnt/<drive-letter-lowercase>/...`:
+
+```bash
+cd /mnt/d/benchmark/MiniBench
+export PYTHONPATH=src
+python3 -m unittest discover -s tests
+python3 -m minibench.cli evaluate --agent oracle
+```
+
+For model-backed agents, set the provider API key inside WSL:
+
+```bash
+cd /mnt/d/benchmark/MiniBench
+export PYTHONPATH=src
+export DEEPSEEK_API_KEY="your_key_here"
+python3 -m minibench.cli evaluate --agent cot --provider deepseek
+```
+
+PowerShell and WSL use different environment variable syntax:
+
+```text
+PowerShell: $env:DEEPSEEK_API_KEY="your_key_here"
+WSL/bash:   export DEEPSEEK_API_KEY="your_key_here"
+```
+
+### Agent Architectures
+
+All multiple-choice architectures use the same evaluator:
 
 ```powershell
 $env:PYTHONPATH="src"
-python -m minibench.cli evaluate --predictions path\to\predictions.jsonl
+python -m minibench.cli evaluate --agent <agent-name> --provider <provider>
 ```
 
-Run an OpenAI-compatible provider:
+Available agent names:
+
+- `oracle`: returns the gold answer; evaluation sanity check only.
+- `noisy`: returns a loose text answer; extraction sanity check only.
+- `openai-compatible`: direct OpenAI-compatible chat completion baseline.
+- `direct`: asks the model to answer directly with the required JSON format.
+- `cot`: Chain-of-Thought style; reason first, then finalize to JSON.
+- `self-consistency`: sample several reasoning paths and majority vote.
+- `tot`: Tree-of-Thought style; generate several candidates, then judge.
+- `plan-then-solve`: produce a short plan, solve from the plan, then finalize.
+- `critic-refine`: draft an answer, critique it, then return a refined answer.
+
+Reasoning architectures support shared options:
+
+```powershell
+--samples 3
+--reasoning-temperature 0.7
+--final-temperature 0.0
+--max-reasoning-tokens 512
+```
+
+### Provider Examples
+
+DeepSeek:
 
 ```powershell
 $env:PYTHONPATH="src"
 $env:DEEPSEEK_API_KEY="your_key_here"
-python -m minibench.cli evaluate --agent openai-compatible --provider deepseek
+python -m minibench.cli evaluate --agent cot --provider deepseek
 ```
+
+Qwen/DashScope:
+
+```powershell
+$env:PYTHONPATH="src"
+$env:DASHSCOPE_API_KEY="your_key_here"
+python -m minibench.cli evaluate --agent self-consistency --provider qwen
+```
+
+SiliconFlow:
 
 ```powershell
 $env:PYTHONPATH="src"
 $env:SILICONFLOW_API_KEY="your_key_here"
-python -m minibench.cli evaluate --agent openai-compatible --provider siliconflow --model your-siliconflow-model-id
+python -m minibench.cli evaluate --agent tot --provider siliconflow --model your-siliconflow-model-id
+```
+
+Custom OpenAI-compatible endpoint:
+
+```powershell
+$env:PYTHONPATH="src"
+$env:MY_MODEL_API_KEY="your_key_here"
+python -m minibench.cli evaluate `
+  --agent openai-compatible `
+  --provider generic `
+  --model my-model `
+  --base-url https://example.com/v1 `
+  --api-key-env MY_MODEL_API_KEY
 ```
 
 Provider shortcuts:
@@ -70,14 +142,7 @@ Provider shortcuts:
 - `qwen-intl`: `DASHSCOPE_API_KEY`, `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, default model `qwen3.6-plus`.
 - `qwen-us`: `DASHSCOPE_API_KEY`, `https://dashscope-us.aliyuncs.com/compatible-mode/v1`, default model `qwen3.6-plus`.
 - `siliconflow`: `SILICONFLOW_API_KEY`, `https://api.siliconflow.cn/v1`, requires `--model`.
-
-Use a custom OpenAI-compatible endpoint:
-
-```powershell
-$env:PYTHONPATH="src"
-$env:MY_MODEL_API_KEY="your_key_here"
-python -m minibench.cli evaluate --agent openai-compatible --provider generic --model my-model --base-url https://example.com/v1 --api-key-env MY_MODEL_API_KEY
-```
+- `generic`: requires `--model`, `--base-url`, and `--api-key-env`.
 
 ### Xiangqi + Pikafish
 
@@ -87,194 +152,213 @@ the optional high-strength opponent for harder endgames.
 
 Run the simple one-step Xiangqi set:
 
-```powershell
-$env:PYTHONPATH="src"
-python -m minibench.cli evaluate-xiangqi --xiangqi-tasks data\xiangqi_tasks.jsonl --predictions path\to\xiangqi_predictions.jsonl
+```bash
+cd /mnt/d/benchmark/MiniBench
+export PYTHONPATH=src
+python -m minibench.cli evaluate-xiangqi \
+  --xiangqi-tasks data/xiangqi_tasks.jsonl \
+  --predictions path/to/xiangqi_predictions.jsonl
 ```
 
-Clone and build Pikafish next to this repo:
-
-```powershell
-git clone https://github.com/official-pikafish/Pikafish.git ..\pikafish
-cd ..\pikafish\src
-make -j profile-build
-```
-
-If you used the GitHub source zip, the source folder is usually
-`D:\benchmark\pikafish\Pikafish-master`. Build from its `src` folder, or put a
-prebuilt `pikafish.exe` there.
-
-When running MiniBench from WSL, prefer compiling the Linux binary in WSL:
+Build Pikafish from the source zip in WSL:
 
 ```bash
 cd /mnt/d/benchmark/pikafish/Pikafish-master/src
 make -j"$(nproc)" build ARCH=x86-64
 ```
 
-Then point MiniBench at the compiled binary and run the hard endgame set:
+Run the hard endgame set against Pikafish:
 
-```powershell
-$env:PYTHONPATH="src"
-$env:PIKAFISH_PATH="D:\benchmark\pikafish\Pikafish-master\src\pikafish.exe"
-$env:DEEPSEEK_API_KEY="your_key_here"
-python -m minibench.cli evaluate-xiangqi --xiangqi-tasks data\xiangqi_hard_tasks.jsonl --agent openai-compatible --provider deepseek --pikafish-depth 8
+```bash
+cd /mnt/d/benchmark/MiniBench
+export PYTHONPATH=src
+export PIKAFISH_PATH=/mnt/d/benchmark/pikafish/Pikafish-master/src/pikafish
+export DEEPSEEK_API_KEY="your_key_here"
+python -m minibench.cli evaluate-xiangqi \
+  --xiangqi-tasks data/xiangqi_hard_tasks.jsonl \
+  --agent openai-compatible \
+  --provider deepseek \
+  --pikafish-depth 8
 ```
 
 Each hard task can set `"opponent": "pikafish"` and `"agent_side": "ally"` or
-`"enemy"`. MiniBench alternates turns through `gym-xiangqi`; on the agent's
-turn it asks for a JSON action, and on the opponent's turn it asks Pikafish for
-a UCI best move and maps it back into the gym action space.
+`"enemy"`. MiniBench alternates turns through `gym-xiangqi`; on the agent turn it
+asks for `{"action": 12345}`, and on the opponent turn it asks Pikafish for a UCI
+best move and maps it back into the gym action space.
 
-### Dataset Format
+### One-Stroke Puzzles
 
-Each line in `data/tasks.jsonl` is one task. See `docs/task-authoring.md` for
-the full authoring and tag schema.
+One-stroke tasks are graph puzzles. The agent must return a vertex sequence that
+uses every listed undirected edge exactly once:
 
 ```json
-{
-  "id": "mb-choice-001",
-  "question": "Question text goes here.",
-  "options": {
-    "A": "Option A",
-    "B": "Option B",
-    "C": "Option C",
-    "D": "Option D"
-  },
-  "correct_option": "B",
-  "tags": ["format:multiple-choice", "turn:single", "source:synthetic", "domain:tool-use", "skill:tool-selection", "difficulty:easy"]
-}
+{"path":["A","B","C","D"]}
 ```
 
-Every task must contain exactly four options labeled `A`, `B`, `C`, and `D`.
-The evaluator extracts one option letter and compares it with `correct_option`.
-Default answer extractors and prompt constraints are applied when those fields
-are omitted.
+Run the built-in one-stroke set with a model:
 
-### Output
+```bash
+cd /mnt/d/benchmark/MiniBench
+export PYTHONPATH=src
+export DEEPSEEK_API_KEY="your_key_here"
+python -m minibench.cli evaluate-one-stroke \
+  --one-stroke-tasks data/one_stroke_tasks.jsonl \
+  --agent openai-compatible \
+  --provider deepseek \
+  --json-mode
+```
 
-Each evaluation creates a directory under `runs/`:
+Replay a saved predictions file:
 
-- `predictions.jsonl`: raw output, extracted answer, and per-instance result.
-- `results.json`: aggregate counts and accuracy.
-- `summary.txt`: a short human-readable summary.
+```bash
+python -m minibench.cli evaluate-one-stroke \
+  --one-stroke-tasks data/one_stroke_tasks.jsonl \
+  --predictions path/to/one_stroke_predictions.jsonl
+```
 
-### Next Steps
+### Dataset Files
 
-- Add multi-step task environments with trajectories.
-- Track progress rate over intermediate states.
-- Add weighted diagnostic scores over normalized tags.
-- Add provider-specific metadata such as latency, token usage, and cost.
+- `data/tasks-limo.jsonl`: contributor-specific multiple-choice tasks.
+- `data/xiangqi_tasks.jsonl`: simple Xiangqi tasks.
+- `data/xiangqi_hard_tasks.jsonl`: Pikafish-opponent Xiangqi endgames.
+- `data/one_stroke_tasks.jsonl`: one-stroke graph puzzles.
+
+Each evaluation creates a run directory under `runs/` with:
+
+- `predictions.jsonl`: raw outputs and per-instance results.
+- `results.json`: aggregate metrics.
+- `summary.txt`: short human-readable summary.
 
 ## 中文
 
-Mini Agent Bench 是一个小型 agent benchmark 起步项目。当前版本先把“四选一题目评测”的最小闭环跑通：
+Mini Agent Bench 是一个小型、可复现的 agent benchmark。现在支持三类任务：
 
-1. 读取 benchmark 题目。
-2. 构造受约束的 prompt。
-3. 收集模型或 agent 输出。
-4. 优先解析 JSON，失败时用正则兜底抽取答案。
-5. 将抽取出的选项字母和标准答案比较。
-6. 写出 JSONL 预测文件和汇总指标。
+- 单轮四选一题。
+- 中国象棋环境题，可选 Pikafish 作为高水平对手。
+- 一笔画图论题，按欧拉路径或欧拉回路进行校验。
 
-这个设计参考了 AgentBoard 和 SWE-bench，但从最小可用单元开始。AgentBoard 启发我们后续加入过程指标和能力诊断；SWE-bench 启发我们把题目、预测和评测结果都做成可复现的文件。
+项目同时支持 `src/minibench/agents/` 下的多种 agent 架构，可以用同一批题比较不同
+“思维组织方式”的效果。
 
 ### 快速开始
 
-运行内置 oracle agent。它直接读取标准答案，适合检查评测链路是否正常：
+运行 multiple-choice 的 oracle agent，检查评测链路：
 
 ```powershell
 $env:PYTHONPATH="src"
 python -m minibench.cli evaluate --agent oracle
 ```
 
-运行 noisy agent。它会输出不那么规整的文本，用来测试正则兜底抽取：
+运行测试：
 
 ```powershell
 $env:PYTHONPATH="src"
-python -m minibench.cli evaluate --agent noisy
+python -m unittest discover -s tests
 ```
 
-查看某一道题实际生成的 prompt：
+查看某一道选择题 prompt：
 
 ```powershell
 $env:PYTHONPATH="src"
 python -m minibench.cli show-prompt mb-choice-001
 ```
 
-用已有预测文件重新评分：
+### 在 WSL 中运行
 
-```powershell
-$env:PYTHONPATH="src"
-python -m minibench.cli evaluate --predictions path\to\predictions.jsonl
+如果项目在 Windows 磁盘中，进入 WSL 后路径要写成 `/mnt/<小写盘符>/...`：
+
+```bash
+cd /mnt/d/benchmark/MiniBench
+export PYTHONPATH=src
+python3 -m unittest discover -s tests
+python3 -m minibench.cli evaluate --agent oracle
 ```
 
-### 接入外部模型
+调用真实模型时，也要在 WSL 里设置 API key：
 
-运行 DeepSeek：
-
-```powershell
-$env:PYTHONPATH="src"
-$env:DEEPSEEK_API_KEY="your_key_here"
-python -m minibench.cli evaluate --agent openai-compatible --provider deepseek
+```bash
+export DEEPSEEK_API_KEY="your_key_here"
+python3 -m minibench.cli evaluate --agent cot --provider deepseek
 ```
 
-运行硅基流动模型：
+### Agent 架构
 
-```powershell
-$env:PYTHONPATH="src"
-$env:SILICONFLOW_API_KEY="your_key_here"
-python -m minibench.cli evaluate --agent openai-compatible --provider siliconflow --model your-siliconflow-model-id
+选择题可以使用这些 agent 名称：
+
+- `oracle`：直接返回标准答案，只用于检查评测链路。
+- `noisy`：返回较松散文本，用于检查抽取逻辑。
+- `openai-compatible`：普通 OpenAI-compatible chat completion baseline。
+- `direct`：直接要求模型输出最终 JSON。
+- `cot`：先推理，再收敛为 JSON。
+- `self-consistency`：多次采样推理，然后多数投票。
+- `tot`：生成多个候选思路，再由 judge 选择。
+- `plan-then-solve`：先写计划，再求解。
+- `critic-refine`：初答、批判、修正。
+
+### 象棋 + Pikafish
+
+简单题：
+
+```bash
+cd /mnt/d/benchmark/MiniBench
+export PYTHONPATH=src
+python -m minibench.cli evaluate-xiangqi \
+  --xiangqi-tasks data/xiangqi_tasks.jsonl \
+  --predictions path/to/xiangqi_predictions.jsonl
 ```
 
-可用 provider 快捷方式：
+困难题对接 Pikafish：
 
-- `deepseek`: 使用 `DEEPSEEK_API_KEY`，地址为 `https://api.deepseek.com`，默认模型为 `deepseek-v4-flash`。
-- `qwen`: 使用 `DASHSCOPE_API_KEY`，地址为 `https://dashscope.aliyuncs.com/compatible-mode/v1`，默认模型为 `qwen3.6-plus`。
-- `qwen-intl`: 使用 `DASHSCOPE_API_KEY`，地址为 `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`，默认模型为 `qwen3.6-plus`。
-- `qwen-us`: 使用 `DASHSCOPE_API_KEY`，地址为 `https://dashscope-us.aliyuncs.com/compatible-mode/v1`，默认模型为 `qwen3.6-plus`。
-- `siliconflow`: 使用 `SILICONFLOW_API_KEY`，地址为 `https://api.siliconflow.cn/v1`，需要显式传入 `--model`。
-
-自定义 OpenAI-compatible 接口：
-
-```powershell
-$env:PYTHONPATH="src"
-$env:MY_MODEL_API_KEY="your_key_here"
-python -m minibench.cli evaluate --agent openai-compatible --provider generic --model my-model --base-url https://example.com/v1 --api-key-env MY_MODEL_API_KEY
+```bash
+cd /mnt/d/benchmark/MiniBench
+export PYTHONPATH=src
+export PIKAFISH_PATH=/mnt/d/benchmark/pikafish/Pikafish-master/src/pikafish
+export DEEPSEEK_API_KEY="your_key_here"
+python -m minibench.cli evaluate-xiangqi \
+  --xiangqi-tasks data/xiangqi_hard_tasks.jsonl \
+  --agent openai-compatible \
+  --provider deepseek \
+  --pikafish-depth 8
 ```
 
-### 题库格式
+agent 需要输出 `{"action": 12345}`。评测器会用 `gym-xiangqi` 执行规则，
+在 Pikafish 回合调用 UCI 引擎生成对手走法。
 
-`data/tasks.jsonl` 中每一行是一道题。完整出题规范和 tag schema 见 `docs/task-authoring.md`。
+### 一笔画
+
+一笔画任务要求 agent 返回一个顶点序列，必须刚好使用每条无向边一次：
 
 ```json
-{
-  "id": "mb-choice-001",
-  "question": "Question text goes here.",
-  "options": {
-    "A": "Option A",
-    "B": "Option B",
-    "C": "Option C",
-    "D": "Option D"
-  },
-  "correct_option": "B",
-  "tags": ["format:multiple-choice", "turn:single", "source:synthetic", "domain:tool-use", "skill:tool-selection", "difficulty:easy"]
-}
+{"path":["A","B","C","D"]}
 ```
 
-每道题必须刚好包含 `A`、`B`、`C`、`D` 四个选项。评测器会抽取一个选项字母，并与 `correct_option` 比较。省略 `answer_extractors` 和 `prompt_constraints` 时，会自动使用默认规则。
+运行内置题：
 
-### 输出结果
+```bash
+cd /mnt/d/benchmark/MiniBench
+export PYTHONPATH=src
+export DEEPSEEK_API_KEY="your_key_here"
+python -m minibench.cli evaluate-one-stroke \
+  --one-stroke-tasks data/one_stroke_tasks.jsonl \
+  --agent openai-compatible \
+  --provider deepseek \
+  --json-mode
+```
 
-每次评测都会在 `runs/` 下创建一个目录：
+使用已有预测文件复评：
 
-- `predictions.jsonl`: 每题的原始输出、抽取答案和单题结果。
-- `results.json`: 总体指标和按 tag 汇总的指标。
-- `summary.txt`: 简短的人类可读总结。
+```bash
+python -m minibench.cli evaluate-one-stroke \
+  --one-stroke-tasks data/one_stroke_tasks.jsonl \
+  --predictions path/to/one_stroke_predictions.jsonl
+```
 
-### 下一步
+### 题库文件
 
-- 增加带 trajectory 的多步任务环境。
-- 记录中间状态的 progress rate。
-- 基于规范化 tags 做加权能力诊断。
-- 记录 provider 相关元数据，比如 latency、token usage 和 cost。
+- `data/tasks-limo.jsonl`：Limo 贡献的四选一题。
+- `data/xiangqi_tasks.jsonl`：简单象棋题。
+- `data/xiangqi_hard_tasks.jsonl`：Pikafish 对手象棋残局题。
+- `data/one_stroke_tasks.jsonl`：一笔画图论题。
 
+每次评测都会在 `runs/` 下生成目录，包含 `predictions.jsonl`、`results.json`
+和 `summary.txt`。

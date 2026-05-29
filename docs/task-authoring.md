@@ -1,11 +1,12 @@
 # Task Authoring Guide
 
-This guide defines how to add multiple-choice tasks to `data/tasks.jsonl`.
-The current benchmark is intentionally simple: every task is a single-turn
-question with four options, and the evaluator scores only the selected option
-letter.
+MiniBench currently has three task families:
 
-## Task Shape
+- Multiple-choice tasks in contributor-specific files such as `data/tasks-limo.jsonl`.
+- Xiangqi environment tasks in `data/xiangqi_tasks.jsonl` and `data/xiangqi_hard_tasks.jsonl`.
+- One-stroke graph puzzles in `data/one_stroke_tasks.jsonl`.
+
+## Multiple-Choice Tasks
 
 Each JSONL line is one task:
 
@@ -23,17 +24,61 @@ Required fields:
 
 Optional fields:
 
-- `answer_extractors`: regexes for unusual outputs. If omitted, the default
-  A-D extractors are used.
-- `prompt_constraints`: output rules. If omitted, the default JSON-only
-  constraints are used.
+- `answer_extractors`: regexes for unusual outputs. If omitted, default A-D
+  extractors are used.
+- `prompt_constraints`: output rules. If omitted, default JSON-only constraints
+  are used.
+
+## Xiangqi Tasks
+
+Xiangqi tasks describe a `gym-xiangqi` board plus the side and goal to evaluate.
+Simple tasks usually have no opponent and expect the agent to find a one-step
+winning action. Hard tasks can set `opponent` to `pikafish`.
+
+```json
+{"id":"xq-capture-general-011","board":[[0,0,0,0,-1,0,0,0,0],[0,0,0,0,0,0,0,0,0]],"side_to_move":"ally","agent_side":"ally","goal":"capture_enemy_general","opponent":"none","max_steps":1,"tags":["xiangqi","endgame","difficulty:easy"]}
+```
+
+The real board must contain 10 rows and 9 columns. Use existing Xiangqi files as
+templates because piece ids are inherited from `gym-xiangqi`.
+
+Important fields:
+
+- `side_to_move`: `ally` or `enemy`.
+- `agent_side`: side controlled by the tested agent.
+- `goal`: currently `capture_enemy_general` or `agent_win`.
+- `opponent`: `none` or `pikafish`.
+- `max_steps`: maximum environment steps before the task is failed.
+
+## One-Stroke Tasks
+
+One-stroke tasks are undirected graph puzzles. The agent must return a vertex
+path that traverses every listed edge exactly once.
+
+```json
+{"id":"os-example-011","vertices":["A","B","C","D"],"edges":[["A","B"],["B","C"],["C","D"]],"start":"A","end":"D","tags":["one-stroke","euler-trail","difficulty:easy"]}
+```
+
+Required fields:
+
+- `id`: unique task id. Use `os-...`.
+- `vertices`: unique vertex labels.
+- `edges`: non-empty list of two-vertex undirected edges.
+- `tags`: normalized tags.
+
+Optional fields:
+
+- `start`: required first vertex.
+- `end`: required final vertex.
+
+The loader validates that the graph has a one-stroke solution under the supplied
+start and end constraints. Parallel edges are accepted by the evaluator if they
+appear as repeated edge entries, but self-loops are not supported.
 
 ## Tag Schema
 
-Use flat tags with a `prefix:value` pattern. Every task should have exactly one
-tag from each required group.
-
-Required groups:
+Use flat tags with a `prefix:value` pattern where useful. Multiple-choice tasks
+should keep the original normalized groups:
 
 - `format:multiple-choice`
 - `turn:single`
@@ -42,68 +87,14 @@ Required groups:
 - `skill:<skill>`
 - `difficulty:easy`, `difficulty:medium`, or `difficulty:hard`
 
-Recommended domains:
+Environment and game tasks can add task-family tags such as:
 
-- `domain:agent-evaluation`
-- `domain:prompting`
-- `domain:tool-use`
-- `domain:planning`
-- `domain:self-reflection`
-- `domain:software-engineering`
-- `domain:web-information`
-- `domain:world-modeling`
-
-Recommended skills:
-
-- `skill:metric-understanding`
-- `skill:format-following`
-- `skill:tool-selection`
-- `skill:planning`
-- `skill:self-reflection`
-- `skill:test-understanding`
-- `skill:information-extraction`
-- `skill:state-tracking`
-- `skill:grounding`
-- `skill:world-modeling`
-- `skill:patch-reasoning`
-- `skill:error-diagnosis`
-
-Optional secondary tags are allowed when useful:
-
-- `topic:progress-rate`
-- `topic:trajectory`
-- `topic:partial-observability`
-- `topic:json`
-- `topic:regex`
-- `topic:docker`
-- `topic:patch`
-
-## Category Plan
-
-The first seed set targets eight buckets:
-
-1. Agent evaluation concepts: success rate, progress rate, grounding,
-   trajectories, partial observability.
-2. Prompt and JSON format following: machine parsing, invalid extra text,
-   schema compliance.
-3. Tool selection: search, calculator, file read, code execution, database query.
-4. Planning: choose the next action in a small goal-directed sequence.
-5. Self-reflection: identify the mistake in a failed trajectory.
-6. SWE-bench-style software engineering: failing tests, patches, containers,
-   repo state, resolution.
-7. Web and information extraction: read short webpage-like snippets and extract
-   the correct value.
-8. World modeling: track state changes after actions.
-
-## Quality Rules
-
-- Keep the question answerable from the prompt alone.
-- Make exactly one option clearly correct.
-- Avoid trick wording unless the task is explicitly about instruction following.
-- Keep option lengths roughly balanced.
-- Do not use real private data, secrets, credentials, or copyrighted dataset
-  instances copied from another benchmark.
-- Prefer small synthetic scenarios inspired by mature benchmark patterns.
+- `xiangqi`
+- `one-stroke`
+- `euler-trail`
+- `euler-circuit`
+- `pikafish-opponent`
+- `difficulty:easy`, `difficulty:medium`, or `difficulty:hard`
 
 ## Validation
 
@@ -115,9 +106,16 @@ python -m unittest discover -s tests
 python -m minibench.cli evaluate --agent oracle
 ```
 
-Use `show-prompt` to inspect a task:
+In WSL:
+
+```bash
+cd /mnt/d/benchmark/MiniBench
+export PYTHONPATH=src
+python3 -m unittest discover -s tests
+```
+
+Inspect one multiple-choice prompt:
 
 ```powershell
 python -m minibench.cli show-prompt mb-choice-051
 ```
-

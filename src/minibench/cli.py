@@ -5,71 +5,117 @@ import json
 from pathlib import Path
 from typing import Any
 
-from minibench.agents import make_agent
+from minibench.agents import AGENT_NAMES, make_agent
 from minibench.dataset import find_task, load_tasks
 from minibench.evaluation import evaluate_tasks, summarize, write_run
 from minibench.prompting import build_prompt
 
 
+PROVIDER_CHOICES = (
+    "generic",
+    "deepseek",
+    "qwen",
+    "qwen-intl",
+    "qwen-us",
+    "siliconflow",
+)
+
+ENV_AGENT_CHOICES = ("openai-compatible",)
+
+
 def _parse_extra_body_json(value: str | None) -> dict[str, object] | None:
     if value is None:
         return None
-
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError as exc:
         raise SystemExit(f"--extra-body-json must be valid JSON: {exc}") from exc
-
     if not isinstance(parsed, dict):
         raise SystemExit("--extra-body-json must be a JSON object")
-
     return parsed
 
 
 def _select_tasks(tasks: list[Any], task_ids: list[str] | None) -> list[Any]:
     if not task_ids:
         return tasks
-
     wanted = set(task_ids)
     selected = [task for task in tasks if task.id in wanted]
     missing = wanted - {task.id for task in selected}
-
     if missing:
         raise SystemExit(f"unknown task id(s): {', '.join(sorted(missing))}")
-
     return selected
+
+
+def _make_cli_agent(
+    args: argparse.Namespace,
+    *,
+    system_prompt: str | None = None,
+) -> Any:
+    return make_agent(
+        args.agent,
+        args.predictions,
+        provider=args.provider,
+        model=args.model,
+        base_url=args.base_url,
+        api_key_env=args.api_key_env,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        timeout=args.timeout,
+        json_mode=args.json_mode,
+        extra_body=_parse_extra_body_json(args.extra_body_json),
+        system_prompt=system_prompt,
+        samples=args.samples,
+        reasoning_temperature=args.reasoning_temperature,
+        final_temperature=args.final_temperature,
+        max_reasoning_tokens=args.max_reasoning_tokens,
+    )
+
+
+def _add_provider_args(parser: argparse.ArgumentParser, *, max_tokens: int) -> None:
+    parser.add_argument("--predictions", type=Path, default=None)
+    parser.add_argument(
+        "--provider",
+        choices=PROVIDER_CHOICES,
+        default="generic",
+    )
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--base-url", default=None)
+    parser.add_argument("--api-key-env", default=None)
+    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--max-tokens", type=int, default=max_tokens)
+    parser.add_argument("--samples", type=int, default=3)
+    parser.add_argument("--reasoning-temperature", type=float, default=0.7)
+    parser.add_argument("--final-temperature", type=float, default=0.0)
+    parser.add_argument("--max-reasoning-tokens", type=int, default=512)
+    parser.add_argument("--timeout", type=int, default=60)
+    parser.add_argument("--json-mode", action="store_true")
+    parser.add_argument(
+        "--extra-body-json",
+        default=None,
+        help="JSON object merged into the chat completions request body.",
+    )
+
+
+def _add_run_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--output-dir", type=Path, default=Path("runs"))
+    parser.add_argument("--run-name", default=None)
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--task-id", action="append", default=None)
 
 
 def _cmd_evaluate(args: argparse.Namespace) -> int:
     tasks = load_tasks(args.tasks)
     tasks = _select_tasks(tasks, args.task_id)
-
     if args.limit is not None:
         tasks = tasks[: args.limit]
-
     try:
-        agent = make_agent(
-            args.agent,
-            args.predictions,
-            provider=args.provider,
-            model=args.model,
-            base_url=args.base_url,
-            api_key_env=args.api_key_env,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            timeout=args.timeout,
-            json_mode=args.json_mode,
-            extra_body=_parse_extra_body_json(args.extra_body_json),
-        )
+        agent = _make_cli_agent(args)
         results = evaluate_tasks(tasks, agent)
     except (KeyError, RuntimeError, ValueError) as exc:
         raise SystemExit(f"evaluation failed: {exc}") from exc
-
     run_dir = write_run(results, args.output_dir, args.run_name)
     summary = summarize(results)
-
     print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
-
     return 0 if summary["correct"] == summary["total"] else 1
 
 
@@ -84,25 +130,10 @@ def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
 
     tasks = load_xiangqi_tasks(args.xiangqi_tasks)
     tasks = _select_tasks(tasks, args.task_id)
-
     if args.limit is not None:
         tasks = tasks[: args.limit]
-
     try:
-        agent = make_agent(
-            args.agent,
-            args.predictions,
-            provider=args.provider,
-            model=args.model,
-            base_url=args.base_url,
-            api_key_env=args.api_key_env,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            timeout=args.timeout,
-            json_mode=args.json_mode,
-            extra_body=_parse_extra_body_json(args.extra_body_json),
-            system_prompt=XIANGQI_SYSTEM_PROMPT,
-        )
+        agent = _make_cli_agent(args, system_prompt=XIANGQI_SYSTEM_PROMPT)
         results = evaluate_xiangqi_tasks(
             tasks,
             agent,
@@ -115,12 +146,33 @@ def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
         )
     except (KeyError, RuntimeError, ValueError) as exc:
         raise SystemExit(f"xiangqi evaluation failed: {exc}") from exc
-
     run_dir = write_xiangqi_run(results, args.output_dir, args.run_name)
     summary = summarize_xiangqi(results)
-
     print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
+    return 0 if summary["success"] == summary["total"] else 1
 
+
+def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
+    from minibench.one_stroke_dataset import load_one_stroke_tasks
+    from minibench.one_stroke_evaluation import (
+        evaluate_one_stroke_tasks,
+        summarize_one_stroke,
+        write_one_stroke_run,
+    )
+    from minibench.one_stroke_prompting import ONE_STROKE_SYSTEM_PROMPT
+
+    tasks = load_one_stroke_tasks(args.one_stroke_tasks)
+    tasks = _select_tasks(tasks, args.task_id)
+    if args.limit is not None:
+        tasks = tasks[: args.limit]
+    try:
+        agent = _make_cli_agent(args, system_prompt=ONE_STROKE_SYSTEM_PROMPT)
+        results = evaluate_one_stroke_tasks(tasks, agent)
+    except (KeyError, RuntimeError, ValueError) as exc:
+        raise SystemExit(f"one-stroke evaluation failed: {exc}") from exc
+    run_dir = write_one_stroke_run(results, args.output_dir, args.run_name)
+    summary = summarize_one_stroke(results)
+    print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
     return 0 if summary["success"] == summary["total"] else 1
 
 
@@ -133,52 +185,16 @@ def _cmd_show_prompt(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="minibench")
-    parser.add_argument(
-        "--tasks",
-        type=Path,
-        default=None,
-        help="Path to multiple-choice tasks JSONL.",
-    )
-
+    parser.add_argument("--tasks", type=Path, default=None, help="Path to tasks JSONL.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    evaluate = subparsers.add_parser(
-        "evaluate",
-        help="Run multiple-choice benchmark evaluation.",
-    )
-    evaluate.add_argument(
-        "--agent",
-        choices=["oracle", "noisy", "openai-compatible"],
-        default="oracle",
-    )
-    evaluate.add_argument("--predictions", type=Path, default=None)
-    evaluate.add_argument(
-        "--provider",
-        choices=["generic", "deepseek", "qwen", "qwen-intl", "qwen-us", "siliconflow"],
-        default="generic",
-    )
-    evaluate.add_argument("--model", default=None)
-    evaluate.add_argument("--base-url", default=None)
-    evaluate.add_argument("--api-key-env", default=None)
-    evaluate.add_argument("--temperature", type=float, default=0.0)
-    evaluate.add_argument("--max-tokens", type=int, default=64)
-    evaluate.add_argument("--timeout", type=int, default=60)
-    evaluate.add_argument("--json-mode", action="store_true")
-    evaluate.add_argument(
-        "--extra-body-json",
-        default=None,
-        help="JSON object merged into the chat completions request body.",
-    )
-    evaluate.add_argument("--output-dir", type=Path, default=Path("runs"))
-    evaluate.add_argument("--run-name", default=None)
-    evaluate.add_argument("--limit", type=int, default=None)
-    evaluate.add_argument("--task-id", action="append", default=None)
+    evaluate = subparsers.add_parser("evaluate", help="Run benchmark evaluation.")
+    evaluate.add_argument("--agent", choices=AGENT_NAMES, default="oracle")
+    _add_provider_args(evaluate, max_tokens=64)
+    _add_run_args(evaluate)
     evaluate.set_defaults(func=_cmd_evaluate)
 
-    show_prompt = subparsers.add_parser(
-        "show-prompt",
-        help="Print one multiple-choice task prompt.",
-    )
+    show_prompt = subparsers.add_parser("show-prompt", help="Print one task prompt.")
     show_prompt.add_argument("task_id")
     show_prompt.set_defaults(func=_cmd_show_prompt)
 
@@ -190,35 +206,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--xiangqi-tasks",
         type=Path,
         default=None,
-        help="Path to xiangqi tasks JSONL. Defaults to data/xiangqi_tasks.jsonl.",
+        help="Path to Xiangqi tasks JSONL. Defaults to data/xiangqi_tasks.jsonl.",
     )
     evaluate_xiangqi.add_argument(
         "--agent",
-        choices=["openai-compatible"],
+        choices=ENV_AGENT_CHOICES,
         default="openai-compatible",
     )
-    evaluate_xiangqi.add_argument("--predictions", type=Path, default=None)
-    evaluate_xiangqi.add_argument(
-        "--provider",
-        choices=["generic", "deepseek", "qwen", "qwen-intl", "qwen-us", "siliconflow"],
-        default="generic",
-    )
-    evaluate_xiangqi.add_argument("--model", default=None)
-    evaluate_xiangqi.add_argument("--base-url", default=None)
-    evaluate_xiangqi.add_argument("--api-key-env", default=None)
-    evaluate_xiangqi.add_argument("--temperature", type=float, default=0.0)
-    evaluate_xiangqi.add_argument("--max-tokens", type=int, default=128)
-    evaluate_xiangqi.add_argument("--timeout", type=int, default=60)
-    evaluate_xiangqi.add_argument("--json-mode", action="store_true")
-    evaluate_xiangqi.add_argument(
-        "--extra-body-json",
-        default=None,
-        help="JSON object merged into the chat completions request body.",
-    )
-    evaluate_xiangqi.add_argument("--output-dir", type=Path, default=Path("runs"))
-    evaluate_xiangqi.add_argument("--run-name", default=None)
-    evaluate_xiangqi.add_argument("--limit", type=int, default=None)
-    evaluate_xiangqi.add_argument("--task-id", action="append", default=None)
+    _add_provider_args(evaluate_xiangqi, max_tokens=128)
+    _add_run_args(evaluate_xiangqi)
     evaluate_xiangqi.add_argument(
         "--opponent",
         choices=["none", "pikafish"],
@@ -256,6 +252,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Timeout in seconds while waiting for Pikafish UCI responses.",
     )
     evaluate_xiangqi.set_defaults(func=_cmd_evaluate_xiangqi)
+
+    evaluate_one_stroke = subparsers.add_parser(
+        "evaluate-one-stroke",
+        help="Run one-stroke graph puzzle benchmark evaluation.",
+    )
+    evaluate_one_stroke.add_argument(
+        "--one-stroke-tasks",
+        type=Path,
+        default=None,
+        help="Path to one-stroke tasks JSONL. Defaults to data/one_stroke_tasks.jsonl.",
+    )
+    evaluate_one_stroke.add_argument(
+        "--agent",
+        choices=ENV_AGENT_CHOICES,
+        default="openai-compatible",
+    )
+    _add_provider_args(evaluate_one_stroke, max_tokens=256)
+    _add_run_args(evaluate_one_stroke)
+    evaluate_one_stroke.set_defaults(func=_cmd_evaluate_one_stroke)
 
     return parser
 
