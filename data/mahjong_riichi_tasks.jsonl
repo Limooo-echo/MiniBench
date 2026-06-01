@@ -1,0 +1,5 @@
+{"id":"mj-riichi-001","seed":111,"agent_seat":0,"max_draws":70,"starting_scores":[25000,25000,25000,25000],"tags":["mahjong","riichi-full-v1","four-player","difficulty:medium"]}
+{"id":"mj-riichi-002","seed":222,"agent_seat":0,"max_draws":70,"starting_scores":[25000,25000,25000,25000],"tags":["mahjong","riichi-full-v1","four-player","difficulty:medium"]}
+{"id":"mj-riichi-003","seed":333,"agent_seat":0,"max_draws":70,"starting_scores":[25000,25000,25000,25000],"tags":["mahjong","riichi-full-v1","four-player","difficulty:medium"]}
+{"id":"mj-riichi-004","seed":444,"agent_seat":0,"max_draws":70,"starting_scores":[25000,25000,25000,25000],"tags":["mahjong","riichi-full-v1","four-player","difficulty:hard"]}
+{"id":"mj-riichi-005","seed":555,"agent_seat":0,"max_draws":70,"starting_scores":[25000,25000,25000,25000],"tags":["mahjong","riichi-full-v1","four-player","difficulty:hard"]}

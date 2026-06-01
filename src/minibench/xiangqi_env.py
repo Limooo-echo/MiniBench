@@ -4,6 +4,7 @@ import numpy as np
 
 from gym_xiangqi.envs import XiangQiEnv
 from gym_xiangqi.constants import ALLY, ENEMY, RED, BLACK, DEAD, PIECE_CNT
+from gym_xiangqi.utils import action_space_to_move
 
 
 def make_xiangqi_env_from_board(
@@ -89,6 +90,46 @@ def set_board(
 def legal_actions(env: XiangQiEnv) -> list[int]:
     actions = env.ally_actions if env.turn == ALLY else env.enemy_actions
     return np.where(actions == 1)[0].astype(int).tolist()
+
+
+def strict_legal_actions(env: XiangQiEnv) -> list[int]:
+    """Legal actions that do not leave the moving side's general capturable."""
+    side = turn_to_side(env)
+    return [
+        action
+        for action in legal_actions(env)
+        if not leaves_general_capturable(env, action, side_to_move=side)
+    ]
+
+
+def leaves_general_capturable(
+    env: XiangQiEnv,
+    action: int,
+    *,
+    side_to_move: str | None = None,
+) -> bool:
+    side = side_to_move or turn_to_side(env)
+    board = np.array(env.state, dtype=int).tolist()
+    trial = make_xiangqi_env_from_board(board, side_to_move=side)
+
+    try:
+        _obs, reward, done, _info = trial.step(action)
+        if done:
+            return reward < 100
+
+        own_general = 1 if side == "ally" else -1
+        if not np.any(trial.state == own_general):
+            return True
+
+        for opponent_action in legal_actions(trial):
+            _piece_id, _start, end = action_space_to_move(opponent_action)
+            end_row, end_col = int(end[0]), int(end[1])
+            if int(trial.state[end_row][end_col]) == own_general:
+                return True
+
+        return False
+    finally:
+        trial.close()
 
 
 def turn_to_side(env: XiangQiEnv) -> str:

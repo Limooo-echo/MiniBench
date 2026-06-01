@@ -59,9 +59,10 @@ def xiangqi_task_from_dict(raw: dict[str, Any]) -> XiangqiTask:
         raise ValueError(f"{task_id}: max_steps must be a positive integer")
 
     goal = raw.get("goal", "capture_enemy_general")
-    if goal not in {"capture_enemy_general", "agent_win"}:
+    if goal not in {"capture_enemy_general", "agent_win", "agent_survive"}:
         raise ValueError(
-            f"{task_id}: currently only capture_enemy_general and agent_win are supported"
+            f"{task_id}: currently only capture_enemy_general, agent_win, "
+            "and agent_survive are supported"
         )
 
     tags = raw.get("tags", [])

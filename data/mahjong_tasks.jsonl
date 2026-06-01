@@ -1,0 +1,10 @@
+{"id":"mj-waits-001","goal":"winning_tiles","hand":["1m","2m","3m","4m","5m","6m","7p","8p","9p","2s","3s","4s","E"],"tags":["mahjong","riichi","goal:winning_tiles","difficulty:easy","shape:tanki"]}
+{"id":"mj-waits-002","goal":"winning_tiles","hand":["2m","3m","4p","5p","6p","7s","8s","9s","E","E","E","5m","5m"],"tags":["mahjong","riichi","goal:winning_tiles","difficulty:easy","shape:ryanmen"]}
+{"id":"mj-waits-003","goal":"winning_tiles","hand":["1m","1m","2m","2m","3p","3p","4p","4p","5s","5s","E","E","C"],"tags":["mahjong","riichi","goal:winning_tiles","difficulty:medium","shape:seven-pairs"]}
+{"id":"mj-waits-004","goal":"winning_tiles","hand":["2m","4m","1p","2p","3p","4p","5p","6p","7s","8s","9s","E","E"],"tags":["mahjong","riichi","goal:winning_tiles","difficulty:easy","shape:kanchan"]}
+{"id":"mj-waits-009","goal":"winning_tiles","hand":["1m","2m","3m","4m","5m","6m","8p","9p","3s","4s","5s","P","P"],"tags":["mahjong","riichi","goal:winning_tiles","difficulty:easy","shape:penchan"]}
+{"id":"mj-discard-005","goal":"tenpai_discard","hand":["1m","1m","2m","3m","4m","5m","6m","7p","8p","9p","3s","4s","5s","9s"],"tags":["mahjong","riichi","goal:tenpai_discard","difficulty:easy","shape:isolated-tile"]}
+{"id":"mj-discard-006","goal":"tenpai_discard","hand":["1m","1m","2m","2m","3p","3p","4p","4p","5s","5s","E","E","C","9m"],"tags":["mahjong","riichi","goal:tenpai_discard","difficulty:medium","shape:seven-pairs"]}
+{"id":"mj-discard-007","goal":"tenpai_discard","hand":["2m","3m","4m","4m","5m","6m","6p","7p","8p","3s","4s","5s","P","9m"],"tags":["mahjong","riichi","goal:tenpai_discard","difficulty:easy","shape:standard"]}
+{"id":"mj-discard-008","goal":"tenpai_discard","hand":["2m","3m","4m","4m","5m","6m","6p","7p","8p","3s","4s","5s","P","P"],"tags":["mahjong","riichi","goal:tenpai_discard","difficulty:medium","shape:standard"]}
+{"id":"mj-discard-010","goal":"tenpai_discard","hand":["2m","3m","4m","2p","3p","4p","7p","8p","9p","4s","5s","6s","C","1m"],"tags":["mahjong","riichi","goal:tenpai_discard","difficulty:medium","shape:standard"]}

@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 authors = [{ name = "MiniBench" }]
 dependencies = [
     "gym-xiangqi",
+    "mahjong>=2.0.0",
 ]
 
 [project.scripts]
@@ -18,4 +19,8 @@ minibench = "minibench.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]
 

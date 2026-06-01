@@ -9,7 +9,11 @@ from typing import Any
 
 from minibench.agents import Agent
 from minibench.xiangqi_dataset import XiangqiTask
-from minibench.xiangqi_env import make_xiangqi_env_from_board, legal_actions, turn_to_side
+from minibench.xiangqi_env import (
+    make_xiangqi_env_from_board,
+    strict_legal_actions,
+    turn_to_side,
+)
 from minibench.xiangqi_pikafish import (
     PikafishEngine,
     PikafishError,
@@ -64,6 +68,15 @@ def classify_pikafish_error(exc: Exception, *, last_actor: str | None) -> str:
         return "invalid_position:king_can_be_captured"
 
     return f"pikafish_error:{message}"
+
+
+def _is_pikafish_no_move(exc: Exception) -> bool:
+    message = str(exc)
+    return "Pikafish returned no move" in message or "bestmove (none)" in message
+
+
+def _is_agent_win_goal(goal: str) -> bool:
+    return goal in {"capture_enemy_general", "agent_win", "agent_survive"}
 
 
 def evaluate_xiangqi_tasks(
@@ -138,9 +151,21 @@ def evaluate_xiangqi_tasks(
         try:
             for step_idx in range(task.max_steps):
                 current_side = turn_to_side(env)
-                legal = set(legal_actions(env))
+                legal = set(strict_legal_actions(env))
                 if not legal:
-                    reasons.append("no_legal_actions")
+                    if (
+                        last_actor == "agent"
+                        and current_side != task.agent_side
+                        and task.goal in {"agent_win", "agent_survive"}
+                    ):
+                        success = True
+                        score = 1.0
+                        reasons.append("agent_checkmated_opponent")
+                        break
+                    if current_side == task.agent_side:
+                        reasons.append("agent_no_safe_legal_actions")
+                    else:
+                        reasons.append("opponent_no_safe_legal_actions")
                     break
 
                 actor = "agent"
@@ -177,6 +202,15 @@ def evaluate_xiangqi_tasks(
                             movetime_ms=pikafish_movetime_ms,
                         )
                     except (PikafishError, ValueError) as exc:
+                        if (
+                            last_actor == "agent"
+                            and task.goal in {"agent_win", "agent_survive"}
+                            and _is_pikafish_no_move(exc)
+                        ):
+                            success = True
+                            score = 1.0
+                            reasons.append("agent_checkmated_opponent")
+                            break
                         reasons.append(
                             classify_pikafish_error(exc, last_actor=last_actor)
                         )
@@ -206,7 +240,7 @@ def evaluate_xiangqi_tasks(
                 if done:
                     if (
                         actor == "agent"
-                        and task.goal in {"capture_enemy_general", "agent_win"}
+                        and _is_agent_win_goal(task.goal)
                         and reward >= 100
                     ):
                         success = True
@@ -219,7 +253,11 @@ def evaluate_xiangqi_tasks(
                     break
 
             if not reasons:
-                if task.goal == "agent_win":
+                if task.goal == "agent_survive":
+                    success = True
+                    score = 1.0
+                    reasons.append("agent_survived_step_limit")
+                elif task.goal == "agent_win":
                     reasons.append("agent_did_not_win_within_step_limit")
                 else:
                     reasons.append("max_steps_reached")
