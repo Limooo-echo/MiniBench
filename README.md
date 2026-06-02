@@ -142,12 +142,17 @@ python -m minibench.cli --tasks data/tasks-limo.jsonl evaluate \
 
 ### Run Xiangqi
 
+Static single-move Xiangqi tasks support all generative agent architectures:
+`openai-compatible`, `direct`, `cot`, `self-consistency`, `tot`,
+`plan-then-solve`, and `critic-refine`. Pikafish battle tasks remain
+`openai-compatible` only.
+
 Simple Xiangqi tasks:
 
 ```bash
 python -m minibench.cli evaluate-xiangqi \
   --xiangqi-tasks data/xiangqi_tasks.jsonl \
-  --agent openai-compatible \
+  --agent cot \
   --provider deepseek \
   --model deepseek-chat \
   --json-mode \
@@ -183,7 +188,7 @@ The agent must return a vertex path that uses every listed undirected edge once:
 ```bash
 python -m minibench.cli evaluate-one-stroke \
   --one-stroke-tasks data/one_stroke_tasks.jsonl \
-  --agent openai-compatible \
+  --agent cot \
   --provider deepseek \
   --model deepseek-chat \
   --json-mode \
@@ -194,11 +199,12 @@ python -m minibench.cli evaluate-one-stroke \
 ### Run Riichi Mahjong
 
 Static tile-shape tasks:
+These static tasks also support every generative agent architecture.
 
 ```bash
 python -m minibench.cli evaluate-mahjong \
   --mahjong-tasks data/mahjong_tasks.jsonl \
-  --agent openai-compatible \
+  --agent cot \
   --provider deepseek \
   --model deepseek-chat \
   --json-mode \
@@ -368,7 +374,7 @@ python -m minibench.cli --tasks data/tasks-limo.jsonl evaluate \
 ```bash
 python -m minibench.cli evaluate-xiangqi \
   --xiangqi-tasks data/xiangqi_tasks.jsonl \
-  --agent openai-compatible \
+  --agent cot \
   --provider deepseek \
   --model deepseek-chat \
   --json-mode \
@@ -403,7 +409,7 @@ python -m minibench.cli evaluate-xiangqi \
 ```bash
 python -m minibench.cli evaluate-one-stroke \
   --one-stroke-tasks data/one_stroke_tasks.jsonl \
-  --agent openai-compatible \
+  --agent cot \
   --provider deepseek \
   --model deepseek-chat \
   --json-mode \
@@ -418,7 +424,7 @@ python -m minibench.cli evaluate-one-stroke \
 ```bash
 python -m minibench.cli evaluate-mahjong \
   --mahjong-tasks data/mahjong_tasks.jsonl \
-  --agent openai-compatible \
+  --agent cot \
   --provider deepseek \
   --model deepseek-chat \
   --json-mode \

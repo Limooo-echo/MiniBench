@@ -7,6 +7,7 @@ from minibench.mahjong_api import (
     tenpai_discards,
     winning_tiles,
 )
+from minibench.cli import build_parser
 from minibench.mahjong_dataset import load_mahjong_tasks, mahjong_task_from_dict
 from minibench.mahjong_evaluation import (
     evaluate_mahjong_tasks,
@@ -76,6 +77,11 @@ def discard_task():
 
 
 class MahjongTests(unittest.TestCase):
+    def test_cli_accepts_cot_agent_for_static_mahjong(self):
+        args = build_parser().parse_args(["evaluate-mahjong", "--agent", "cot"])
+
+        self.assertEqual(args.agent, "cot")
+
     def test_normalizes_tile_notation(self):
         self.assertEqual(normalize_tile("1M"), "1m")
         self.assertEqual(normalize_tile("1z"), "E")

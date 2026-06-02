@@ -83,6 +83,23 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(payload["response_format"], {"type": "json_object"})
         self.assertEqual(payload["reasoning_effort"], "high")
 
+    def test_payload_combines_default_and_phase_system_prompts(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+            default_system_prompt="Mahjong rules prompt.",
+        )
+
+        payload = agent.build_payload(
+            "Question?",
+            system_prompt="Finalize as JSON.",
+        )
+
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("Mahjong rules prompt.", system_content)
+        self.assertIn("Finalize as JSON.", system_content)
+
 
 if __name__ == "__main__":
     unittest.main()

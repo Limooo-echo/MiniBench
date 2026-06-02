@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 FINAL_ANSWER_SYSTEM_PROMPT = (
-    "You are answering a multiple-choice benchmark. "
-    "Return exactly one JSON object like {\"answer\":\"A\"}. "
-    "The answer must be one of A, B, C, or D."
+    "You are finalizing a benchmark answer. Return exactly one JSON object "
+    "and no markdown. Follow the output schema requested in the user prompt."
 )
 
 REASONING_SYSTEM_PROMPT = (
-    "You are solving a multiple-choice benchmark task. Think carefully, but do not "
-    "use external tools or claim tool results. The final answer will be converted "
-    "to a JSON object separately."
+    "You are solving a benchmark task. Think carefully, but do not use external "
+    "tools or claim tool results. The final answer will be converted to a JSON "
+    "object separately."
 )
 
 CRITIC_SYSTEM_PROMPT = (
-    "You are reviewing a multiple-choice benchmark answer. Check logical fit, "
-    "constraint following, and whether the final choice is one of A, B, C, or D."
+    "You are reviewing a benchmark answer. Check logical fit, constraint "
+    "following, and whether the draft follows the requested output schema."
 )
 
 
@@ -22,7 +21,7 @@ def direct_prompt(task_prompt: str) -> str:
     return "\n\n".join(
         [
             task_prompt,
-            "Choose the single best option. Return only the required JSON object.",
+            "Solve the task. Return only the required JSON object.",
         ]
     )
 
@@ -31,7 +30,8 @@ def cot_prompt(task_prompt: str) -> str:
     return "\n\n".join(
         [
             task_prompt,
-            "Reason step by step about the options. End with the best option letter.",
+            "Reason step by step about the task. End with the answer in the "
+            "required schema.",
         ]
     )
 
@@ -40,7 +40,7 @@ def plan_prompt(task_prompt: str) -> str:
     return "\n\n".join(
         [
             task_prompt,
-            "Create a short plan for solving this question without external tools.",
+            "Create a short plan for solving this task without external tools.",
         ]
     )
 
@@ -51,7 +51,8 @@ def solve_with_plan_prompt(task_prompt: str, plan: str) -> str:
             task_prompt,
             "Plan:",
             plan,
-            "Use the plan to solve the task. End with the best option letter.",
+            "Use the plan to solve the task. End with the answer in the required "
+            "schema.",
         ]
     )
 
@@ -60,7 +61,8 @@ def candidate_prompt(task_prompt: str, index: int) -> str:
     return "\n\n".join(
         [
             task_prompt,
-            f"Generate candidate reasoning path {index}. Pick the best option letter.",
+            f"Generate candidate reasoning path {index}. End with the answer in "
+            "the required schema.",
         ]
     )
 
@@ -75,7 +77,8 @@ def judge_prompt(task_prompt: str, candidates: list[str]) -> str:
             task_prompt,
             "Candidate solutions:",
             formatted,
-            "Select the best candidate answer. Return only the required JSON object.",
+            "Select the best candidate answer. Return only the required JSON "
+            "object using the schema requested in the original task.",
         ]
     )
 
@@ -86,7 +89,8 @@ def finalize_prompt(task_prompt: str, reasoning: str) -> str:
             task_prompt,
             "Reasoning or draft answer:",
             reasoning,
-            "Convert the final choice to exactly one JSON object.",
+            "Convert the final answer to exactly one JSON object using the schema "
+            "requested in the original task.",
         ]
     )
 
@@ -97,7 +101,8 @@ def critic_prompt(task_prompt: str, draft: str) -> str:
             task_prompt,
             "Draft answer:",
             draft,
-            "Review the draft. If it is wrong or malformed, explain the correction.",
+            "Review the draft. If it is wrong or malformed, explain the correction "
+            "and the expected output schema.",
         ]
     )
 

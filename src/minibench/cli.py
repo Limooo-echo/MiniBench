@@ -21,6 +21,9 @@ PROVIDER_CHOICES = (
 )
 
 ENV_AGENT_CHOICES = ("openai-compatible",)
+STATIC_GENERATIVE_AGENT_CHOICES = tuple(
+    name for name in AGENT_NAMES if name not in {"oracle", "noisy"}
+)
 
 
 def _parse_extra_body_json(value: str | None) -> dict[str, object] | None:
@@ -44,6 +47,30 @@ def _select_tasks(tasks: list[Any], task_ids: list[str] | None) -> list[Any]:
     if missing:
         raise SystemExit(f"unknown task id(s): {', '.join(sorted(missing))}")
     return selected
+
+
+def _is_xiangqi_battle_task(task: Any, opponent_override: str | None) -> bool:
+    task_opponent = opponent_override if opponent_override is not None else task.opponent
+    return (
+        task_opponent == "pikafish"
+        or task.max_steps != 1
+        or task.goal != "capture_enemy_general"
+    )
+
+
+def _reject_reasoning_agent_for_xiangqi_battle(
+    args: argparse.Namespace,
+    tasks: list[Any],
+) -> None:
+    if args.agent == "openai-compatible":
+        return
+    if any(_is_xiangqi_battle_task(task, args.opponent) for task in tasks):
+        raise SystemExit(
+            "reasoning agent architectures are only supported for static Xiangqi "
+            "tasks (opponent=none, max_steps=1, goal=capture_enemy_general). "
+            "Use --agent openai-compatible for Pikafish or multi-step Xiangqi "
+            "battle tasks."
+        )
 
 
 def _make_cli_agent(
@@ -121,6 +148,13 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
 
 def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
     from minibench.xiangqi_dataset import load_xiangqi_tasks
+
+    tasks = load_xiangqi_tasks(args.xiangqi_tasks)
+    tasks = _select_tasks(tasks, args.task_id)
+    if args.limit is not None:
+        tasks = tasks[: args.limit]
+    _reject_reasoning_agent_for_xiangqi_battle(args, tasks)
+
     from minibench.xiangqi_evaluation import (
         evaluate_xiangqi_tasks,
         summarize_xiangqi,
@@ -128,10 +162,6 @@ def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
     )
     from minibench.xiangqi_prompting import XIANGQI_SYSTEM_PROMPT
 
-    tasks = load_xiangqi_tasks(args.xiangqi_tasks)
-    tasks = _select_tasks(tasks, args.task_id)
-    if args.limit is not None:
-        tasks = tasks[: args.limit]
     try:
         agent = _make_cli_agent(args, system_prompt=XIANGQI_SYSTEM_PROMPT)
         results = evaluate_xiangqi_tasks(
@@ -265,7 +295,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate_xiangqi.add_argument(
         "--agent",
-        choices=ENV_AGENT_CHOICES,
+        choices=STATIC_GENERATIVE_AGENT_CHOICES,
         default="openai-compatible",
     )
     _add_provider_args(evaluate_xiangqi, max_tokens=128)
@@ -320,7 +350,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate_one_stroke.add_argument(
         "--agent",
-        choices=ENV_AGENT_CHOICES,
+        choices=STATIC_GENERATIVE_AGENT_CHOICES,
         default="openai-compatible",
     )
     _add_provider_args(evaluate_one_stroke, max_tokens=256)
@@ -339,7 +369,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate_mahjong.add_argument(
         "--agent",
-        choices=ENV_AGENT_CHOICES,
+        choices=STATIC_GENERATIVE_AGENT_CHOICES,
         default="openai-compatible",
     )
     _add_provider_args(evaluate_mahjong, max_tokens=256)

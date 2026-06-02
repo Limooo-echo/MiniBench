@@ -1,6 +1,7 @@
 import unittest
 
 from minibench.agents import (
+    CoTAgent,
     CriticRefineAgent,
     ReasoningConfig,
     SelfConsistencyAgent,
@@ -50,6 +51,20 @@ def sample_task():
 
 
 class ReasoningAgentTests(unittest.TestCase):
+    def test_cot_finalizes_non_choice_json_schema(self):
+        client = FakeClient(["The pair wait is E.", '{"winning_tiles":["E"]}'])
+        agent = CoTAgent(client, ReasoningConfig())
+
+        output = agent.generate(
+            'Return {"winning_tiles":["E"]} for this Mahjong task.',
+            object(),
+        )
+
+        self.assertEqual(output, '{"winning_tiles":["E"]}')
+        self.assertEqual(len(client.calls), 2)
+        self.assertTrue(client.calls[-1]["json_mode"])
+        self.assertIn("schema requested", client.calls[-1]["prompt"])
+
     def test_self_consistency_uses_majority_vote(self):
         client = FakeClient(["answer: C", "answer: B", "answer: C"])
         agent = SelfConsistencyAgent(client, ReasoningConfig(samples=3))

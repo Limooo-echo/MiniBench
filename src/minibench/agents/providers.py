@@ -94,11 +94,7 @@ class OpenAICompatibleAgent(Agent):
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        system_prompt
-                        or self.default_system_prompt
-                        or FINAL_ANSWER_SYSTEM_PROMPT
-                    ),
+                    "content": self._system_prompt(system_prompt),
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -111,6 +107,16 @@ class OpenAICompatibleAgent(Agent):
             payload["response_format"] = {"type": "json_object"}
         payload.update(self.extra_body)
         return payload
+
+    def _system_prompt(self, phase_prompt: str | None = None) -> str:
+        prompts = [
+            prompt
+            for prompt in (self.default_system_prompt, phase_prompt)
+            if prompt
+        ]
+        if prompts:
+            return "\n\n".join(prompts)
+        return FINAL_ANSWER_SYSTEM_PROMPT
 
     def complete(
         self,
