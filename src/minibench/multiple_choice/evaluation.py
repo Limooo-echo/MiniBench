@@ -28,8 +28,16 @@ def evaluate_tasks(tasks: list[Task], agent: Agent) -> list[InstanceResult]:
     results: list[InstanceResult] = []
     for task in tasks:
         prompt = build_prompt(task)
-        raw_output = agent.generate(prompt, task)
-        extracted_answer, extraction_method = extract_answer(raw_output, task.answer_extractors)
+        try:
+            raw_output = agent.generate(prompt, task)
+            extracted_answer, extraction_method = extract_answer(
+                raw_output,
+                task.answer_extractors,
+            )
+        except RuntimeError as exc:
+            raw_output = f"AGENT_ERROR: {type(exc).__name__}: {exc}"
+            extracted_answer = None
+            extraction_method = "agent_error"
         correct, score_reason = score_answer(task, extracted_answer)
         results.append(
             InstanceResult(

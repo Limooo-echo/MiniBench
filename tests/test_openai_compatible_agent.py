@@ -1,6 +1,22 @@
+import json
+from unittest.mock import patch
 import unittest
 
 from minibench.agents import OpenAICompatibleAgent, resolve_provider
+
+
+class FakeHTTPResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
 
 
 class OpenAICompatibleAgentTests(unittest.TestCase):
@@ -99,6 +115,30 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         system_content = payload["messages"][0]["content"]
         self.assertIn("Mahjong rules prompt.", system_content)
         self.assertIn("Finalize as JSON.", system_content)
+
+    def test_complete_uses_reasoning_content_when_visible_content_is_empty(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+        )
+        payload = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "answer: C",
+                    },
+                }
+            ]
+        }
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch("urllib.request.urlopen", return_value=FakeHTTPResponse(payload)):
+                output = agent.complete("Question?")
+
+        self.assertEqual(output, "answer: C")
 
 
 if __name__ == "__main__":

@@ -166,18 +166,9 @@ class OpenAICompatibleAgent(Agent):
         try:
             choice = payload["choices"][0]
             message = choice["message"]
-            content = message.get("content")
+            content = _message_text(message)
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError(f"Unexpected chat completion response: {raw}") from exc
-
-        if isinstance(content, list):
-            content = "".join(
-                _content_part_to_text(part)
-                for part in content
-            )
-
-        if content is None:
-            content = ""
 
         if not isinstance(content, str):
             raise RuntimeError(f"Unexpected message content in response: {raw}")
@@ -210,6 +201,32 @@ def _content_part_to_text(part: object) -> str:
     if isinstance(content, str):
         return content
     return ""
+
+
+def _content_to_text(content: object) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(_content_part_to_text(part) for part in content)
+    return ""
+
+
+def _message_text(message: object) -> str:
+    if not isinstance(message, dict):
+        return ""
+    content = _content_to_text(message.get("content"))
+    if content.strip():
+        return content
+
+    # Reasoning models served through OpenAI-compatible APIs often place their
+    # scratch work in provider-specific fields before emitting visible content.
+    for key in ("reasoning_content", "reasoning", "reasoning_details"):
+        reasoning = _content_to_text(message.get(key))
+        if reasoning.strip():
+            return reasoning
+    return content
 
 
 def resolve_provider(
