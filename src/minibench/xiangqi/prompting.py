@@ -1,10 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from gym_xiangqi.utils import action_space_to_move
 from gym_xiangqi.constants import PIECE_ID_TO_NAME
 
-from minibench.xiangqi_dataset import XiangqiTask
-from minibench.xiangqi_env import strict_legal_actions, turn_to_side
+from minibench.xiangqi.dataset import XiangqiTask
+from minibench.xiangqi.env import strict_legal_actions, turn_to_side
 
 
 FILES = "abcdefghi"
@@ -102,3 +102,4 @@ general immediately capturable. Choose one action id from this list.
 Return exactly:
 {{"action": one_integer_from_the_legal_action_list}}
 """
+

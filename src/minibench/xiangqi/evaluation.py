@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
@@ -8,18 +8,18 @@ from time import strftime
 from typing import Any
 
 from minibench.agents import Agent
-from minibench.xiangqi_dataset import XiangqiTask
-from minibench.xiangqi_env import (
+from minibench.xiangqi.dataset import XiangqiTask
+from minibench.xiangqi.env import (
     make_xiangqi_env_from_board,
     strict_legal_actions,
     turn_to_side,
 )
-from minibench.xiangqi_pikafish import (
+from minibench.xiangqi.pikafish import (
     PikafishEngine,
     PikafishError,
     resolve_pikafish_executable,
 )
-from minibench.xiangqi_prompting import build_xiangqi_prompt, format_action
+from minibench.xiangqi.prompting import build_xiangqi_prompt, format_action
 
 
 @dataclass(frozen=True)
@@ -333,3 +333,4 @@ def write_xiangqi_run(
     )
 
     return run_dir
+

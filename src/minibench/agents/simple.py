@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Any
 
 from minibench.agents.base import Agent
-from minibench.dataset import Task
+from minibench.multiple_choice.dataset import Task
 
 
 class OracleAgent(Agent):
@@ -68,3 +68,4 @@ class PredictionFileAgent(Agent):
             )
         self.positions[task_id] = position + 1
         return task_outputs[position]
+

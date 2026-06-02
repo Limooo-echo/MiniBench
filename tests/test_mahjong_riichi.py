@@ -1,12 +1,12 @@
-import json
+﻿import json
 from pathlib import Path
 import sys
 import unittest
 
-from minibench.mahjong_api import score_closed_hand
-from minibench.mahjong_riichi_ai import ExternalMahjongAI
-from minibench.mahjong_riichi_dataset import load_mahjong_riichi_tasks
-from minibench.mahjong_riichi_evaluation import (
+from minibench.mahjong.api import score_closed_hand
+from minibench.mahjong_riichi.ai import ExternalMahjongAI
+from minibench.mahjong_riichi.dataset import load_mahjong_riichi_tasks
+from minibench.mahjong_riichi.evaluation import (
     evaluate_mahjong_riichi_tasks,
     extract_riichi_action,
     legal_call_options,
@@ -15,7 +15,7 @@ from minibench.mahjong_riichi_evaluation import (
     score_riichi_seats,
     summarize_mahjong_riichi,
 )
-from minibench.mahjong_riichi_prompting import build_mahjong_riichi_prompt
+from minibench.mahjong_riichi.prompting import build_mahjong_riichi_prompt
 
 
 class SimpleRiichiAgent:
@@ -324,3 +324,4 @@ class MahjongRiichiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

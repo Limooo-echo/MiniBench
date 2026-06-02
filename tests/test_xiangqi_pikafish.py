@@ -1,9 +1,9 @@
-import importlib.util
+﻿import importlib.util
 import unittest
 from pathlib import Path
 
-from minibench.xiangqi_dataset import load_xiangqi_tasks, xiangqi_task_from_dict
-from minibench.xiangqi_pikafish import (
+from minibench.xiangqi.dataset import load_xiangqi_tasks, xiangqi_task_from_dict
+from minibench.xiangqi.pikafish import (
     board_to_pikafish_fen,
     square_to_uci,
     uci_to_square,
@@ -86,7 +86,7 @@ class XiangqiPikafishTests(unittest.TestCase):
 
     @unittest.skipUnless(XIANGQI_ENV_AVAILABLE, "gym-xiangqi is not installed")
     def test_strict_actions_filter_moves_that_leave_general_in_check(self):
-        from minibench.xiangqi_env import (
+        from minibench.xiangqi.env import (
             make_xiangqi_env_from_board,
             strict_legal_actions,
         )
@@ -115,8 +115,8 @@ class XiangqiPikafishTests(unittest.TestCase):
 
     @unittest.skipUnless(XIANGQI_ENV_AVAILABLE, "gym-xiangqi is not installed")
     def test_prompt_uses_strict_legal_actions(self):
-        from minibench.xiangqi_env import make_xiangqi_env_from_board
-        from minibench.xiangqi_prompting import build_xiangqi_prompt
+        from minibench.xiangqi.env import make_xiangqi_env_from_board
+        from minibench.xiangqi.prompting import build_xiangqi_prompt
 
         task = xiangqi_task_from_dict(
             {
@@ -154,3 +154,4 @@ class XiangqiPikafishTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

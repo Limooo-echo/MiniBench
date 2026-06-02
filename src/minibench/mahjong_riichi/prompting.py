@@ -1,7 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from minibench.mahjong_api import calculate_shanten, tile_to_index
-from minibench.mahjong_riichi_dataset import MahjongRiichiTask
+from minibench.mahjong.api import calculate_shanten, tile_to_index
+from minibench.mahjong_riichi.dataset import MahjongRiichiTask
 
 
 MAHJONG_RIICHI_SYSTEM_PROMPT = (
@@ -490,3 +490,4 @@ def _meld_lines(melds: list[list[dict[str, object]]], agent_seat: int) -> list[s
             )
         lines.append(f"- Seat {seat} ({label}): {'; '.join(formatted)}")
     return lines
+

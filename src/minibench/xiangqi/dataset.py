@@ -19,7 +19,7 @@ class XiangqiTask:
 
 
 def default_xiangqi_tasks_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "data" / "xiangqi_tasks.jsonl"
+    return Path(__file__).resolve().parents[3] / "data" / "xiangqi_tasks.jsonl"
 
 
 def xiangqi_task_from_dict(raw: dict[str, Any]) -> XiangqiTask:

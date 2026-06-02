@@ -128,6 +128,25 @@ Provider shortcuts:
 | Static Riichi Mahjong shapes | `data/mahjong_tasks.jsonl` | `evaluate-mahjong` |
 | Four-player Riichi Mahjong v1 | `data/mahjong_riichi_tasks.jsonl` | `evaluate-mahjong-riichi` |
 
+### Source Layout
+
+The source package is organized by benchmark family:
+
+```text
+src/minibench/
+  cli.py                 # shared command-line entrypoint
+  agents/                # model adapters and reasoning architectures
+  multiple_choice/       # four-choice dataset, prompting, extraction, scoring
+  xiangqi/               # Xiangqi dataset, environment bridge, Pikafish support
+  one_stroke/            # one-stroke graph puzzle dataset and evaluator
+  mahjong/               # static Mahjong shape tasks
+  mahjong_riichi/        # four-player Riichi Mahjong table simulation
+```
+
+Each benchmark family keeps its own `dataset.py`, `prompting.py`, and
+`evaluation.py` files where applicable. This keeps new task types from piling
+up in the `minibench/` root.
+
 ### Optional External Engines
 
 Most MiniBench tasks do not require external game engines. Install these only
@@ -368,6 +387,24 @@ python -m minibench.cli evaluate --agent <agent-name> --provider <provider>
 | 一笔画 | `data/one_stroke_tasks.jsonl` | `evaluate-one-stroke` |
 | 麻将牌型题 | `data/mahjong_tasks.jsonl` | `evaluate-mahjong` |
 | 麻将 Riichi 完整 v1 | `data/mahjong_riichi_tasks.jsonl` | `evaluate-mahjong-riichi` |
+
+### 源码结构
+
+`src/minibench/` 现在按 benchmark 家族分包：
+
+```text
+src/minibench/
+  cli.py                 # 统一命令行入口
+  agents/                # 模型适配器和不同 agent 思维架构
+  multiple_choice/       # 四选一题库、prompt、答案抽取和评分
+  xiangqi/               # 象棋题库、环境桥接和 Pikafish 支持
+  one_stroke/            # 一笔画图题库和评测器
+  mahjong/               # 静态麻将牌型题
+  mahjong_riichi/        # 四人 Riichi Mahjong 牌桌模拟
+```
+
+每个任务家族内部按需保留自己的 `dataset.py`、`prompting.py` 和
+`evaluation.py`。这样新增题型时不会继续堆在 `minibench/` 根目录。
 
 ### 可选外部引擎
 

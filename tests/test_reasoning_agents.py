@@ -1,4 +1,4 @@
-import unittest
+﻿import unittest
 
 from minibench.agents import (
     CoTAgent,
@@ -7,7 +7,7 @@ from minibench.agents import (
     SelfConsistencyAgent,
     TreeOfThoughtAgent,
 )
-from minibench.dataset import Task
+from minibench.multiple_choice.dataset import Task
 
 
 class FakeClient:
@@ -112,3 +112,4 @@ class ReasoningAgentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

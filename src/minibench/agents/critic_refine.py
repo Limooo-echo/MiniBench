@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from minibench.agents.base import Agent, ChatClient, ReasoningConfig
 from minibench.agents.prompts import (
@@ -8,7 +8,7 @@ from minibench.agents.prompts import (
     direct_prompt,
     refine_prompt,
 )
-from minibench.dataset import Task
+from minibench.multiple_choice.dataset import Task
 
 
 class CriticRefineAgent(Agent):
@@ -40,3 +40,4 @@ class CriticRefineAgent(Agent):
             max_tokens=self.config.final_max_tokens,
             json_mode=True,
         )
+

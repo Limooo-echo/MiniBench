@@ -1,0 +1,1 @@
+"""Static Mahjong benchmark components."""

@@ -1,6 +1,6 @@
-import unittest
+﻿import unittest
 
-from minibench.extraction import extract_answer
+from minibench.multiple_choice.extraction import extract_answer
 
 
 class ExtractionTests(unittest.TestCase):
@@ -25,3 +25,4 @@ class ExtractionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

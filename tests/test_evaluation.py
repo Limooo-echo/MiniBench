@@ -1,8 +1,8 @@
-import unittest
+﻿import unittest
 
 from minibench.agents import OracleAgent
-from minibench.dataset import load_tasks
-from minibench.evaluation import evaluate_tasks, summarize
+from minibench.multiple_choice.dataset import load_tasks
+from minibench.multiple_choice.evaluation import evaluate_tasks, summarize
 
 
 class EvaluationTests(unittest.TestCase):
@@ -17,3 +17,4 @@ class EvaluationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

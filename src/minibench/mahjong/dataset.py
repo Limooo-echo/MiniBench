@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import json
 from pathlib import Path
 from typing import Any
 
-from minibench.mahjong_api import normalize_tiles, tenpai_discards, winning_tiles
+from minibench.mahjong.api import normalize_tiles, tenpai_discards, winning_tiles
 
 
 MAHJONG_GOALS = {"tenpai_discard", "winning_tiles"}
@@ -20,7 +20,7 @@ class MahjongTask:
 
 
 def default_mahjong_tasks_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "data" / "mahjong_tasks.jsonl"
+    return Path(__file__).resolve().parents[3] / "data" / "mahjong_tasks.jsonl"
 
 
 def _require_string_list(raw: dict[str, Any], key: str) -> tuple[str, ...]:
@@ -73,3 +73,4 @@ def load_mahjong_tasks(path: str | Path | None = None) -> list[MahjongTask]:
     if not tasks:
         raise ValueError(f"{task_path} contains no tasks")
     return tasks
+

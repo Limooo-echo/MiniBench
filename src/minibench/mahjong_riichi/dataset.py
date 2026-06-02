@@ -17,7 +17,7 @@ class MahjongRiichiTask:
 
 
 def default_mahjong_riichi_tasks_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "data" / "mahjong_riichi_tasks.jsonl"
+    return Path(__file__).resolve().parents[3] / "data" / "mahjong_riichi_tasks.jsonl"
 
 
 def _require_string_list(raw: dict[str, Any], key: str) -> tuple[str, ...]:

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from minibench.agents import AGENT_NAMES, make_agent
-from minibench.dataset import find_task, load_tasks
-from minibench.evaluation import evaluate_tasks, summarize, write_run
-from minibench.prompting import build_prompt
+from minibench.multiple_choice.dataset import find_task, load_tasks
+from minibench.multiple_choice.evaluation import evaluate_tasks, summarize, write_run
+from minibench.multiple_choice.prompting import build_prompt
 
 
 PROVIDER_CHOICES = (
@@ -147,7 +147,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
-    from minibench.xiangqi_dataset import load_xiangqi_tasks
+    from minibench.xiangqi.dataset import load_xiangqi_tasks
 
     tasks = load_xiangqi_tasks(args.xiangqi_tasks)
     tasks = _select_tasks(tasks, args.task_id)
@@ -155,12 +155,12 @@ def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
         tasks = tasks[: args.limit]
     _reject_reasoning_agent_for_xiangqi_battle(args, tasks)
 
-    from minibench.xiangqi_evaluation import (
+    from minibench.xiangqi.evaluation import (
         evaluate_xiangqi_tasks,
         summarize_xiangqi,
         write_xiangqi_run,
     )
-    from minibench.xiangqi_prompting import XIANGQI_SYSTEM_PROMPT
+    from minibench.xiangqi.prompting import XIANGQI_SYSTEM_PROMPT
 
     try:
         agent = _make_cli_agent(args, system_prompt=XIANGQI_SYSTEM_PROMPT)
@@ -183,13 +183,13 @@ def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
-    from minibench.one_stroke_dataset import load_one_stroke_tasks
-    from minibench.one_stroke_evaluation import (
+    from minibench.one_stroke.dataset import load_one_stroke_tasks
+    from minibench.one_stroke.evaluation import (
         evaluate_one_stroke_tasks,
         summarize_one_stroke,
         write_one_stroke_run,
     )
-    from minibench.one_stroke_prompting import ONE_STROKE_SYSTEM_PROMPT
+    from minibench.one_stroke.prompting import ONE_STROKE_SYSTEM_PROMPT
 
     tasks = load_one_stroke_tasks(args.one_stroke_tasks)
     tasks = _select_tasks(tasks, args.task_id)
@@ -207,13 +207,13 @@ def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate_mahjong(args: argparse.Namespace) -> int:
-    from minibench.mahjong_dataset import load_mahjong_tasks
-    from minibench.mahjong_evaluation import (
+    from minibench.mahjong.dataset import load_mahjong_tasks
+    from minibench.mahjong.evaluation import (
         evaluate_mahjong_tasks,
         summarize_mahjong,
         write_mahjong_run,
     )
-    from minibench.mahjong_prompting import MAHJONG_SYSTEM_PROMPT
+    from minibench.mahjong.prompting import MAHJONG_SYSTEM_PROMPT
 
     tasks = load_mahjong_tasks(args.mahjong_tasks)
     tasks = _select_tasks(tasks, args.task_id)
@@ -231,13 +231,13 @@ def _cmd_evaluate_mahjong(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate_mahjong_riichi(args: argparse.Namespace) -> int:
-    from minibench.mahjong_riichi_dataset import load_mahjong_riichi_tasks
-    from minibench.mahjong_riichi_evaluation import (
+    from minibench.mahjong_riichi.dataset import load_mahjong_riichi_tasks
+    from minibench.mahjong_riichi.evaluation import (
         evaluate_mahjong_riichi_tasks,
         summarize_mahjong_riichi,
         write_mahjong_riichi_run,
     )
-    from minibench.mahjong_riichi_prompting import MAHJONG_RIICHI_SYSTEM_PROMPT
+    from minibench.mahjong_riichi.prompting import MAHJONG_RIICHI_SYSTEM_PROMPT
 
     tasks = load_mahjong_riichi_tasks(args.mahjong_riichi_tasks)
     tasks = _select_tasks(tasks, args.task_id)
@@ -438,3 +438,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

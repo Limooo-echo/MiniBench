@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -9,20 +9,20 @@ from time import strftime
 from typing import Any, Sequence
 
 from minibench.agents import Agent
-from minibench.mahjong_api import (
+from minibench.mahjong.api import (
     calculate_shanten,
     deal_table,
     normalize_tile,
     score_closed_hand,
     tile_to_index,
 )
-from minibench.mahjong_riichi_dataset import MahjongRiichiTask
-from minibench.mahjong_riichi_ai import (
+from minibench.mahjong_riichi.dataset import MahjongRiichiTask
+from minibench.mahjong_riichi.ai import (
     ExternalMahjongAI,
     MahjongAIError,
     make_external_mahjong_ai,
 )
-from minibench.mahjong_riichi_prompting import (
+from minibench.mahjong_riichi.prompting import (
     build_mahjong_riichi_call_prompt,
     build_mahjong_riichi_prompt,
 )
@@ -1348,3 +1348,4 @@ def _parse_json_object(output: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             return None
     return parsed if isinstance(parsed, dict) else None
+

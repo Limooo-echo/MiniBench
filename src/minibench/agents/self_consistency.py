@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections import Counter
 import json
@@ -10,8 +10,8 @@ from minibench.agents.prompts import (
     cot_prompt,
     judge_prompt,
 )
-from minibench.dataset import Task
-from minibench.extraction import extract_answer
+from minibench.multiple_choice.dataset import Task
+from minibench.multiple_choice.extraction import extract_answer
 
 
 class SelfConsistencyAgent(Agent):
@@ -51,3 +51,4 @@ class SelfConsistencyAgent(Agent):
             max_tokens=self.config.final_max_tokens,
             json_mode=True,
         )
+

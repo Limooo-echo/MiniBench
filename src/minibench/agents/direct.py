@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from minibench.agents.base import Agent, ChatClient, ReasoningConfig
 from minibench.agents.prompts import FINAL_ANSWER_SYSTEM_PROMPT, direct_prompt
-from minibench.dataset import Task
+from minibench.multiple_choice.dataset import Task
 
 
 class DirectAgent(Agent):
@@ -20,3 +20,4 @@ class DirectAgent(Agent):
             max_tokens=self.config.final_max_tokens,
             json_mode=True,
         )
+

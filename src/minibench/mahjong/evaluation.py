@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
@@ -8,9 +8,9 @@ from time import strftime
 from typing import Any
 
 from minibench.agents import Agent
-from minibench.mahjong_api import normalize_tile, tenpai_discards, winning_tiles
-from minibench.mahjong_dataset import MahjongTask
-from minibench.mahjong_prompting import build_mahjong_prompt
+from minibench.mahjong.api import normalize_tile, tenpai_discards, winning_tiles
+from minibench.mahjong.dataset import MahjongTask
+from minibench.mahjong.prompting import build_mahjong_prompt
 
 
 @dataclass(frozen=True)
@@ -216,6 +216,7 @@ def _parse_json_object(output: str) -> dict[str, Any] | None:
 
 
 def _tile_sort_key(tile: str) -> int:
-    from minibench.mahjong_api import tile_to_index
+    from minibench.mahjong.api import tile_to_index
 
     return tile_to_index(tile)
+

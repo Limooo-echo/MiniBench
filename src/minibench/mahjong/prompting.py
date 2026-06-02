@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from minibench.mahjong_dataset import MahjongTask
+from minibench.mahjong.dataset import MahjongTask
 
 
 MAHJONG_SYSTEM_PROMPT = (
@@ -57,3 +57,4 @@ def build_mahjong_prompt(task: MahjongTask) -> str:
         lines.append("Return only the requested JSON object.")
 
     return "\n".join(lines)
+

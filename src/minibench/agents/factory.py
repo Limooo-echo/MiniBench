@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Type
+from typing import Callable
 
-from minibench.agents.base import Agent, ReasoningConfig
+from minibench.agents.base import Agent, ChatClient, ReasoningConfig
 from minibench.agents.critic_refine import CriticRefineAgent
 from minibench.agents.cot import CoTAgent
 from minibench.agents.direct import DirectAgent
@@ -14,7 +14,10 @@ from minibench.agents.simple import NoisyAgent, OracleAgent, PredictionFileAgent
 from minibench.agents.tree_of_thought import TreeOfThoughtAgent
 
 
-REASONING_AGENTS: dict[str, Type[Agent]] = {
+ReasoningAgentFactory = Callable[[ChatClient, ReasoningConfig], Agent]
+
+
+REASONING_AGENTS: dict[str, ReasoningAgentFactory] = {
     "direct": DirectAgent,
     "cot": CoTAgent,
     "self-consistency": SelfConsistencyAgent,
