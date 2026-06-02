@@ -128,6 +128,48 @@ Provider shortcuts:
 | Static Riichi Mahjong shapes | `data/mahjong_tasks.jsonl` | `evaluate-mahjong` |
 | Four-player Riichi Mahjong v1 | `data/mahjong_riichi_tasks.jsonl` | `evaluate-mahjong-riichi` |
 
+### Optional External Engines
+
+Most MiniBench tasks do not require external game engines. Install these only
+when you want to run the corresponding opponent mode.
+
+Pikafish is only needed for Xiangqi tasks with `--opponent pikafish`, such as
+`data/xiangqi_hard_tasks.jsonl`. Follow the upstream project for platform
+details; a typical Linux/WSL source build is:
+
+```bash
+git clone https://github.com/official-pikafish/Pikafish.git
+cd Pikafish/src
+make -j profile-build
+export PIKAFISH_PATH="$PWD/pikafish"
+```
+
+If your build or release package stores the NNUE network separately, also set:
+
+```bash
+export PIKAFISH_EVAL_FILE=/path/to/pikafish.nnue
+```
+
+akochan is only needed for four-player Riichi Mahjong when using
+`--riichi-opponent external` with `examples/akochan_wrapper.py`. A typical
+Linux/WSL build is:
+
+```bash
+git clone https://github.com/critter-mj/akochan.git
+cd akochan
+sudo apt-get install libboost-all-dev
+(cd ai_src && make -f Makefile_Linux)
+make -f Makefile_Linux
+export AKOCHAN_HOME="$PWD"
+```
+
+The wrapper will look for `AKOCHAN_HOME/system` or `AKOCHAN_HOME/system.exe`.
+If akochan needs shared libraries from the active Python/conda environment, set:
+
+```bash
+export AKOCHAN_CONDA_PREFIX="$CONDA_PREFIX"
+```
+
 ### Run Multiple Choice
 
 ```bash
@@ -326,6 +368,45 @@ python -m minibench.cli evaluate --agent <agent-name> --provider <provider>
 | 一笔画 | `data/one_stroke_tasks.jsonl` | `evaluate-one-stroke` |
 | 麻将牌型题 | `data/mahjong_tasks.jsonl` | `evaluate-mahjong` |
 | 麻将 Riichi 完整 v1 | `data/mahjong_riichi_tasks.jsonl` | `evaluate-mahjong-riichi` |
+
+### 可选外部引擎
+
+大多数 MiniBench 题目不需要外部游戏引擎。只有在运行对应对战模式时，才需要按需安装下面的引擎。
+
+Pikafish 只用于 `--opponent pikafish` 的象棋任务，例如
+`data/xiangqi_hard_tasks.jsonl`。具体平台细节以官方项目为准；Linux/WSL 下常见源码构建方式如下：
+
+```bash
+git clone https://github.com/official-pikafish/Pikafish.git
+cd Pikafish/src
+make -j profile-build
+export PIKAFISH_PATH="$PWD/pikafish"
+```
+
+如果你的构建或 release 包把 NNUE 网络文件单独放置，也设置：
+
+```bash
+export PIKAFISH_EVAL_FILE=/path/to/pikafish.nnue
+```
+
+akochan 只用于四人 Riichi 麻将的外部 AI 对手模式，也就是
+`--riichi-opponent external` 搭配 `examples/akochan_wrapper.py`。Linux/WSL 下常见构建方式如下：
+
+```bash
+git clone https://github.com/critter-mj/akochan.git
+cd akochan
+sudo apt-get install libboost-all-dev
+(cd ai_src && make -f Makefile_Linux)
+make -f Makefile_Linux
+export AKOCHAN_HOME="$PWD"
+```
+
+包装器会查找 `AKOCHAN_HOME/system` 或 `AKOCHAN_HOME/system.exe`。如果 akochan 需要当前
+Python/conda 环境里的共享库，再设置：
+
+```bash
+export AKOCHAN_CONDA_PREFIX="$CONDA_PREFIX"
+```
 
 ### Provider 示例
 
