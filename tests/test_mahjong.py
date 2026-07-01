@@ -1,20 +1,20 @@
-﻿import json
+import json
 import unittest
 
-from minibench.mahjong.api import (
+from minibench.datasets.mahjong.api import (
     calculate_shanten,
     normalize_tile,
     tenpai_discards,
     winning_tiles,
 )
 from minibench.cli import build_parser
-from minibench.mahjong.dataset import load_mahjong_tasks, mahjong_task_from_dict
-from minibench.mahjong.evaluation import (
+from minibench.datasets.mahjong.dataset import load_mahjong_tasks, mahjong_task_from_dict
+from minibench.datasets.mahjong.evaluation import (
     evaluate_mahjong_tasks,
     extract_mahjong_answer,
     validate_mahjong_answer,
 )
-from minibench.mahjong.prompting import build_mahjong_prompt
+from minibench.datasets.mahjong.prompting import build_mahjong_prompt
 
 
 class FixedMahjongAgent:
@@ -161,4 +161,3 @@ class MahjongTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

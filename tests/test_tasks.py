@@ -1,6 +1,6 @@
-﻿import unittest
+import unittest
 
-from minibench.multiple_choice.dataset import load_tasks
+from minibench.datasets.multiple_choice.dataset import load_tasks
 
 
 REQUIRED_TAG_PREFIXES = (
@@ -39,5 +39,3 @@ class TaskSetTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-

@@ -12,6 +12,7 @@ authors = [{ name = "MiniBench" }]
 dependencies = [
     "gym-xiangqi",
     "mahjong>=2.0.0",
+    "PyYAML>=6.0",
 ]
 
 [project.scripts]
@@ -23,4 +24,3 @@ where = ["src"]
 [tool.pyright]
 include = ["src", "tests"]
 extraPaths = ["src"]
-

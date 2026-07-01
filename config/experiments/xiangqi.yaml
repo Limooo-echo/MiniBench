@@ -1,0 +1,28 @@
+task:
+  family: xiangqi
+  path: data/xiangqi/tasks.jsonl
+  limit: null
+  task_ids: []
+
+agent:
+  name: openai-compatible
+  samples: 3
+  reasoning_temperature: 0.7
+  final_temperature: 0.0
+  max_reasoning_tokens: 512
+
+provider:
+  name: deepseek
+  model: deepseek-chat
+  json_mode: true
+  max_tokens: 256
+  timeout: 120
+
+evaluation:
+  opponent: null
+  pikafish_depth: 8
+  pikafish_timeout: 30.0
+
+run:
+  output_dir: runs
+  run_name: null

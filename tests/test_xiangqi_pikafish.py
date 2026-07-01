@@ -1,9 +1,9 @@
-﻿import importlib.util
+import importlib.util
 import unittest
 from pathlib import Path
 
-from minibench.xiangqi.dataset import load_xiangqi_tasks, xiangqi_task_from_dict
-from minibench.xiangqi.pikafish import (
+from minibench.datasets.xiangqi.dataset import load_xiangqi_tasks, xiangqi_task_from_dict
+from minibench.datasets.xiangqi.engines.pikafish import (
     board_to_pikafish_fen,
     square_to_uci,
     uci_to_square,
@@ -61,7 +61,7 @@ class XiangqiPikafishTests(unittest.TestCase):
         self.assertEqual(task.goal, "agent_survive")
 
     def test_hard_dataset_has_three_categories(self):
-        tasks = load_xiangqi_tasks(Path("data/xiangqi_hard_tasks.jsonl"))
+        tasks = load_xiangqi_tasks(Path("data/xiangqi/hard_tasks.jsonl"))
         categories = {
             tag
             for task in tasks
@@ -86,7 +86,7 @@ class XiangqiPikafishTests(unittest.TestCase):
 
     @unittest.skipUnless(XIANGQI_ENV_AVAILABLE, "gym-xiangqi is not installed")
     def test_strict_actions_filter_moves_that_leave_general_in_check(self):
-        from minibench.xiangqi.env import (
+        from minibench.datasets.xiangqi.env import (
             make_xiangqi_env_from_board,
             strict_legal_actions,
         )
@@ -115,8 +115,8 @@ class XiangqiPikafishTests(unittest.TestCase):
 
     @unittest.skipUnless(XIANGQI_ENV_AVAILABLE, "gym-xiangqi is not installed")
     def test_prompt_uses_strict_legal_actions(self):
-        from minibench.xiangqi.env import make_xiangqi_env_from_board
-        from minibench.xiangqi.prompting import build_xiangqi_prompt
+        from minibench.datasets.xiangqi.env import make_xiangqi_env_from_board
+        from minibench.datasets.xiangqi.prompting import build_xiangqi_prompt
 
         task = xiangqi_task_from_dict(
             {
@@ -154,4 +154,3 @@ class XiangqiPikafishTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -1,11 +1,11 @@
-﻿import json
+import json
 import unittest
 
-from minibench.one_stroke.dataset import (
+from minibench.datasets.one_stroke.dataset import (
     load_one_stroke_tasks,
     one_stroke_task_from_dict,
 )
-from minibench.one_stroke.evaluation import (
+from minibench.datasets.one_stroke.evaluation import (
     evaluate_one_stroke_tasks,
     extract_path,
     validate_one_stroke_path,
@@ -64,4 +64,3 @@ class OneStrokeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

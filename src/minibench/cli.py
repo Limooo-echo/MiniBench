@@ -1,14 +1,15 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
 from typing import Any
 
-from minibench.agents import AGENT_NAMES, make_agent
-from minibench.multiple_choice.dataset import find_task, load_tasks
-from minibench.multiple_choice.evaluation import evaluate_tasks, summarize, write_run
-from minibench.multiple_choice.prompting import build_prompt
+from minibench.evaluate import run_config
+from minibench.factory.agents import AGENT_NAMES, make_agent
+from minibench.datasets.multiple_choice.dataset import find_task, load_tasks
+from minibench.datasets.multiple_choice.evaluation import evaluate_tasks, summarize, write_run
+from minibench.datasets.multiple_choice.prompting import build_prompt
 
 
 PROVIDER_CHOICES = (
@@ -147,7 +148,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
-    from minibench.xiangqi.dataset import load_xiangqi_tasks
+    from minibench.datasets.xiangqi.dataset import load_xiangqi_tasks
 
     tasks = load_xiangqi_tasks(args.xiangqi_tasks)
     tasks = _select_tasks(tasks, args.task_id)
@@ -155,12 +156,12 @@ def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
         tasks = tasks[: args.limit]
     _reject_reasoning_agent_for_xiangqi_battle(args, tasks)
 
-    from minibench.xiangqi.evaluation import (
+    from minibench.datasets.xiangqi.evaluation import (
         evaluate_xiangqi_tasks,
         summarize_xiangqi,
         write_xiangqi_run,
     )
-    from minibench.xiangqi.prompting import XIANGQI_SYSTEM_PROMPT
+    from minibench.datasets.xiangqi.prompting import XIANGQI_SYSTEM_PROMPT
 
     try:
         agent = _make_cli_agent(args, system_prompt=XIANGQI_SYSTEM_PROMPT)
@@ -183,13 +184,13 @@ def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
-    from minibench.one_stroke.dataset import load_one_stroke_tasks
-    from minibench.one_stroke.evaluation import (
+    from minibench.datasets.one_stroke.dataset import load_one_stroke_tasks
+    from minibench.datasets.one_stroke.evaluation import (
         evaluate_one_stroke_tasks,
         summarize_one_stroke,
         write_one_stroke_run,
     )
-    from minibench.one_stroke.prompting import ONE_STROKE_SYSTEM_PROMPT
+    from minibench.datasets.one_stroke.prompting import ONE_STROKE_SYSTEM_PROMPT
 
     tasks = load_one_stroke_tasks(args.one_stroke_tasks)
     tasks = _select_tasks(tasks, args.task_id)
@@ -207,13 +208,13 @@ def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate_mahjong(args: argparse.Namespace) -> int:
-    from minibench.mahjong.dataset import load_mahjong_tasks
-    from minibench.mahjong.evaluation import (
+    from minibench.datasets.mahjong.dataset import load_mahjong_tasks
+    from minibench.datasets.mahjong.evaluation import (
         evaluate_mahjong_tasks,
         summarize_mahjong,
         write_mahjong_run,
     )
-    from minibench.mahjong.prompting import MAHJONG_SYSTEM_PROMPT
+    from minibench.datasets.mahjong.prompting import MAHJONG_SYSTEM_PROMPT
 
     tasks = load_mahjong_tasks(args.mahjong_tasks)
     tasks = _select_tasks(tasks, args.task_id)
@@ -231,13 +232,13 @@ def _cmd_evaluate_mahjong(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate_mahjong_riichi(args: argparse.Namespace) -> int:
-    from minibench.mahjong_riichi.dataset import load_mahjong_riichi_tasks
-    from minibench.mahjong_riichi.evaluation import (
+    from minibench.datasets.mahjong_riichi.dataset import load_mahjong_riichi_tasks
+    from minibench.datasets.mahjong_riichi.evaluation import (
         evaluate_mahjong_riichi_tasks,
         summarize_mahjong_riichi,
         write_mahjong_riichi_run,
     )
-    from minibench.mahjong_riichi.prompting import MAHJONG_RIICHI_SYSTEM_PROMPT
+    from minibench.datasets.mahjong_riichi.prompting import MAHJONG_RIICHI_SYSTEM_PROMPT
 
     tasks = load_mahjong_riichi_tasks(args.mahjong_riichi_tasks)
     tasks = _select_tasks(tasks, args.task_id)
@@ -268,10 +269,26 @@ def _cmd_show_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_run_config(args: argparse.Namespace) -> int:
+    try:
+        result = run_config(args.config)
+    except (KeyError, RuntimeError, ValueError) as exc:
+        raise SystemExit(f"config evaluation failed: {exc}") from exc
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="minibench")
     parser.add_argument("--tasks", type=Path, default=None, help="Path to tasks JSONL.")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    run_config_parser = subparsers.add_parser(
+        "run-config",
+        help="Run an experiment from a YAML config file.",
+    )
+    run_config_parser.add_argument("config", type=Path)
+    run_config_parser.set_defaults(func=_cmd_run_config)
 
     evaluate = subparsers.add_parser("evaluate", help="Run benchmark evaluation.")
     evaluate.add_argument("--agent", choices=AGENT_NAMES, default="oracle")
@@ -291,7 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--xiangqi-tasks",
         type=Path,
         default=None,
-        help="Path to Xiangqi tasks JSONL. Defaults to data/xiangqi_tasks.jsonl.",
+        help="Path to Xiangqi tasks JSONL. Defaults to data/xiangqi/tasks.jsonl.",
     )
     evaluate_xiangqi.add_argument(
         "--agent",
@@ -346,7 +363,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--one-stroke-tasks",
         type=Path,
         default=None,
-        help="Path to one-stroke tasks JSONL. Defaults to data/one_stroke_tasks.jsonl.",
+        help="Path to one-stroke tasks JSONL. Defaults to data/one_stroke/tasks.jsonl.",
     )
     evaluate_one_stroke.add_argument(
         "--agent",
@@ -365,7 +382,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mahjong-tasks",
         type=Path,
         default=None,
-        help="Path to Mahjong tasks JSONL. Defaults to data/mahjong_tasks.jsonl.",
+        help="Path to Mahjong tasks JSONL. Defaults to data/mahjong/tasks.jsonl.",
     )
     evaluate_mahjong.add_argument(
         "--agent",
@@ -386,7 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Path to Riichi Mahjong tasks JSONL. Defaults to "
-            "data/mahjong_riichi_tasks.jsonl."
+            "data/mahjong_riichi/tasks.jsonl."
         ),
     )
     evaluate_mahjong_riichi.add_argument(
@@ -438,4 +455,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

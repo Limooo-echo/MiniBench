@@ -1,14 +1,14 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-from minibench.agents.base import Agent, ChatClient, ReasoningConfig
-from minibench.agents.prompts import (
+from minibench.core.agent import Agent, ChatClient, ReasoningConfig
+from minibench.core.prompts import (
     FINAL_ANSWER_SYSTEM_PROMPT,
     REASONING_SYSTEM_PROMPT,
     finalize_prompt,
     plan_prompt,
     solve_with_plan_prompt,
 )
-from minibench.multiple_choice.dataset import Task
+from minibench.datasets.multiple_choice.dataset import Task
 
 
 class PlanThenSolveAgent(Agent):
@@ -40,4 +40,3 @@ class PlanThenSolveAgent(Agent):
             max_tokens=self.config.final_max_tokens,
             json_mode=True,
         )
-

@@ -2,7 +2,7 @@ import json
 from unittest.mock import patch
 import unittest
 
-from minibench.agents import OpenAICompatibleAgent, resolve_provider
+from minibench.factory.providers import OpenAICompatibleAgent, resolve_provider
 
 
 class FakeHTTPResponse:

@@ -4,12 +4,12 @@ from minibench.agents import (
     CoTAgent,
     CriticRefineAgent,
     DirectAgent,
-    OpenAICompatibleAgent,
     PlanThenSolveAgent,
     SelfConsistencyAgent,
     TreeOfThoughtAgent,
-    make_agent,
 )
+from minibench.factory.agents import make_agent
+from minibench.factory.providers import OpenAICompatibleAgent
 
 
 class AgentFactoryTests(unittest.TestCase):
