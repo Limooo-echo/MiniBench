@@ -8,6 +8,12 @@ from time import strftime
 from typing import Any
 
 from minibench.core.agent import Agent
+from minibench.core.metrics import (
+    finish_task_metrics,
+    start_task_metrics,
+    summarize_metrics,
+    summary_metrics_line,
+)
 from minibench.datasets.xiangqi.dataset import XiangqiTask
 from minibench.datasets.xiangqi.env import (
     make_xiangqi_env_from_board,
@@ -33,6 +39,7 @@ class XiangqiInstanceResult:
     fen_history: list[str]
     reasons: list[str]
     tags: tuple[str, ...]
+    metrics: dict[str, object]
 
 
 def extract_action(output: str) -> int | None:
@@ -108,6 +115,7 @@ def evaluate_xiangqi_tasks(
         )
 
     for task, task_opponent in zip(tasks, resolved_opponents):
+        metrics_start = start_task_metrics(agent)
         env = make_xiangqi_env_from_board(task.board, side_to_move=task.side_to_move)
         pikafish: PikafishEngine | None = None
 
@@ -125,6 +133,7 @@ def evaluate_xiangqi_tasks(
                         fen_history=[],
                         reasons=reasons,
                         tags=task.tags,
+                        metrics=finish_task_metrics(agent, metrics_start),
                     )
                 )
                 env.close()
@@ -278,6 +287,7 @@ def evaluate_xiangqi_tasks(
                 fen_history=fen_history,
                 reasons=reasons,
                 tags=task.tags,
+                metrics=finish_task_metrics(agent, metrics_start),
             )
         )
 
@@ -303,6 +313,7 @@ def summarize_xiangqi(results: list[XiangqiInstanceResult]) -> dict[str, Any]:
         "success": success_count,
         "success_rate": success_count / total if total else 0.0,
         "by_tag": by_tag,
+        "metrics": summarize_metrics(results),
     }
 
 
@@ -328,7 +339,8 @@ def write_xiangqi_run(
 
     (run_dir / "summary.txt").write_text(
         f"total={summary['total']} success={summary['success']} "
-        f"success_rate={summary['success_rate']:.3f}\n",
+        f"success_rate={summary['success_rate']:.3f}\n"
+        + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
     )
 

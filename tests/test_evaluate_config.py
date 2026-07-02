@@ -46,6 +46,15 @@ class EvaluateConfigTests(unittest.TestCase):
                 (run_dir / "results.json").read_text(encoding="utf-8")
             )
             self.assertEqual(saved["accuracy"], 1.0)
+            self.assertIn("metrics", saved)
+            self.assertEqual(saved["metrics"]["total"]["llm_calls"], 0)
+            prediction = json.loads(
+                (run_dir / "predictions.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()[0]
+            )
+            self.assertIn("metrics", prediction)
+            self.assertIn("task_elapsed_seconds", prediction["metrics"])
 
     def test_invalid_task_family_reports_clear_error(self):
         with self.assertRaisesRegex(ValueError, "task.family must be one of"):

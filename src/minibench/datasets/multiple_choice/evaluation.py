@@ -6,6 +6,12 @@ from pathlib import Path
 from time import strftime
 
 from minibench.core.agent import Agent
+from minibench.core.metrics import (
+    finish_task_metrics,
+    start_task_metrics,
+    summarize_metrics,
+    summary_metrics_line,
+)
 from minibench.datasets.multiple_choice.dataset import Task
 from minibench.datasets.multiple_choice.extraction import extract_answer
 from minibench.datasets.multiple_choice.prompting import build_prompt
@@ -22,11 +28,13 @@ class InstanceResult:
     correct: bool
     score_reason: str
     tags: tuple[str, ...]
+    metrics: dict[str, object]
 
 
 def evaluate_tasks(tasks: list[Task], agent: Agent) -> list[InstanceResult]:
     results: list[InstanceResult] = []
     for task in tasks:
+        metrics_start = start_task_metrics(agent)
         prompt = build_prompt(task)
         try:
             raw_output = agent.generate(prompt, task)
@@ -49,6 +57,7 @@ def evaluate_tasks(tasks: list[Task], agent: Agent) -> list[InstanceResult]:
                 correct=correct,
                 score_reason=score_reason,
                 tags=task.tags,
+                metrics=finish_task_metrics(agent, metrics_start),
             )
         )
     return results
@@ -70,6 +79,7 @@ def summarize(results: list[InstanceResult]) -> dict[str, object]:
         "correct": correct,
         "accuracy": correct / total if total else 0.0,
         "by_tag": by_tag,
+        "metrics": summarize_metrics(results),
     }
 
 
@@ -94,7 +104,8 @@ def write_run(
     )
     (run_dir / "summary.txt").write_text(
         f"total={summary['total']} correct={summary['correct']} "
-        f"accuracy={summary['accuracy']:.3f}\n",
+        f"accuracy={summary['accuracy']:.3f}\n"
+        + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
     )
     return run_dir

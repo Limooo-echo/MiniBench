@@ -140,6 +140,57 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
 
         self.assertEqual(output, "answer: C")
 
+    def test_complete_records_usage_metrics(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+        )
+        payload = {
+            "choices": [{"message": {"content": '{"answer":"C"}'}}],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 4,
+                "total_tokens": 14,
+                "prompt_tokens_details": {"cached_tokens": 3},
+                "completion_tokens_details": {"reasoning_tokens": 2},
+            },
+        }
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch("urllib.request.urlopen", return_value=FakeHTTPResponse(payload)):
+                output = agent.complete("Question?")
+
+        metrics = agent.metrics_snapshot()
+        self.assertEqual(output, '{"answer":"C"}')
+        self.assertEqual(metrics["llm_calls"], 1)
+        self.assertEqual(metrics["usage_missing_calls"], 0)
+        self.assertEqual(metrics["token_usage"]["prompt_tokens"], 10)
+        self.assertEqual(metrics["token_usage"]["completion_tokens"], 4)
+        self.assertEqual(metrics["token_usage"]["total_tokens"], 14)
+        self.assertEqual(metrics["token_usage"]["cached_tokens"], 3)
+        self.assertEqual(metrics["token_usage"]["reasoning_tokens"], 2)
+        self.assertGreaterEqual(metrics["model_elapsed_seconds"], 0.0)
+
+    def test_complete_records_missing_usage_metrics(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+        )
+        payload = {
+            "choices": [{"message": {"content": '{"answer":"C"}'}}],
+        }
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch("urllib.request.urlopen", return_value=FakeHTTPResponse(payload)):
+                agent.complete("Question?")
+
+        metrics = agent.metrics_snapshot()
+        self.assertEqual(metrics["llm_calls"], 1)
+        self.assertEqual(metrics["usage_missing_calls"], 1)
+        self.assertEqual(metrics["token_usage"]["total_tokens"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
