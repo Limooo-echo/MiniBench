@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+from time import perf_counter
 from typing import Any
 import urllib.error
 import urllib.request
 
 from minibench.core.agent import Agent
+from minibench.core.metrics import empty_token_usage, extract_token_usage
 from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT
 
 
@@ -72,6 +74,10 @@ class OpenAICompatibleAgent(Agent):
         self.json_mode = json_mode
         self.extra_body = extra_body or {}
         self.default_system_prompt = default_system_prompt
+        self._model_elapsed_seconds = 0.0
+        self._llm_calls = 0
+        self._usage_missing_calls = 0
+        self._token_usage = empty_token_usage()
 
     @property
     def endpoint(self) -> str:
@@ -151,18 +157,22 @@ class OpenAICompatibleAgent(Agent):
             },
             method="POST",
         )
+        started_at = perf_counter()
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
+            self._record_completion_metrics(perf_counter() - started_at, None)
             raise RuntimeError(
                 f"{self.name} request failed with HTTP {exc.code}: {error_body}"
             ) from exc
         except urllib.error.URLError as exc:
+            self._record_completion_metrics(perf_counter() - started_at, None)
             raise RuntimeError(f"{self.name} request failed: {exc.reason}") from exc
 
         payload = json.loads(raw)
+        self._record_completion_metrics(perf_counter() - started_at, payload.get("usage"))
         try:
             choice = payload["choices"][0]
             message = choice["message"]
@@ -187,6 +197,28 @@ class OpenAICompatibleAgent(Agent):
 
     def generate(self, prompt: str, task: Any) -> str:
         return self.complete(prompt)
+
+    def metrics_snapshot(self) -> dict[str, Any]:
+        return {
+            "model_elapsed_seconds": self._model_elapsed_seconds,
+            "llm_calls": self._llm_calls,
+            "usage_missing_calls": self._usage_missing_calls,
+            "token_usage": dict(self._token_usage),
+        }
+
+    def _record_completion_metrics(
+        self,
+        elapsed_seconds: float,
+        usage: object,
+    ) -> None:
+        self._model_elapsed_seconds += elapsed_seconds
+        self._llm_calls += 1
+        token_usage = extract_token_usage(usage)
+        if token_usage is None:
+            self._usage_missing_calls += 1
+            return
+        for key, value in token_usage.items():
+            self._token_usage[key] = self._token_usage.get(key, 0) + value
 
 
 def _content_part_to_text(part: object) -> str:

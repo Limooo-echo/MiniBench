@@ -10,6 +10,12 @@ from time import strftime
 from typing import Any
 
 from minibench.core.agent import Agent
+from minibench.core.metrics import (
+    finish_task_metrics,
+    start_task_metrics,
+    summarize_metrics,
+    summary_metrics_line,
+)
 from minibench.datasets.mahjong.api import (
     calculate_shanten,
     index_to_tile,
@@ -42,6 +48,7 @@ class MahjongSoloInstanceResult:
     win_score: dict[str, Any] | None
     reasons: list[str]
     tags: tuple[str, ...]
+    metrics: dict[str, object]
 
 
 def evaluate_mahjong_solo_tasks(
@@ -90,6 +97,7 @@ def evaluate_mahjong_solo_task(
     move_scorer: str = "shanten",
     external_ai: ExternalMahjongAI | None = None,
 ) -> MahjongSoloInstanceResult:
+    metrics_start = start_task_metrics(agent)
     hand = list(task.initial_hand)
     draws: list[str] = []
     discards: list[str] = []
@@ -144,6 +152,7 @@ def evaluate_mahjong_solo_task(
                 final_hand=hand,
                 win_score=win_score,
                 reasons=reasons,
+                metrics=finish_task_metrics(agent, metrics_start),
             )
 
         if action_name != "discard":
@@ -214,6 +223,7 @@ def evaluate_mahjong_solo_task(
         final_hand=hand,
         win_score=win_score,
         reasons=reasons,
+        metrics=finish_task_metrics(agent, metrics_start),
     )
 
 
@@ -368,6 +378,7 @@ def summarize_mahjong_solo(results: list[MahjongSoloInstanceResult]) -> dict[str
         "move_scored_total": sum(1 for result in results if result.move_scores),
         "per_move_average_score": mean(all_move_scores) if all_move_scores else None,
         "by_tag": by_tag,
+        "metrics": summarize_metrics(results),
     }
 
 
@@ -395,7 +406,8 @@ def write_mahjong_solo_run(
     (run_dir / "summary.txt").write_text(
         f"total={summary['total']} success={summary['success']} "
         f"success_rate={summary['success_rate']:.3f} "
-        f"per_move_average_score={score_text}\n",
+        f"per_move_average_score={score_text}\n"
+        + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
     )
     return run_dir
@@ -413,6 +425,7 @@ def _make_result(
     final_hand: list[str],
     win_score: dict[str, Any] | None,
     reasons: list[str],
+    metrics: dict[str, object],
 ) -> MahjongSoloInstanceResult:
     move_values = [float(item["move_score"]) for item in move_scores]
     return MahjongSoloInstanceResult(
@@ -430,6 +443,7 @@ def _make_result(
         win_score=win_score,
         reasons=list(reasons),
         tags=task.tags,
+        metrics=metrics,
     )
 
 

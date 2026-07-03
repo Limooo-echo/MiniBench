@@ -9,6 +9,12 @@ from time import strftime
 from typing import Any, Sequence
 
 from minibench.core.agent import Agent
+from minibench.core.metrics import (
+    finish_task_metrics,
+    start_task_metrics,
+    summarize_metrics,
+    summary_metrics_line,
+)
 from minibench.datasets.mahjong.api import (
     calculate_shanten,
     deal_table,
@@ -110,6 +116,7 @@ class MahjongRiichiInstanceResult:
     final_agent_hand: list[str]
     reasons: list[str]
     tags: tuple[str, ...]
+    metrics: dict[str, object]
 
 
 def extract_riichi_action(output: str) -> dict[str, object] | None:
@@ -327,6 +334,7 @@ def evaluate_mahjong_riichi_task(
     mahjong_ai_mode: str = "stdio",
     mahjong_ai_timeout: float = 30.0,
 ) -> MahjongRiichiInstanceResult:
+    metrics_start = start_task_metrics(agent)
     opponent_ais = _make_opponent_ais(
         task,
         opponent=opponent,
@@ -493,6 +501,7 @@ def evaluate_mahjong_riichi_task(
             final_agent_hand=list(hands[task.agent_seat]),
             reasons=reasons,
             tags=task.tags,
+            metrics=finish_task_metrics(agent, metrics_start),
         )
     finally:
         for ai in opponent_ais.values():
@@ -538,6 +547,7 @@ def summarize_mahjong_riichi(
         "agent_total_score": round(seat_total_scores[0], 3),
         "agent_average_score": round(seat_total_scores[0] / total, 3) if total else 0.0,
         "by_tag": by_tag,
+        "metrics": summarize_metrics(results),
     }
 
 
@@ -564,7 +574,8 @@ def write_mahjong_riichi_run(
         f"total={summary['total']} success={summary['success']} "
         f"success_rate={summary['success_rate']:.3f}\n"
         f"seat_total_scores={json.dumps(summary['seat_total_scores'], ensure_ascii=False)}\n"
-        f"seat_average_scores={json.dumps(summary['seat_average_scores'], ensure_ascii=False)}\n",
+        f"seat_average_scores={json.dumps(summary['seat_average_scores'], ensure_ascii=False)}\n"
+        + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
     )
     return run_dir

@@ -8,6 +8,12 @@ from time import strftime
 from typing import Any
 
 from minibench.core.agent import Agent
+from minibench.core.metrics import (
+    finish_task_metrics,
+    start_task_metrics,
+    summarize_metrics,
+    summary_metrics_line,
+)
 from minibench.datasets.mahjong.api import normalize_tile, tenpai_discards, winning_tiles
 from minibench.datasets.mahjong.dataset import MahjongTask
 from minibench.datasets.mahjong.prompting import build_mahjong_prompt
@@ -23,6 +29,7 @@ class MahjongInstanceResult:
     expected_answer: dict[str, Any]
     reasons: list[str]
     tags: tuple[str, ...]
+    metrics: dict[str, object]
 
 
 def extract_mahjong_answer(output: str) -> dict[str, Any] | None:
@@ -57,6 +64,7 @@ def evaluate_mahjong_tasks(
 ) -> list[MahjongInstanceResult]:
     results: list[MahjongInstanceResult] = []
     for task in tasks:
+        metrics_start = start_task_metrics(agent)
         prompt = build_mahjong_prompt(task)
         raw_output = agent.generate(prompt, task)
         parsed = extract_mahjong_answer(raw_output)
@@ -67,6 +75,7 @@ def evaluate_mahjong_tasks(
                 parsed_answer={},
                 success=False,
                 reasons=["no_json_answer_extracted"],
+                metrics=finish_task_metrics(agent, metrics_start),
             )
             results.append(result)
             continue
@@ -79,6 +88,7 @@ def evaluate_mahjong_tasks(
                 parsed_answer=parsed,
                 success=success,
                 reasons=reasons,
+                metrics=finish_task_metrics(agent, metrics_start),
             )
         )
     return results
@@ -144,6 +154,7 @@ def summarize_mahjong(results: list[MahjongInstanceResult]) -> dict[str, Any]:
         "success": success_count,
         "success_rate": success_count / total if total else 0.0,
         "by_tag": by_tag,
+        "metrics": summarize_metrics(results),
     }
 
 
@@ -168,7 +179,8 @@ def write_mahjong_run(
     )
     (run_dir / "summary.txt").write_text(
         f"total={summary['total']} success={summary['success']} "
-        f"success_rate={summary['success_rate']:.3f}\n",
+        f"success_rate={summary['success_rate']:.3f}\n"
+        + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
     )
     return run_dir
@@ -181,6 +193,7 @@ def _make_result(
     parsed_answer: dict[str, Any],
     success: bool,
     reasons: list[str],
+    metrics: dict[str, object],
 ) -> MahjongInstanceResult:
     return MahjongInstanceResult(
         task_id=task.id,
@@ -191,6 +204,7 @@ def _make_result(
         expected_answer=expected_answer(task),
         reasons=reasons,
         tags=task.tags,
+        metrics=metrics,
     )
 
 

@@ -10,6 +10,12 @@ from time import strftime
 from typing import Any, TextIO
 
 from minibench.core.agent import Agent
+from minibench.core.metrics import (
+    finish_task_metrics,
+    start_task_metrics,
+    summarize_metrics,
+    summary_metrics_line,
+)
 from minibench.datasets.one_stroke.dataset import OneStrokeTask
 from minibench.datasets.one_stroke.prompting import build_one_stroke_prompt
 
@@ -25,6 +31,7 @@ class OneStrokeInstanceResult:
     path: list[str]
     reasons: list[str]
     tags: tuple[str, ...]
+    metrics: dict[str, object]
 
 
 def extract_path(output: str) -> list[str] | None:
@@ -114,6 +121,7 @@ def evaluate_one_stroke_tasks(
         if show_progress and progress_stream is not None:
             _write_progress(progress_stream, index, total, task.id)
 
+        metrics_start = start_task_metrics(agent)
         prompt = build_one_stroke_prompt(task, prompt_variant=prompt_variant)
         raw_output = agent.generate(prompt, task)
         path = extract_path(raw_output)
@@ -165,6 +173,7 @@ def evaluate_one_stroke_tasks(
                 path=path,
                 reasons=reasons,
                 tags=task.tags,
+                metrics=finish_task_metrics(agent, metrics_start),
             )
         )
     if show_progress and progress_stream is not None:
@@ -190,6 +199,7 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
         "success": success_count,
         "success_rate": success_count / total if total else 0.0,
         "by_tag": by_tag,
+        "metrics": summarize_metrics(results),
     }
 
 
@@ -214,7 +224,8 @@ def write_one_stroke_run(
     )
     (run_dir / "summary.txt").write_text(
         f"total={summary['total']} success={summary['success']} "
-        f"success_rate={summary['success_rate']:.3f}\n",
+        f"success_rate={summary['success_rate']:.3f}\n"
+        + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
     )
     return run_dir

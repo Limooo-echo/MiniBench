@@ -264,6 +264,7 @@ class XiangqiPikafishTests(unittest.TestCase):
             ],
             reasons=["agent_survived_step_limit"],
             tags=("xiangqi",),
+            metrics={},
         )
 
     def test_fen_to_position_assigns_unique_piece_ids(self):

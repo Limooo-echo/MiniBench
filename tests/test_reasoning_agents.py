@@ -7,6 +7,7 @@ from minibench.agents import (
     SelfConsistencyAgent,
     TreeOfThoughtAgent,
 )
+from minibench.core.metrics import finish_task_metrics, start_task_metrics
 from minibench.datasets.multiple_choice.dataset import Task
 
 
@@ -36,6 +37,36 @@ class FakeClient:
         if not self.responses:
             raise AssertionError("fake client ran out of responses")
         return self.responses.pop(0)
+
+
+class MetricsClient(FakeClient):
+    def __init__(self, responses):
+        super().__init__(responses)
+        self.model_elapsed_seconds = 0.0
+        self.llm_calls = 0
+        self.usage_missing_calls = 0
+        self.token_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+
+    def complete(self, *args, **kwargs):
+        output = super().complete(*args, **kwargs)
+        self.llm_calls += 1
+        self.model_elapsed_seconds += 0.25
+        self.token_usage["prompt_tokens"] += 7
+        self.token_usage["completion_tokens"] += 3
+        self.token_usage["total_tokens"] += 10
+        return output
+
+    def metrics_snapshot(self):
+        return {
+            "model_elapsed_seconds": self.model_elapsed_seconds,
+            "llm_calls": self.llm_calls,
+            "usage_missing_calls": self.usage_missing_calls,
+            "token_usage": dict(self.token_usage),
+        }
 
 
 def sample_task():
@@ -108,6 +139,22 @@ class ReasoningAgentTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 3)
         self.assertTrue(client.calls[-1]["json_mode"])
         self.assertIn("Critique:", client.calls[-1]["prompt"])
+
+    def test_reasoning_agent_metrics_include_nested_client_calls(self):
+        client = MetricsClient(["Reasoning says C.", '{"answer":"C"}'])
+        agent = CoTAgent(client, ReasoningConfig())
+        metrics_start = start_task_metrics(agent)
+
+        output = agent.generate("Question prompt", sample_task())
+        metrics = finish_task_metrics(agent, metrics_start)
+
+        self.assertEqual(output, '{"answer":"C"}')
+        self.assertEqual(metrics["llm_calls"], 2)
+        self.assertEqual(metrics["model_elapsed_seconds"], 0.5)
+        self.assertEqual(metrics["token_usage"]["prompt_tokens"], 14)
+        self.assertEqual(metrics["token_usage"]["completion_tokens"], 6)
+        self.assertEqual(metrics["token_usage"]["total_tokens"], 20)
+        self.assertTrue(metrics["usage_available"])
 
 
 if __name__ == "__main__":

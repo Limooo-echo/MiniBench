@@ -12,3 +12,18 @@ runs/
 .env
 .DS_Store
 
+.env.*
+!.env.example
+.coverage
+htmlcov/
+coverage.xml
+.ipynb_checkpoints/
+*.log
+*.tmp
+tmp/
+temp/
+.idea/
+Thumbs.db
+pikafish
+pikafish.exe
+*.nnue
