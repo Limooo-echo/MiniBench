@@ -47,6 +47,54 @@ class EvaluateConfigTests(unittest.TestCase):
             )
             self.assertEqual(saved["accuracy"], 1.0)
 
+    def test_run_config_passes_one_stroke_prompt_variant(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "runs"
+            predictions_path = Path(tmpdir) / "predictions.jsonl"
+            predictions_path.write_text(
+                json.dumps(
+                    {
+                        "task_id": "os-path-001",
+                        "raw_output": '{"path":["A","B","C","D"]}',
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            config_path = Path(tmpdir) / "experiment.yaml"
+            config_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "task": {
+                            "family": "one_stroke",
+                            "path": "data/one_stroke/tasks.jsonl",
+                            "limit": 1,
+                            "task_ids": [],
+                        },
+                        "agent": {
+                            "name": "openai-compatible",
+                            "predictions": str(predictions_path),
+                        },
+                        "provider": {"name": "generic"},
+                        "evaluation": {"prompt_variant": "euler_theorem"},
+                        "run": {
+                            "output_dir": str(output_dir),
+                            "run_name": "one-stroke-unit-run",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_config(config_path)
+
+            run_dir = Path(result["run_dir"])
+            saved_prediction = json.loads(
+                (run_dir / "predictions.jsonl").read_text(encoding="utf-8")
+            )
+            self.assertEqual(result["success"], 1)
+            self.assertEqual(saved_prediction["prompt_variant"], "euler_theorem")
+
     def test_invalid_task_family_reports_clear_error(self):
         with self.assertRaisesRegex(ValueError, "task.family must be one of"):
             validate_experiment_config(

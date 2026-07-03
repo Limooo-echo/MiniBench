@@ -12,12 +12,12 @@ agent:
   max_reasoning_tokens: 1024
 
 provider:
-  name: siliconflow
-  model: zai-org/GLM-5.2
+  name: deepseek
+  model: deepseek-chat
   json_mode: true
   max_tokens: 64
   timeout: 120
 
 run:
   output_dir: runs
-  run_name: siliconflow-glm52-mcq
+  run_name: null

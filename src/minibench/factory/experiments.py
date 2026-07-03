@@ -98,6 +98,25 @@ def _mahjong_spec() -> TaskFamilySpec:
     )
 
 
+def _mahjong_solo_spec() -> TaskFamilySpec:
+    from minibench.datasets.mahjong_solo.dataset import load_mahjong_solo_tasks
+    from minibench.datasets.mahjong_solo.evaluation import (
+        evaluate_mahjong_solo_tasks,
+        summarize_mahjong_solo,
+        write_mahjong_solo_run,
+    )
+    from minibench.datasets.mahjong_solo.prompting import MAHJONG_SOLO_SYSTEM_PROMPT
+
+    return TaskFamilySpec(
+        default_path=Path("data/mahjong_solo/tasks.jsonl"),
+        load_tasks=load_mahjong_solo_tasks,
+        evaluate_tasks=evaluate_mahjong_solo_tasks,
+        summarize=summarize_mahjong_solo,
+        write_run=write_mahjong_solo_run,
+        system_prompt=MAHJONG_SOLO_SYSTEM_PROMPT,
+    )
+
+
 def _mahjong_riichi_spec() -> TaskFamilySpec:
     from minibench.datasets.mahjong_riichi.dataset import load_mahjong_riichi_tasks
     from minibench.datasets.mahjong_riichi.evaluation import (
@@ -124,6 +143,7 @@ TASK_FAMILIES: dict[str, Callable[[], TaskFamilySpec]] = {
     "xiangqi": _xiangqi_spec,
     "one_stroke": _one_stroke_spec,
     "mahjong": _mahjong_spec,
+    "mahjong_solo": _mahjong_solo_spec,
     "mahjong_riichi": _mahjong_riichi_spec,
 }
 
@@ -194,6 +214,13 @@ def _evaluate(
             pikafish_movetime_ms=evaluation_config.get("pikafish_movetime_ms"),
             pikafish_timeout=evaluation_config.get("pikafish_timeout", 30.0),
         )
+    if family == "one_stroke":
+        return spec.evaluate_tasks(
+            tasks,
+            agent,
+            prompt_variant=evaluation_config.get("prompt_variant", "baseline"),
+            show_progress=bool(evaluation_config.get("show_progress", False)),
+        )
     if family == "mahjong_riichi":
         return spec.evaluate_tasks(
             tasks,
@@ -205,5 +232,15 @@ def _evaluate(
             mahjong_ai_command=evaluation_config.get("mahjong_ai_command"),
             mahjong_ai_mode=evaluation_config.get("mahjong_ai_mode", "stdio"),
             mahjong_ai_timeout=evaluation_config.get("mahjong_ai_timeout", 30.0),
+        )
+    if family == "mahjong_solo":
+        return spec.evaluate_tasks(
+            tasks,
+            agent,
+            move_scorer=evaluation_config.get("move_scorer", "shanten"),
+            mahjong_ai_command=evaluation_config.get("mahjong_ai_command"),
+            mahjong_ai_mode=evaluation_config.get("mahjong_ai_mode", "stdio"),
+            mahjong_ai_timeout=evaluation_config.get("mahjong_ai_timeout", 30.0),
+            show_progress=bool(evaluation_config.get("show_progress", False)),
         )
     return spec.evaluate_tasks(tasks, agent)

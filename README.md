@@ -60,6 +60,7 @@ src/minibench/datasets/
     engines/
   one_stroke/
   mahjong/
+  mahjong_solo/
   mahjong_riichi/
 ```
 
@@ -72,6 +73,7 @@ src/minibench/datasets/
 | Hard Xiangqi with Pikafish | `data/xiangqi/hard_tasks.jsonl` | `evaluate-xiangqi` |
 | One-stroke graph puzzles | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
 | Static Mahjong tile shapes | `data/mahjong/tasks.jsonl` | `evaluate-mahjong` |
+| Single-player Riichi Mahjong draw-discard | `data/mahjong_solo/tasks.jsonl` | `evaluate-mahjong-solo` |
 | Four-player Riichi Mahjong v1 | `data/mahjong_riichi/tasks.jsonl` | `evaluate-mahjong-riichi` |
 
 ### Agent Architectures
@@ -194,6 +196,50 @@ python -m minibench.cli evaluate-mahjong \
   --timeout 120
 ```
 
+Single-player Riichi Mahjong draw-discard tasks:
+
+```bash
+python -m minibench.cli evaluate-mahjong-solo \
+  --mahjong-solo-tasks data/mahjong_solo/tasks.jsonl \
+  --agent cot \
+  --provider deepseek \
+  --model deepseek-chat \
+  --json-mode \
+  --max-tokens 512 \
+  --move-scorer shanten \
+  --progress \
+  --timeout 120
+```
+
+`score` is 1 only when the agent wins by tsumo within the draw limit.
+`per_move_average_score` is the average discard-quality score over all scored
+discards.
+
+To score each discard by agreement with Akochan's recommended action:
+
+```bash
+export AKOCHAN_HOME=/path/to/akochan
+export AKOCHAN_CONDA_PREFIX="$CONDA_PREFIX"
+
+python -m minibench.cli evaluate-mahjong-solo \
+  --mahjong-solo-tasks data/mahjong_solo/tasks_win.jsonl \
+  --agent cot \
+  --provider deepseek \
+  --model deepseek-chat \
+  --json-mode \
+  --max-tokens 512 \
+  --move-scorer akochan-choice \
+  --mahjong-ai-command "python examples/akochan_wrapper.py" \
+  --mahjong-ai-mode stdio \
+  --mahjong-ai-timeout 60 \
+  --progress \
+  --timeout 120
+```
+
+`akochan-choice` is a policy-agreement score: each discard gets 1.0 when it
+matches the discard selected by the external Akochan wrapper and 0.0 otherwise.
+The local shanten score is still recorded as `shanten_move_score` for context.
+
 Four-player Riichi Mahjong:
 
 ```bash
@@ -209,6 +255,140 @@ python -m minibench.cli evaluate-mahjong-riichi \
 
 By default, seats 1/2/3 use the local shanten baseline bot. To connect external
 Mahjong AIs, use `--riichi-opponent external` and provide a wrapper command.
+
+### Task Generators
+
+Generate one-stroke graph puzzles:
+
+```bash
+python scripts/generate_one_stroke_tasks.py \
+  --output data/one_stroke/tasks_generated.jsonl \
+  --count 200 \
+  --min-vertices 4 \
+  --max-vertices 8 \
+  --seed 20260702 \
+  --overwrite
+```
+
+Generate simple Xiangqi one-move capture-general tasks. The generator keeps only
+positions with exactly one winning legal move:
+
+```bash
+python -m minibench.cli generate-xiangqi-capture \
+  --count 200 \
+  --output data/xiangqi/tasks_generated.jsonl \
+  --piece-types rook,cannon,horse,soldier \
+  --difficulties easy,medium,hard \
+  --seed 20260702 \
+  --overwrite \
+  --progress-interval 100
+```
+
+Convert CCPD endgame FEN records into Pikafish-opponent Xiangqi battle tasks.
+This conversion is format-only by default and does not call Pikafish:
+
+```bash
+python -m minibench.cli generate-ccpd-endgames \
+  --ccpd-root /path/to/Chinese-Chess-Practical-Dataset \
+  --output data/xiangqi/ccpd_endgames.jsonl \
+  --overwrite \
+  --progress-interval 25
+```
+
+Add `--engine-label` only when you want Pikafish static-score labels during
+generation; this is slower.
+
+Generate single-player Mahjong draw-discard tasks:
+
+```bash
+python -m minibench.cli generate-mahjong-solo \
+  --output data/mahjong_solo/tasks.jsonl \
+  --count 50 \
+  --max-draws 18 \
+  --seed 20260702 \
+  --overwrite
+```
+
+Add `--require-oracle-win` to keep only tasks that the local shanten/ukeire
+oracle can win within the draw limit.
+
+### One-Stroke Prompt Variants
+
+Run one-stroke puzzles without the Euler theorem hint:
+
+```bash
+python -m minibench.cli evaluate-one-stroke \
+  --one-stroke-tasks data/one_stroke/tasks.jsonl \
+  --agent cot \
+  --provider deepseek \
+  --model deepseek-chat \
+  --json-mode \
+  --max-tokens 512 \
+  --prompt-variant baseline \
+  --progress \
+  --timeout 120
+```
+
+Run one-stroke puzzles with the Euler theorem hint:
+
+```bash
+python -m minibench.cli evaluate-one-stroke \
+  --one-stroke-tasks data/one_stroke/tasks.jsonl \
+  --agent cot \
+  --provider deepseek \
+  --model deepseek-chat \
+  --json-mode \
+  --max-tokens 512 \
+  --prompt-variant euler_theorem \
+  --progress \
+  --timeout 120
+```
+
+The same two configurations are also available as YAML experiments:
+
+```bash
+./run.sh config/experiments/one_stroke.yaml
+./run.sh config/experiments/one_stroke_euler_theorem.yaml
+```
+
+### Xiangqi Evaluation Commands
+
+Run generated simple Xiangqi one-move capture-general tasks:
+
+```bash
+python -m minibench.cli evaluate-xiangqi \
+  --xiangqi-tasks data/xiangqi/tasks_generated.jsonl \
+  --agent cot \
+  --provider deepseek \
+  --model deepseek-chat \
+  --json-mode \
+  --max-tokens 256 \
+  --progress \
+  --timeout 120
+```
+
+Run CCPD endgame battle tasks against Pikafish:
+
+```bash
+python -m minibench.cli evaluate-xiangqi \
+  --xiangqi-tasks data/xiangqi/ccpd_endgames.jsonl \
+  --agent openai-compatible \
+  --provider deepseek \
+  --model deepseek-chat \
+  --json-mode \
+  --max-tokens 256 \
+  --pikafish-path /path/to/Pikafish/src/pikafish \
+  --pikafish-eval-file /path/to/Pikafish/src/pikafish.nnue \
+  --pikafish-depth 8 \
+  --progress \
+  --timeout 120
+```
+
+To score every agent move with Pikafish, add:
+
+```bash
+--score-agent-moves --score-depth 4
+```
 
 ### Adding A New Task Family
 

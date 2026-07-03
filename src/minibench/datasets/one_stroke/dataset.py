@@ -14,6 +14,8 @@ class OneStrokeTask:
     edges: tuple[tuple[str, str], ...]
     start: str | None
     end: str | None
+    solution_exists: bool
+    solution_path: tuple[str, ...] | None
     tags: tuple[str, ...]
 
 
@@ -35,6 +37,36 @@ def _optional_vertex(raw: dict[str, Any], key: str, vertices: set[str]) -> str |
     if not isinstance(value, str) or value not in vertices:
         raise ValueError(f"{raw.get('id', '<unknown>')}: {key} must be a known vertex")
     return value
+
+
+def _optional_solution_path(
+    raw: dict[str, Any],
+    vertices: set[str],
+) -> tuple[str, ...] | None:
+    value = raw.get("solution_path")
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(
+            f"{raw.get('id', '<unknown>')}: solution_path must be a list of strings"
+        )
+    unknown = sorted(set(value) - vertices)
+    if unknown:
+        raise ValueError(
+            f"{raw.get('id', '<unknown>')}: solution_path references unknown vertices "
+            f"{', '.join(unknown)}"
+        )
+    return tuple(value)
+
+
+def has_one_stroke_solution(
+    vertices: tuple[str, ...],
+    edges: tuple[tuple[str, str], ...],
+    *,
+    start: str | None = None,
+    end: str | None = None,
+) -> bool:
+    return _has_euler_trail(vertices, edges, start=start, end=end)
 
 
 def _has_euler_trail(
@@ -123,8 +155,37 @@ def one_stroke_task_from_dict(raw: dict[str, Any]) -> OneStrokeTask:
     edge_tuple = tuple(edges)
     start = _optional_vertex(raw, "start", vertex_set)
     end = _optional_vertex(raw, "end", vertex_set)
-    if not _has_euler_trail(vertices, edge_tuple, start=start, end=end):
+
+    solution_exists = raw.get("solution_exists", True)
+    if not isinstance(solution_exists, bool):
+        raise ValueError(f"{raw['id']}: solution_exists must be true or false")
+
+    actual_solution_exists = has_one_stroke_solution(
+        vertices,
+        edge_tuple,
+        start=start,
+        end=end,
+    )
+    if solution_exists and not actual_solution_exists:
         raise ValueError(f"{raw['id']}: graph has no one-stroke solution")
+    if not solution_exists and actual_solution_exists:
+        raise ValueError(
+            f"{raw['id']}: marked solution_exists=false but graph has a one-stroke solution"
+        )
+
+    solution_path = _optional_solution_path(raw, vertex_set)
+    if solution_path is not None:
+        if not solution_exists:
+            raise ValueError(
+                f"{raw['id']}: solution_path must be null when solution_exists=false"
+            )
+        _validate_solution_path(
+            raw["id"],
+            edge_tuple,
+            solution_path,
+            start=start,
+            end=end,
+        )
 
     return OneStrokeTask(
         id=raw["id"],
@@ -132,8 +193,39 @@ def one_stroke_task_from_dict(raw: dict[str, Any]) -> OneStrokeTask:
         edges=edge_tuple,
         start=start,
         end=end,
+        solution_exists=solution_exists,
+        solution_path=solution_path,
         tags=_require_string_list(raw, "tags"),
     )
+
+
+def _validate_solution_path(
+    task_id: str,
+    edges: tuple[tuple[str, str], ...],
+    path: tuple[str, ...],
+    *,
+    start: str | None,
+    end: str | None,
+) -> None:
+    expected_length = len(edges) + 1
+    if len(path) != expected_length:
+        raise ValueError(
+            f"{task_id}: solution_path length must be {expected_length}, got {len(path)}"
+        )
+    if start is not None and path[0] != start:
+        raise ValueError(f"{task_id}: solution_path does not start at {start}")
+    if end is not None and path[-1] != end:
+        raise ValueError(f"{task_id}: solution_path does not end at {end}")
+
+    available_edges = Counter(_canonical_edge(edge) for edge in edges)
+    used_edges = Counter(_canonical_edge(edge) for edge in zip(path, path[1:]))
+    if used_edges != available_edges:
+        raise ValueError(f"{task_id}: solution_path does not use every edge once")
+
+
+def _canonical_edge(edge: tuple[str, str]) -> tuple[str, str]:
+    a, b = edge
+    return (a, b) if a <= b else (b, a)
 
 
 def load_one_stroke_tasks(path: str | Path | None = None) -> list[OneStrokeTask]:

@@ -46,6 +46,58 @@ class PikafishChoice:
     info_lines: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class PikafishAnalysis:
+    fen: str
+    bestmove: str
+    score_kind: str
+    score: int
+    depth: int | None
+    pv: tuple[str, ...]
+    info_lines: tuple[str, ...]
+
+
+def parse_pikafish_analysis(
+    fen: str,
+    bestmove: str,
+    info_lines: Sequence[str],
+) -> PikafishAnalysis:
+    """Parse the final UCI info score emitted by Pikafish."""
+    score_kind: str | None = None
+    score: int | None = None
+    depth: int | None = None
+    pv: tuple[str, ...] = ()
+
+    for line in info_lines:
+        score_match = re.search(r"\bscore\s+(cp|mate)\s+(-?\d+)\b", line)
+        if score_match:
+            score_kind = score_match.group(1)
+            score = int(score_match.group(2))
+
+        depth_match = re.search(r"\bdepth\s+(\d+)\b", line)
+        if depth_match:
+            depth = int(depth_match.group(1))
+
+        pv_match = re.search(r"\bpv\s+(.+)$", line)
+        if pv_match:
+            pv = tuple(pv_match.group(1).split())
+
+    if score_kind is None or score is None:
+        tail = "\n".join(tuple(info_lines)[-8:])
+        detail = f":\n{tail}" if tail else ""
+        raise PikafishError(f"Pikafish did not return a parseable score{detail}")
+
+    return PikafishAnalysis(
+        fen=fen,
+        bestmove=bestmove,
+        score_kind=score_kind,
+        score=score,
+        depth=depth,
+        pv=pv,
+        info_lines=tuple(info_lines),
+    )
+
+
 def board_to_pikafish_fen(
     board: Sequence[Sequence[int]],
     *,
@@ -308,6 +360,20 @@ class PikafishEngine:
 
         return parts[1], tuple(line for line in lines if line.startswith("info "))
 
+    def analyze_fen(
+        self,
+        fen: str,
+        *,
+        depth: int | None = 8,
+        movetime_ms: int | None = None,
+    ) -> PikafishAnalysis:
+        bestmove, info_lines = self.bestmove_for_fen(
+            fen,
+            depth=depth,
+            movetime_ms=movetime_ms,
+        )
+        return parse_pikafish_analysis(fen, bestmove, info_lines)
+
     def close(self) -> None:
         process = self._process
         if process is None:
@@ -400,7 +466,10 @@ class PikafishEngine:
 
     def _path_for_engine(self, path: Path) -> str:
         try:
-            if path.resolve().parent == self._executable_path.resolve().parent:
+            if (
+                self._executable_path.suffix.lower() != ".exe"
+                and path.resolve().parent == self._executable_path.resolve().parent
+            ):
                 return path.name
         except OSError:
             pass

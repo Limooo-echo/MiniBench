@@ -1,9 +1,10 @@
 """MiniBench external-opponent wrapper for akochan.
 
 akochan is a C++ Riichi Mahjong AI that ships its strategy parameters in the
-repository's params/ directory. This wrapper starts akochan's mjai client for
-each MiniBench decision, feeds it the masked mjai event history, and maps the
-reply back to MiniBench's action schema.
+repository's params/ directory. For solo scorer requests, this wrapper keeps one
+akochan mjai client alive per MiniBench task and feeds only the newly appended
+mjai events on later decisions. Other request types use the conservative
+one-client-per-decision path.
 
 Configuration:
     AKOCHAN_HOME=/path/to/akochan
@@ -29,13 +30,125 @@ from typing import Any
 
 
 def main() -> int:
-    for line in sys.stdin:
-        if not line.strip():
-            continue
-        request = json.loads(line)
-        action = choose_with_akochan(request)
-        print(json.dumps(action, ensure_ascii=False), flush=True)
+    session: AkochanSession | None = None
+    try:
+        for line in sys.stdin:
+            if not line.strip():
+                continue
+            request = json.loads(line)
+            if _uses_persistent_session(request):
+                key = _session_key(request)
+                if session is None or session.key != key or not session.is_alive():
+                    if session is not None:
+                        session.close()
+                    session = AkochanSession(request)
+                try:
+                    action = session.choose(request)
+                except Exception:
+                    session.close()
+                    session = AkochanSession(request)
+                    action = session.choose(request)
+            else:
+                if session is not None:
+                    session.close()
+                    session = None
+                action = choose_with_akochan(request)
+            print(json.dumps(action, ensure_ascii=False), flush=True)
+    finally:
+        if session is not None:
+            session.close()
     return 0
+
+
+class AkochanSession:
+    def __init__(self, request: dict[str, Any]):
+        self.key = _session_key(request)
+        self.timeout = float(os.environ.get("AKOCHAN_TIMEOUT", "30"))
+        self.events_sent = 0
+        self.conn: socket.socket | None = None
+        self.process: subprocess.Popen[str] | None = None
+        self._start()
+
+    def _start(self) -> None:
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(("127.0.0.1", 0))
+            server.listen(1)
+            server.settimeout(self.timeout)
+            port = server.getsockname()[1]
+
+            self.process = subprocess.Popen(
+                _akochan_command(port),
+                cwd=str(_akochan_home()),
+                env=_akochan_env(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            self.conn, _addr = server.accept()
+            self.conn.settimeout(self.timeout)
+            _send_event(self.conn, {"type": "hello"})
+            _recv_response(self.conn)
+        except Exception:
+            self.close()
+            raise
+        finally:
+            server.close()
+
+    def is_alive(self) -> bool:
+        return self.process is not None and self.process.poll() is None and self.conn is not None
+
+    def choose(self, request: dict[str, Any]) -> dict[str, object]:
+        legal_actions = request.get("legal_actions")
+        if not isinstance(legal_actions, list) or not legal_actions:
+            raise RuntimeError("request is missing legal_actions")
+        if self.conn is None:
+            raise RuntimeError("akochan session socket is closed")
+
+        events = _prepare_events(request)
+        if len(events) < self.events_sent:
+            raise RuntimeError("akochan session event history went backwards")
+        if len(events) == self.events_sent:
+            raise RuntimeError("akochan session received no new mjai events")
+
+        responses: list[dict[str, Any]] = []
+        for index in range(self.events_sent, len(events)):
+            outgoing = dict(events[index])
+            if index == len(events) - 1 and request.get("decision") == "call":
+                outgoing["possible_actions"] = _possible_actions(request)
+
+            _send_event(self.conn, outgoing)
+            response = _recv_response(self.conn)
+            self.events_sent = index + 1
+            if index != len(events) - 1:
+                continue
+
+            responses.append(response)
+            if response.get("type") == "reach":
+                _send_event(self.conn, response)
+                responses.append(_recv_response(self.conn))
+            break
+
+        action = _select_legal_action(responses, request)
+        if action is not None:
+            return action
+        return _fallback_legal_action(legal_actions)
+
+    def close(self) -> None:
+        conn = self.conn
+        self.conn = None
+        if conn is not None:
+            try:
+                conn.close()
+            except OSError:
+                pass
+        process = self.process
+        self.process = None
+        if process is not None:
+            _stop_process(process)
 
 
 def choose_with_akochan(request: dict[str, Any]) -> dict[str, object]:
@@ -86,6 +199,16 @@ def choose_with_akochan(request: dict[str, Any]) -> dict[str, object]:
     # locally simplified legal-action surface, e.g. hora in a state where
     # MiniBench did not expose a win action.
     return _fallback_legal_action(legal_actions)
+
+
+def _uses_persistent_session(request: dict[str, Any]) -> bool:
+    return request.get("protocol") == "minibench-mahjong-solo-v1"
+
+
+def _session_key(request: dict[str, Any]) -> tuple[str, int]:
+    task_id = str(request.get("task_id") or request.get("protocol") or "unknown")
+    seat = int(request.get("seat", 0))
+    return task_id, seat
 
 
 def _drive_mjai_session(
@@ -289,6 +412,15 @@ def _select_legal_action(
         matched = _match_legal_action(action, legal_actions)
         if matched is not None:
             return matched
+        if action.get("action") == "riichi":
+            discard_action = {
+                "action": "discard",
+                "tile": action.get("tile"),
+                "discard": action.get("discard") or action.get("tile"),
+            }
+            matched = _match_legal_action(discard_action, legal_actions)
+            if matched is not None:
+                return matched
     return None
 
 
@@ -298,6 +430,8 @@ def _mjai_event_to_action(
     declared_reach: bool,
 ) -> dict[str, object] | None:
     event_type = event.get("type")
+    if event_type == "hora":
+        return {"action": "tsumo"}
     if event_type == "none":
         return {"action": "pass"}
     if event_type == "dahai":

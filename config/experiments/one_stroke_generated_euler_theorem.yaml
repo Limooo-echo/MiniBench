@@ -1,0 +1,27 @@
+task:
+  family: one_stroke
+  path: data/one_stroke/tasks_generated.jsonl
+  limit: null
+  task_ids: []
+
+agent:
+  name: openai-compatible
+  samples: 3
+  reasoning_temperature: 0.7
+  final_temperature: 0.0
+  max_reasoning_tokens: 512
+
+provider:
+  name: deepseek
+  model: deepseek-chat
+  json_mode: true
+  max_tokens: 512
+  timeout: 120
+
+evaluation:
+  prompt_variant: euler_theorem
+  show_progress: true
+
+run:
+  output_dir: runs
+  run_name: null

@@ -5,8 +5,9 @@ from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 import re
+import sys
 from time import strftime
-from typing import Any
+from typing import Any, TextIO
 
 from minibench.core.agent import Agent
 from minibench.datasets.one_stroke.dataset import OneStrokeTask
@@ -16,6 +17,8 @@ from minibench.datasets.one_stroke.prompting import build_one_stroke_prompt
 @dataclass(frozen=True)
 class OneStrokeInstanceResult:
     task_id: str
+    prompt_variant: str
+    solution_exists: bool
     success: bool
     score: float
     raw_output: str
@@ -34,6 +37,19 @@ def extract_path(output: str) -> list[str] | None:
     if not isinstance(path, list) or not all(isinstance(item, str) for item in path):
         return None
     return path
+
+
+def extract_no_solution(output: str) -> bool:
+    payload = _parse_json_object(output)
+    if payload is None:
+        return False
+    if payload.get("solvable") is False:
+        return True
+    if payload.get("solution_exists") is False:
+        return True
+    if payload.get("no_solution") is True:
+        return True
+    return False
 
 
 def validate_one_stroke_path(
@@ -84,13 +100,51 @@ def validate_one_stroke_path(
 def evaluate_one_stroke_tasks(
     tasks: list[OneStrokeTask],
     agent: Agent,
+    *,
+    prompt_variant: str = "baseline",
+    show_progress: bool = False,
+    progress_stream: TextIO | None = None,
 ) -> list[OneStrokeInstanceResult]:
     results: list[OneStrokeInstanceResult] = []
-    for task in tasks:
-        prompt = build_one_stroke_prompt(task)
+    if show_progress and progress_stream is None:
+        progress_stream = sys.stderr
+
+    total = len(tasks)
+    for index, task in enumerate(tasks, start=1):
+        if show_progress and progress_stream is not None:
+            _write_progress(progress_stream, index, total, task.id)
+
+        prompt = build_one_stroke_prompt(task, prompt_variant=prompt_variant)
         raw_output = agent.generate(prompt, task)
         path = extract_path(raw_output)
-        if path is None:
+        no_solution = extract_no_solution(raw_output)
+
+        if not task.solution_exists:
+            if no_solution:
+                success = True
+                score = 1.0
+                path = []
+                reasons = ["correct_no_solution"]
+            elif path is None:
+                success = False
+                score = 0.0
+                path = []
+                reasons = ["no_path_or_no_solution_extracted"]
+            else:
+                path_success, path_reasons = validate_one_stroke_path(task, path)
+                success = False
+                score = 0.0
+                reasons = (
+                    ["task_marked_unsolvable_but_valid_path_found"]
+                    if path_success
+                    else ["claimed_path_for_unsolvable", *path_reasons]
+                )
+        elif no_solution:
+            success = False
+            score = 0.0
+            path = []
+            reasons = ["incorrect_no_solution_claim"]
+        elif path is None:
             success = False
             score = 0.0
             path = []
@@ -103,6 +157,8 @@ def evaluate_one_stroke_tasks(
         results.append(
             OneStrokeInstanceResult(
                 task_id=task.id,
+                prompt_variant=prompt_variant,
+                solution_exists=task.solution_exists,
                 success=success,
                 score=score,
                 raw_output=raw_output,
@@ -111,6 +167,10 @@ def evaluate_one_stroke_tasks(
                 tags=task.tags,
             )
         )
+    if show_progress and progress_stream is not None:
+        _write_progress(progress_stream, total, total, "done")
+        progress_stream.write("\n")
+        progress_stream.flush()
     return results
 
 
@@ -163,6 +223,22 @@ def write_one_stroke_run(
 def _canonical_edge(edge: tuple[str, str]) -> tuple[str, str]:
     a, b = edge
     return (a, b) if a <= b else (b, a)
+
+
+def _write_progress(
+    stream: TextIO,
+    current: int,
+    total: int,
+    label: str,
+) -> None:
+    width = 24
+    filled = width if total == 0 else int(width * current / total)
+    short_label = label if len(label) <= 40 else f"{label[:37]}..."
+    stream.write(
+        f"\rone-stroke [{'#' * filled}{'-' * (width - filled)}] "
+        f"{current}/{total} {short_label:<40}"
+    )
+    stream.flush()
 
 
 def _parse_json_object(output: str) -> dict[str, Any] | None:

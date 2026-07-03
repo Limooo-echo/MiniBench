@@ -18,6 +18,10 @@ provider:
   max_tokens: 512
   timeout: 120
 
+evaluation:
+  prompt_variant: baseline
+  show_progress: true
+
 run:
   output_dir: runs
   run_name: null
