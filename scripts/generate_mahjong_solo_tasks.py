@@ -21,6 +21,36 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Keep only tasks that the local shanten/ukeire oracle can tsumo.",
     )
+    parser.add_argument(
+        "--max-initial-shanten",
+        type=int,
+        default=None,
+        help="Keep tasks whose random initial hand is at or below this shanten.",
+    )
+    parser.add_argument(
+        "--min-initial-ukeire",
+        type=int,
+        default=0,
+        help="Keep tasks whose initial hand has at least this many effective tiles.",
+    )
+    parser.add_argument(
+        "--max-oracle-win-turn",
+        type=int,
+        default=None,
+        help="Keep tasks whose hidden local oracle wins by this draw number.",
+    )
+    parser.add_argument(
+        "--greedy-simulations",
+        type=int,
+        default=0,
+        help="Randomly resolve tied greedy discards this many times per candidate.",
+    )
+    parser.add_argument(
+        "--min-greedy-win-rate",
+        type=float,
+        default=0.0,
+        help="Minimum win rate required across the tied-discard simulations.",
+    )
     parser.add_argument("--max-attempts", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
     return parser
@@ -35,6 +65,11 @@ def main(argv: list[str] | None = None) -> int:
         prefix=args.prefix,
         max_draws=args.max_draws,
         require_oracle_win=args.require_oracle_win,
+        max_initial_shanten=args.max_initial_shanten,
+        min_initial_ukeire=args.min_initial_ukeire,
+        max_oracle_win_turn=args.max_oracle_win_turn,
+        greedy_simulations=args.greedy_simulations,
+        min_greedy_win_rate=args.min_greedy_win_rate,
         max_attempts=args.max_attempts,
         overwrite=args.overwrite,
     )

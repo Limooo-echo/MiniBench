@@ -7,6 +7,23 @@ from minibench.cli import build_parser
 
 
 class StaticAgentCliTests(unittest.TestCase):
+    def test_provider_temperature_defaults_are_zero(self):
+        args = build_parser().parse_args(["evaluate-mahjong", "--agent", "cot"])
+
+        self.assertEqual(args.temperature, 0.0)
+        self.assertEqual(args.reasoning_temperature, 0.0)
+        self.assertEqual(args.final_temperature, 0.0)
+
+    def test_static_mahjong_accepts_progress_flag(self):
+        args = build_parser().parse_args(["evaluate-mahjong", "--progress"])
+
+        self.assertTrue(args.progress)
+
+    def test_static_mahjong_uses_compact_default_output_budget(self):
+        args = build_parser().parse_args(["evaluate-mahjong"])
+
+        self.assertEqual(args.max_tokens, 512)
+
     def test_static_commands_accept_reasoning_agents(self):
         parser = build_parser()
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from minibench.core.agent import Agent, ChatClient, ReasoningConfig
+from minibench.core.agent import Agent, ChatClient, ReasoningConfig, task_image_data_url
 from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT, direct_prompt
 from minibench.datasets.multiple_choice.dataset import Task
 
@@ -13,10 +13,12 @@ class DirectAgent(Agent):
         self.config = config or ReasoningConfig()
 
     def generate(self, prompt: str, task: Task) -> str:
+        image_data_url = task_image_data_url(task)
         return self.client.complete(
             direct_prompt(prompt),
             system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
             temperature=self.config.final_temperature,
             max_tokens=self.config.final_max_tokens,
             json_mode=True,
+            image_data_url=image_data_url,
         )

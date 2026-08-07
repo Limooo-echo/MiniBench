@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import http.client
 import json
 import os
+import time
 from typing import Any
 import urllib.error
 import urllib.request
@@ -47,6 +49,10 @@ PROVIDERS = {
 }
 
 
+MAX_TRANSIENT_ATTEMPTS = 3
+TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+
 class OpenAICompatibleAgent(Agent):
     name = "openai-compatible"
 
@@ -88,7 +94,17 @@ class OpenAICompatibleAgent(Agent):
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool | None = None,
+        image_data_url: str | None = None,
     ) -> dict[str, object]:
+        user_content: object = prompt
+        if image_data_url is not None:
+            user_content = [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_data_url, "detail": "high"},
+                },
+            ]
         payload: dict[str, object] = {
             "model": self.model,
             "messages": [
@@ -96,7 +112,7 @@ class OpenAICompatibleAgent(Agent):
                     "role": "system",
                     "content": self._system_prompt(system_prompt),
                 },
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_content},
             ],
             "temperature": self.temperature if temperature is None else temperature,
             "max_tokens": self.max_tokens if max_tokens is None else max_tokens,
@@ -126,6 +142,7 @@ class OpenAICompatibleAgent(Agent):
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool | None = None,
+        image_data_url: str | None = None,
     ) -> str:
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
@@ -143,6 +160,7 @@ class OpenAICompatibleAgent(Agent):
                     temperature=temperature,
                     max_tokens=max_tokens,
                     json_mode=json_mode,
+                    image_data_url=image_data_url,
                 )
             ).encode("utf-8"),
             headers={
@@ -151,16 +169,44 @@ class OpenAICompatibleAgent(Agent):
             },
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            error_body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"{self.name} request failed with HTTP {exc.code}: {error_body}"
-            ) from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"{self.name} request failed: {exc.reason}") from exc
+        for attempt in range(1, MAX_TRANSIENT_ATTEMPTS + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    raw = response.read().decode("utf-8")
+                break
+            except urllib.error.HTTPError as exc:
+                error_body = exc.read().decode("utf-8", errors="replace")
+                if (
+                    exc.code in TRANSIENT_HTTP_STATUS_CODES
+                    and attempt < MAX_TRANSIENT_ATTEMPTS
+                ):
+                    time.sleep(2 ** (attempt - 1))
+                    continue
+                raise RuntimeError(
+                    f"{self.name} request failed with HTTP {exc.code}: {error_body}"
+                ) from exc
+            except TimeoutError as exc:
+                raise RuntimeError(
+                    f"{self.name} request timed out after {self.timeout} seconds "
+                    f"(model={self.model}). Increase --timeout or use a faster "
+                    "agent/model."
+                ) from exc
+            except (
+                http.client.IncompleteRead,
+                http.client.RemoteDisconnected,
+                ConnectionAbortedError,
+                ConnectionResetError,
+                BrokenPipeError,
+                urllib.error.URLError,
+            ) as exc:
+                if attempt < MAX_TRANSIENT_ATTEMPTS:
+                    time.sleep(2 ** (attempt - 1))
+                    continue
+                detail = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+                raise RuntimeError(
+                    f"{self.name} request failed after {MAX_TRANSIENT_ATTEMPTS} "
+                    f"attempts (model={self.model}): {detail}"
+                ) from exc
 
         payload = json.loads(raw)
         try:
@@ -186,7 +232,12 @@ class OpenAICompatibleAgent(Agent):
         return content
 
     def generate(self, prompt: str, task: Any) -> str:
-        return self.complete(prompt)
+        from minibench.core.agent import task_image_data_url
+
+        return self.complete(
+            prompt,
+            image_data_url=task_image_data_url(task),
+        )
 
 
 def _content_part_to_text(part: object) -> str:

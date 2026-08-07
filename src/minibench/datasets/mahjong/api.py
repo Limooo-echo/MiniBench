@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
-import random
+from collections import Counter
 
 try:
     from mahjong.hand_calculating.hand import HandCalculator
     from mahjong.hand_calculating.hand_config import HandConfig, OptionalRules
-    from mahjong.meld import Meld
     from mahjong.shanten import Shanten
 except ImportError as exc:  # pragma: no cover - exercised only without dependency.
     HandCalculator = None  # type: ignore[assignment]
     HandConfig = None  # type: ignore[assignment]
-    Meld = None  # type: ignore[assignment]
     OptionalRules = None  # type: ignore[assignment]
     Shanten = None  # type: ignore[assignment]
     _MAHJONG_IMPORT_ERROR = exc
@@ -50,12 +46,58 @@ INDEX_TO_TILE = {
     33: "C",
 }
 
+CHINESE_NUMBER_TO_DIGIT = {
+    "\u4e00": "1",
+    "\u4e8c": "2",
+    "\u4e09": "3",
+    "\u56db": "4",
+    "\u4e94": "5",
+    "\u516d": "6",
+    "\u4e03": "7",
+    "\u516b": "8",
+    "\u4e5d": "9",
+}
+
+CHINESE_SUIT_TO_CODE = {
+    "\u842c": "m",
+    "\u4e07": "m",
+    "\u7b52": "p",
+    "\u9905": "p",
+    "\u997c": "p",
+    "\u689d": "s",
+    "\u6761": "s",
+    "\u7d22": "s",
+}
+
+CHINESE_HONOR_TO_CODE = {
+    "\u6771": "E",
+    "\u4e1c": "E",
+    "\u5357": "S",
+    "\u897f": "W",
+    "\u5317": "N",
+    "\u767d": "P",
+    "\u767d\u677f": "P",
+    "\u767c": "F",
+    "\u53d1": "F",
+    "\u4e2d": "C",
+    "\u7d05\u4e2d": "C",
+    "\u7ea2\u4e2d": "C",
+}
+
 
 def normalize_tile(tile: str) -> str:
     value = tile.strip()
     upper = value.upper()
     if upper in HONOR_TO_INDEX:
         return INDEX_TO_TILE[HONOR_TO_INDEX[upper]]
+    if value in CHINESE_HONOR_TO_CODE:
+        return CHINESE_HONOR_TO_CODE[value]
+
+    if len(value) == 2:
+        chinese_number = CHINESE_NUMBER_TO_DIGIT.get(value[0])
+        chinese_suit = CHINESE_SUIT_TO_CODE.get(value[1])
+        if chinese_number is not None and chinese_suit is not None:
+            return f"{chinese_number}{chinese_suit}"
 
     if len(value) != 2:
         raise ValueError(f"invalid tile notation: {tile!r}")
@@ -94,16 +136,6 @@ def full_tile_wall() -> list[str]:
         for index in range(34)
         for _copy in range(4)
     ]
-
-
-def deal_table(seed: int) -> tuple[list[list[str]], list[str]]:
-    wall = full_tile_wall()
-    random.Random(seed).shuffle(wall)
-    hands = [[] for _seat in range(4)]
-    for _round in range(13):
-        for seat in range(4):
-            hands[seat].append(wall.pop(0))
-    return hands, wall
 
 
 def normalize_tiles(tiles: list[str] | tuple[str, ...]) -> tuple[str, ...]:
@@ -164,18 +196,98 @@ def winning_tiles(tiles: list[str] | tuple[str, ...]) -> tuple[str, ...]:
     return tuple(waits)
 
 
-def tenpai_discards(tiles: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+def waits_by_discard(
+    tiles: list[str] | tuple[str, ...],
+) -> dict[str, tuple[str, ...]]:
+    """Return every tenpai discard and its distinct winning tile types."""
     normalized = normalize_tiles(tiles)
     if len(normalized) % 3 != 2:
         raise ValueError("discard tasks require a 3n+2 hand, usually 14 tiles")
 
-    discards: list[str] = []
+    result: dict[str, tuple[str, ...]] = {}
     for tile in sorted(set(normalized), key=tile_to_index):
         remaining = list(normalized)
         remaining.remove(tile)
-        if calculate_shanten(remaining) == 0:
-            discards.append(tile)
-    return tuple(discards)
+        waits = winning_tiles(remaining)
+        if waits:
+            result[tile] = waits
+    return result
+
+
+def max_wait_discards(tiles: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    """Return all discards tied for the most distinct winning tile types."""
+    discard_waits = waits_by_discard(tiles)
+    if not discard_waits:
+        return ()
+    maximum = max(len(waits) for waits in discard_waits.values())
+    return tuple(
+        discard
+        for discard, waits in discard_waits.items()
+        if len(waits) == maximum
+    )
+
+
+def live_wait_counts(
+    tiles: list[str] | tuple[str, ...],
+    visible_tiles: list[str] | tuple[str, ...] = (),
+    *,
+    additional_visible: list[str] | tuple[str, ...] = (),
+) -> dict[str, int]:
+    """Return structurally winning tiles and their remaining live copies."""
+    normalized = normalize_tiles(tiles)
+    visible = tuple(normalize_tile(tile) for tile in visible_tiles)
+    additional = tuple(normalize_tile(tile) for tile in additional_visible)
+    known_counts = Counter((*normalized, *visible, *additional))
+    overfull = sorted(tile for tile, count in known_counts.items() if count > 4)
+    if overfull:
+        raise ValueError(
+            "hand and visible tiles contain too many copies of: "
+            + ", ".join(overfull)
+        )
+    return {
+        tile: 4 - known_counts[tile]
+        for tile in winning_tiles(normalized)
+        if known_counts[tile] < 4
+    }
+
+
+def live_waits_by_discard(
+    tiles: list[str] | tuple[str, ...],
+    visible_tiles: list[str] | tuple[str, ...] = (),
+) -> dict[str, dict[str, int]]:
+    """Return every tenpai discard and live winning-copy counts after it."""
+    normalized = normalize_tiles(tiles)
+    if len(normalized) % 3 != 2:
+        raise ValueError("discard tasks require a 3n+2 hand, usually 14 tiles")
+
+    result: dict[str, dict[str, int]] = {}
+    for discard in sorted(set(normalized), key=tile_to_index):
+        remaining = list(normalized)
+        remaining.remove(discard)
+        waits = live_wait_counts(
+            remaining,
+            visible_tiles,
+            additional_visible=(discard,),
+        )
+        if waits:
+            result[discard] = waits
+    return result
+
+
+def max_ukeire_discards(
+    tiles: list[str] | tuple[str, ...],
+    visible_tiles: list[str] | tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Return discards tied for the most live winning tile copies."""
+    discard_waits = live_waits_by_discard(tiles, visible_tiles)
+    if not discard_waits:
+        return ()
+    maximum = max(sum(waits.values()) for waits in discard_waits.values())
+    return tuple(
+        discard
+        for discard, waits in discard_waits.items()
+        if sum(waits.values()) == maximum
+    )
 
 
 def score_closed_hand(
@@ -189,7 +301,6 @@ def score_closed_hand(
     is_haitei: bool = False,
     is_houtei: bool = False,
     is_rinshan: bool = False,
-    melds: Sequence[Mapping[str, object]] | None = None,
 ) -> dict[str, object] | None:
     _require_mahjong()
     normalized = list(normalize_tiles(tiles))
@@ -198,12 +309,10 @@ def score_closed_hand(
         raise ValueError("win_tile must be included in tiles")
 
     tiles_136 = tiles_to_136_array(normalized)
-    meld_objects, used_in_melds = _build_meld_objects(melds or [], normalized, tiles_136)
-    win_tile_136 = _choose_win_tile_id(
-        normalized,
-        tiles_136,
-        normalized_win_tile,
-        used_in_melds,
+    win_tile_136 = next(
+        tile_id
+        for tile, tile_id in zip(normalized, tiles_136)
+        if tile == normalized_win_tile
     )
     config = HandConfig(  # type: ignore[operator]
         is_tsumo=is_tsumo,
@@ -218,7 +327,6 @@ def score_closed_hand(
     result = HandCalculator().estimate_hand_value(  # type: ignore[operator]
         tiles_136,
         win_tile_136,
-        melds=meld_objects,
         config=config,
     )
     if result.error:
@@ -231,78 +339,6 @@ def score_closed_hand(
         "cost": result.cost,
         "yaku": [str(yaku) for yaku in result.yaku],
     }
-
-
-def _build_meld_objects(
-    melds: Sequence[Mapping[str, object]],
-    normalized_tiles: list[str],
-    tiles_136: list[int],
-) -> tuple[list[object], set[int]]:
-    pools: dict[str, list[int]] = defaultdict(list)
-    for tile, tile_id in zip(normalized_tiles, tiles_136):
-        pools[tile].append(tile_id)
-
-    meld_objects: list[object] = []
-    used: set[int] = set()
-    for meld in melds:
-        meld_type = meld.get("type") or meld.get("action")
-        if not isinstance(meld_type, str):
-            raise ValueError("meld type must be a string")
-        meld_type = meld_type.lower()
-        if meld_type not in {"chi", "pon", "kan"}:
-            raise ValueError(f"unsupported meld type: {meld_type}")
-
-        raw_tiles = meld.get("tiles")
-        if not isinstance(raw_tiles, Sequence) or isinstance(raw_tiles, (str, bytes)):
-            raise ValueError("meld tiles must be a tile list")
-        meld_tiles = [normalize_tile(str(tile)) for tile in raw_tiles]
-
-        raw_called_tile = meld.get("called_tile")
-        called_tile = normalize_tile(str(raw_called_tile)) if raw_called_tile else meld_tiles[0]
-
-        meld_tile_ids: list[int] = []
-        for tile in meld_tiles:
-            try:
-                tile_id = pools[tile].pop(0)
-            except IndexError as exc:
-                raise ValueError(f"meld tile {tile} is missing from hand tiles") from exc
-            meld_tile_ids.append(tile_id)
-            used.add(tile_id)
-
-        called_tile_id = next(
-            (tile_id for tile, tile_id in zip(meld_tiles, meld_tile_ids) if tile == called_tile),
-            meld_tile_ids[0],
-        )
-        meld_objects.append(
-            Meld(  # type: ignore[operator]
-                meld_type=meld_type,
-                tiles=meld_tile_ids,
-                opened=bool(meld.get("opened", True)),
-                called_tile=called_tile_id,
-                who=_optional_int(meld.get("who")),
-                from_who=_optional_int(meld.get("from_who")),
-            )
-        )
-    return meld_objects, used
-
-
-def _choose_win_tile_id(
-    normalized_tiles: list[str],
-    tiles_136: list[int],
-    win_tile: str,
-    used_in_melds: set[int],
-) -> int:
-    for tile, tile_id in zip(normalized_tiles, tiles_136):
-        if tile == win_tile and tile_id not in used_in_melds:
-            return tile_id
-    return tiles_136[normalized_tiles.index(win_tile)]
-
-
-def _optional_int(value: object) -> int | None:
-    if value is None:
-        return None
-    return int(value)
-
 
 def _require_mahjong() -> None:
     if _MAHJONG_IMPORT_ERROR is not None:

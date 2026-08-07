@@ -5,8 +5,7 @@ MiniBench currently has several task families:
 - Multiple-choice tasks in contributor-specific files such as `data/tasks-limo.jsonl`.
 - Xiangqi environment tasks in `data/xiangqi_tasks.jsonl` and `data/xiangqi_hard_tasks.jsonl`.
 - One-stroke graph puzzles in `data/one_stroke_tasks.jsonl`.
-- Riichi Mahjong tile-shape tasks in `data/mahjong_tasks.jsonl`.
-- Local Riichi Mahjong v1 table tasks in `data/mahjong_riichi_tasks.jsonl`.
+- Riichi Mahjong waiting-tile tasks in `data/mahjong/tasks.jsonl`.
 
 ## Multiple-Choice Tasks
 
@@ -97,15 +96,15 @@ package. They currently test tile-shape reasoning, not full yaku or score
 calculation.
 
 ```json
-{"id":"mj-example-009","goal":"winning_tiles","hand":["2m","3m","4p","5p","6p","7s","8s","9s","E","E","E","5m","5m"],"tags":["mahjong","riichi","goal:winning_tiles","difficulty:easy"]}
+{"id":"mj-easy-wait-001","goal":"winning_tiles","hand":["3p","3p","2s","3s","4s","4s","5s","6s","7s","9s","W","W","W"],"tags":["easy","task:winning_tiles"]}
 ```
 
 Required fields:
 
 - `id`: unique task id. Use `mj-...`.
-- `goal`: `winning_tiles` or `tenpai_discard`.
+- `goal`: `winning_tiles`, `max_wait_discard`, or `max_ukeire_discard`.
 - `hand`: tile list.
-- `tags`: normalized tags.
+- `tags`: exactly one difficulty tag followed by the matching task-type tag.
 
 Tile notation:
 
@@ -115,59 +114,65 @@ Tile notation:
 - `E`, `S`, `W`, `N`: winds.
 - `P`, `F`, `C`: white, green, and red dragons.
 
-For `winning_tiles`, the hand should have 13 tiles and the agent must return
-`{"winning_tiles":["3m","6m"]}`. For `tenpai_discard`, the hand should have 14
-tiles and the agent must return `{"discard":"5m"}`. The loader validates that
-each task has at least one correct answer.
+For `winning_tiles`, the hand has 13 tiles and the agent returns the complete
+`winning_tiles` list. For `max_wait_discard`, the hand has 14 tiles and the
+agent returns one best `discard`. Tied best discards are all accepted. To keep
+this task different from a plain tenpai-discard question, author each hand with
+at least two tenpai discards whose winning-tile counts differ. The loader
+validates that each task has at least one correct answer.
 
-## Riichi Mahjong V1 Tasks
+Visual tasks additionally provide `visible_tiles`, `table_columns`, and an
+optional relative `image` path. Their tags end with `visual`. For
+`max_ukeire_discard`, the correct discard maximizes the total number of live
+winning copies rather than the number of distinct wait types. Each tile has
+four copies; copies in the remaining hand, `visible_tiles`, and the selected
+discard are unavailable. The loader rejects any hand/table combination that
+contains more than four physical copies of a tile.
 
-Riichi v1 tasks use a local four-player table with one LLM-controlled seat and
-three shanten-based API bots. Compared with `mahjong-table`, this path adds
-riichi declarations, chi/pon/kan calls, tsumo, ron, yaku/fu/point checks, and
-score deltas through the `mahjong` Python package.
+When `image` is present, `load_mahjong_tasks` resolves it relative to the JSONL
+file and the agent sends the raster image as an OpenAI-compatible `image_url`
+data URL. Use PNG, JPEG, WebP, or GIF and a vision-capable provider model. The
+visual prompt intentionally omits the textual tile identities.
 
-The built-in file contains seeded hands. Each task is random-looking but
-reproducible because its wall shuffle is derived from the `seed` field.
+A full flush contains numbered tiles from exactly one suit and no honors. The
+built-in matrix contains 15 tasks for each combination of goal and difficulty:
+non-full-flush is `easy`, while full-flush is `hard`.
 
-Riichi v1 writes both a strict win flag and softer per-seat benchmark scores.
-The strict `success` flag is true only when seat 0 wins. The per-seat score gives
-`1.0` to the winner, `0.25` to non-winners on another player's tsumo, `0.5` to
-all seats on a normal draw, and `0.0` to the deal-in seat on ron while uninvolved
-seats receive a rank-based survival score.
+## Mahjong Rule-Variant Tasks
+
+Rule-variant evaluation reuses ordinary single-player draw-discard tasks. Each
+source task is evaluated once under each rule channel, with the same initial
+hand, seed, fixed wall, and draw limit.
 
 ```json
-{"id":"mj-riichi-006","seed":666,"agent_seat":0,"max_draws":70,"starting_scores":[25000,25000,25000,25000],"tags":["mahjong","riichi-full-v1","four-player","difficulty:medium"]}
+{"id":"mj-solo-001","seed":12345,"initial_hand":["1m","2m","3m","4p","5p","6p","7s","8s","9s","E","E","N","N"],"wall":["C","4m"],"max_draws":2,"round_wind":"E","seat_wind":"E","tags":["mahjong","solo-draw-discard"]}
 ```
 
 Required fields:
 
-- `id`: unique task id. Use `mj-riichi-...`.
-- `seed`: integer seed for the reproducible wall shuffle.
-- `tags`: normalized tags.
+- `id`: unique task id.
+- `initial_hand`: exactly 13 concealed tiles.
+- `wall`: fixed hidden draw sequence with at least `max_draws` tiles.
+- `max_draws`: maximum number of draw-discard turns.
+- `seed`, `round_wind`, `seat_wind`, and `tags`: the same fields used by
+  ordinary Mahjong solo tasks.
 
-Optional fields:
+The loader expands each source record into eight channels: a `standard`
+baseline, each of `no_cross_suit_duplicate_sequences`, `cyclic_sequences`, and
+`red_dragon_wildcard` alone, all three two-rule combinations, and the three-rule
+combination. Every channel uses the same draw-discard loop, prompt template, and
+correction mechanism. On every turn the agent returns either
+`{"action":"tsumo"}` or a discard from its current hand. The local evaluator
+applies all rules selected for that channel simultaneously without exposing
+legality or future wall tiles in the prompt. Results label wins that are
+possible only under the modified configuration and standard wins blocked by a
+restrictive configuration.
 
-- `agent_seat`: currently expected to be `0`.
-- `max_draws`: maximum draw events before the hand is treated as a draw.
-- `starting_scores`: four integer scores, defaulting to 25000 each.
-
-Agent actions:
-
-- `{"action":"discard","tile":"5m"}`
-- `{"action":"riichi","discard":"5m"}`
-- `{"action":"kan","tile":"5m"}` on a legal closed kan turn
-
-When another player discards a tile that seat 0 can call, MiniBench prompts the
-agent separately for a call decision:
-
-- `{"action":"pass"}`
-- `{"action":"chi","tiles":["3m","4m","5m"]}`
-- `{"action":"pon","tile":"5m"}`
-- `{"action":"kan","tile":"5m"}`
-
-This v1 path does not yet implement dora, ura-dora, ippatsu, added-kan/chankan,
-multi-ron, or complete round bookkeeping.
+The CLI supports `--observation-mode full-hand` and `--observation-mode
+history-only` for all eight channels. Full-hand mode lists the current 14 tiles.
+History-only mode instead provides the initial hand, current draw, completed
+draw/discard history, cumulative discards, and remaining draw count. The
+underlying hand state and rule validator are unchanged.
 
 ## Tag Schema
 
@@ -185,14 +190,14 @@ Environment and game tasks can add task-family tags such as:
 
 - `xiangqi`
 - `one-stroke`
-- `mahjong`
-- `four-player`
-- `riichi-full-v1`
-- `riichi`
 - `euler-trail`
 - `euler-circuit`
 - `pikafish-opponent`
 - `difficulty:easy`, `difficulty:medium`, or `difficulty:hard`
+
+The static Mahjong set is the exception: use exactly `easy` or `hard` followed
+by `task:winning_tiles` or `task:max_wait_discard`. Do not add task-family,
+shape, or prefixed difficulty tags.
 
 ## Validation
 

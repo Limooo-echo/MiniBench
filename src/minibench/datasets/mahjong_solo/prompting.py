@@ -1,98 +1,140 @@
 from __future__ import annotations
 
-from minibench.datasets.mahjong.api import calculate_shanten, tile_to_index
-from minibench.datasets.mahjong_solo.dataset import MahjongSoloTask
+from typing import Protocol
+
+
+class MahjongPromptTask(Protocol):
+    initial_hand: tuple[str, ...]
+
+
+MAHJONG_SOLO_OBSERVATION_MODES = ("full-hand", "history-only")
+
+
+STANDARD_MAHJONG_RULE_TEXT = (
+    "Use ordinary closed-hand Mahjong tile-grouping logic with no rule "
+    "modification."
+)
 
 
 MAHJONG_SOLO_SYSTEM_PROMPT = (
-    "You play a single-player Riichi Mahjong draw-discard hand. Return exactly "
-    "one JSON object and no markdown. Tile notation: 1m-9m, 1p-9p, 1s-9s, "
-    "E/S/W/N winds, P white dragon, F green dragon, C red dragon. Only output "
-    "tsumo when the prompt explicitly says that tsumo is legal now."
+    "You play a single-player closed-hand Mahjong draw-discard task. "
+    "Use the selected rule configuration exactly as stated in the user prompt. "
+    "Return exactly one JSON object and no markdown or explanation."
 )
 
 
 def build_mahjong_solo_prompt(
-    task: MahjongSoloTask,
+    task: MahjongPromptTask,
     *,
     draw_number: int,
     drawn_tile: str,
     hand: list[str],
     discards: list[str],
     remaining_draws: int,
-    can_tsumo: bool,
-    winning_score: dict[str, object] | None,
+    observation_mode: str = "full-hand",
+    prior_turns: tuple[tuple[str, str], ...] = (),
+    attempt_number: int = 1,
+    max_attempts: int = 3,
+    action_feedback: tuple[str, ...] = (),
+    rule_text: str = STANDARD_MAHJONG_RULE_TEXT,
 ) -> str:
+    return build_shared_mahjong_draw_discard_prompt(
+        task,
+        draw_number=draw_number,
+        drawn_tile=drawn_tile,
+        hand=hand,
+        discards=discards,
+        remaining_draws=remaining_draws,
+        observation_mode=observation_mode,
+        prior_turns=prior_turns,
+        attempt_number=attempt_number,
+        max_attempts=max_attempts,
+        action_feedback=action_feedback,
+        rule_texts=(rule_text,),
+    )
+
+
+def build_shared_mahjong_draw_discard_prompt(
+    task: MahjongPromptTask,
+    *,
+    draw_number: int,
+    drawn_tile: str,
+    hand: list[str],
+    discards: list[str],
+    remaining_draws: int,
+    observation_mode: str,
+    prior_turns: tuple[tuple[str, str], ...],
+    attempt_number: int,
+    max_attempts: int,
+    action_feedback: tuple[str, ...],
+    rule_texts: tuple[str, ...],
+) -> str:
+    if observation_mode not in MAHJONG_SOLO_OBSERVATION_MODES:
+        raise ValueError(
+            "observation_mode must be one of: "
+            + ", ".join(MAHJONG_SOLO_OBSERVATION_MODES)
+        )
+    if not rule_texts:
+        raise ValueError("rule_texts must contain at least one rule")
+
     lines = [
-        "Play one action in this single-player Riichi Mahjong hand.",
-        "",
-        "Rules:",
-        "- You start with a concealed 13-tile hand and draw one tile each turn.",
-        "- After each draw you may tsumo only if the current 14-tile hand is a legal winning hand with yaku.",
-        "- The benchmark has already checked tsumo legality for the current hand.",
-        "- If \"Tsumo legal now\" is \"no\", outputting tsumo is illegal and fails the task.",
-        "- Otherwise discard exactly one tile from your current 14-tile hand.",
-        "- There are no calls, riichi declarations, dora, opponents, or defense in this task.",
-        "- You cannot see future wall tiles.",
-        "",
-        "Objective:",
-        "- Win by tsumo within the draw limit.",
-        "- If not currently winning, choose the discard that best advances the hand.",
-        "- Prefer the lowest shanten after discard; when shanten ties, prefer more effective tiles.",
-        "",
-        "Return one of these JSON shapes:",
+        "Play one action in this single-player closed-hand Mahjong task.",
+        "Use ordinary closed-hand Mahjong tile-grouping logic under exactly "
+        "this selected rule configuration:",
+        *(f"- {rule_text}" for rule_text in rule_texts),
     ]
-    if can_tsumo:
-        lines.append('- {"action":"tsumo"}')
+    if len(rule_texts) > 1:
+        lines.append("All listed rule modifications apply simultaneously.")
     lines.extend(
         [
-            '- {"action":"discard","tile":"5m"}',
+            "Do not introduce any other rule change.",
+            "Declare tsumo if the current 14 tiles are complete under that configuration; "
+            "otherwise discard one tile.",
+            "Future wall tiles are hidden.",
             "",
-            "Tile notation: 1m-9m, 1p-9p, 1s-9s, E/S/W/N, P/F/C.",
         ]
     )
+    if action_feedback:
+        lines.extend(
+            [
+                "The previous action was rejected. Choose another legal action "
+                "for the unchanged hand.",
+                f"Attempt {attempt_number} of {max_attempts}.",
+                "",
+            ]
+        )
     lines.extend(
         [
-            f"Task seed: {task.seed}",
-            f"Round wind: {task.round_wind}",
-            f"Seat wind: {task.seat_wind}",
+            "Return exactly one of:",
+            '- {"action":"tsumo"}',
+            '- {"action":"discard","tile":"5m"}',
+            "Tile notation: 1m-9m, 1p-9p, 1s-9s, E/S/W/N, P/F/C.",
             f"Draw number: {draw_number}",
             f"You just drew: {drawn_tile}",
-            f"Current hand ({len(hand)} tiles): {' '.join(hand)}",
-            f"Your discards: {' '.join(discards) if discards else '(none)'}",
-            f"Remaining draws after this action: {remaining_draws}",
-            f"Tsumo legal now: {'yes' if can_tsumo else 'no'}",
-            f"Legal actions now: {'tsumo or discard' if can_tsumo else 'discard only'}",
         ]
     )
-    if winning_score is not None:
-        lines.append(f"Winning hand yaku: {', '.join(str(yaku) for yaku in winning_score.get('yaku', []))}")
+    if observation_mode == "full-hand":
+        lines.append(f"Current hand ({len(hand)} tiles): {' '.join(hand)}")
     else:
-        lines.append("Current status: not a legal winning hand; do not output tsumo.")
+        lines.extend(
+            [
+                f"Initial concealed hand: {' '.join(task.initial_hand)}",
+                "Completed turn history:",
+            ]
+        )
+        if prior_turns:
+            lines.extend(
+                f"- Turn {index}: drew {draw}; discarded {discard}"
+                for index, (draw, discard) in enumerate(prior_turns, start=1)
+            )
+        else:
+            lines.append("- (none)")
+        lines.append("Reconstruct the current hand from this history.")
     lines.extend(
         [
-            "",
-            "Discard quality hints:",
-        ]
-    )
-    lines.extend(_discard_hint_lines(hand))
-    lines.extend(
-        [
-            "",
-            "Choose a legal action. Do not output explanation.",
+            f"Your cumulative discards: {' '.join(discards) if discards else '(none)'}",
+            f"Remaining draws after this action: {remaining_draws}",
+            "Return one legal action only.",
         ]
     )
     return "\n".join(lines)
-
-
-def _discard_hint_lines(hand: list[str]) -> list[str]:
-    hints: list[str] = []
-    for tile in sorted(set(hand), key=tile_to_index):
-        remaining = list(hand)
-        remaining.remove(tile)
-        try:
-            shanten = calculate_shanten(remaining)
-        except ValueError:
-            shanten = 99
-        hints.append(f"- discard {tile}: shanten {shanten}")
-    return hints

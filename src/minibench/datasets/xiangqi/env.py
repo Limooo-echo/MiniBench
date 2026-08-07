@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from gym_xiangqi.envs import XiangQiEnv
-from gym_xiangqi.constants import ALLY, ENEMY, RED, BLACK, DEAD, PIECE_CNT
+from gym_xiangqi.constants import ALLY, ENEMY, RED, DEAD, PIECE_CNT
 from gym_xiangqi.utils import action_space_to_move
 
 

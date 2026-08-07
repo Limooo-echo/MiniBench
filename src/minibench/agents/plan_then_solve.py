@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from minibench.core.agent import Agent, ChatClient, ReasoningConfig
+from minibench.core.agent import Agent, ChatClient, ReasoningConfig, task_image_data_url
 from minibench.core.prompts import (
     FINAL_ANSWER_SYSTEM_PROMPT,
     REASONING_SYSTEM_PROMPT,
@@ -19,12 +19,14 @@ class PlanThenSolveAgent(Agent):
         self.config = config or ReasoningConfig()
 
     def generate(self, prompt: str, task: Task) -> str:
+        image_data_url = task_image_data_url(task)
         plan = self.client.complete(
             plan_prompt(prompt),
             system_prompt=REASONING_SYSTEM_PROMPT,
             temperature=self.config.reasoning_temperature,
             max_tokens=self.config.max_reasoning_tokens,
             json_mode=False,
+            image_data_url=image_data_url,
         )
         solution = self.client.complete(
             solve_with_plan_prompt(prompt, plan),
@@ -32,6 +34,7 @@ class PlanThenSolveAgent(Agent):
             temperature=self.config.reasoning_temperature,
             max_tokens=self.config.max_reasoning_tokens,
             json_mode=False,
+            image_data_url=image_data_url,
         )
         return self.client.complete(
             finalize_prompt(prompt, solution),
@@ -39,4 +42,5 @@ class PlanThenSolveAgent(Agent):
             temperature=self.config.final_temperature,
             max_tokens=self.config.final_max_tokens,
             json_mode=True,
+            image_data_url=image_data_url,
         )

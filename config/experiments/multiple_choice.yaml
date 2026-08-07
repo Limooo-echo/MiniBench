@@ -7,7 +7,7 @@ task:
 agent:
   name: cot
   samples: 3
-  reasoning_temperature: 0.7
+  reasoning_temperature: 0.0
   final_temperature: 0.0
   max_reasoning_tokens: 1024
 

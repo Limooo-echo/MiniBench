@@ -81,7 +81,7 @@ def make_agent(
     extra_body: dict[str, object] | None = None,
     system_prompt: str | None = None,
     samples: int = 3,
-    reasoning_temperature: float = 0.7,
+    reasoning_temperature: float = 0.0,
     final_temperature: float = 0.0,
     max_reasoning_tokens: int = 512,
 ) -> Agent:
@@ -149,7 +149,7 @@ def make_agent_from_config(
         extra_body=provider_config.get("extra_body"),
         system_prompt=system_prompt,
         samples=int(agent_config.get("samples", 3)),
-        reasoning_temperature=float(agent_config.get("reasoning_temperature", 0.7)),
+        reasoning_temperature=float(agent_config.get("reasoning_temperature", 0.0)),
         final_temperature=float(agent_config.get("final_temperature", 0.0)),
         max_reasoning_tokens=int(agent_config.get("max_reasoning_tokens", 512)),
     )

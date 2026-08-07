@@ -1,0 +1,30 @@
+task:
+  family: mahjong_rule_variants
+  path: data/mahjong_solo/tasks_win.jsonl
+  limit: null
+  task_ids: []
+
+agent:
+  name: cot
+  samples: 3
+  reasoning_temperature: 0.0
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+
+provider:
+  name: deepseek
+  model: deepseek-chat
+  json_mode: true
+  max_tokens: 512
+  timeout: 120
+
+evaluation:
+  observation_mode: full-hand
+  show_progress: true
+  # Omit rules to run all eight channels. Add one to three entries to run one
+  # combined channel, for example:
+  # rules: [cyclic_sequences, red_dragon_wildcard]
+
+run:
+  output_dir: runs
+  run_name: null

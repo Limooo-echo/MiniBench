@@ -1,4 +1,7 @@
 import unittest
+from pathlib import Path
+import tempfile
+from types import SimpleNamespace
 
 from minibench.agents import (
     CoTAgent,
@@ -23,6 +26,7 @@ class FakeClient:
         temperature=None,
         max_tokens=None,
         json_mode=None,
+        image_data_url=None,
     ):
         self.calls.append(
             {
@@ -31,6 +35,7 @@ class FakeClient:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "json_mode": json_mode,
+                "image_data_url": image_data_url,
             }
         )
         if not self.responses:
@@ -51,6 +56,12 @@ def sample_task():
 
 
 class ReasoningAgentTests(unittest.TestCase):
+    def test_reasoning_config_temperature_defaults_are_zero(self):
+        config = ReasoningConfig()
+
+        self.assertEqual(config.reasoning_temperature, 0.0)
+        self.assertEqual(config.final_temperature, 0.0)
+
     def test_cot_finalizes_non_choice_json_schema(self):
         client = FakeClient(["The pair wait is E.", '{"winning_tiles":["E"]}'])
         agent = CoTAgent(client, ReasoningConfig())
@@ -64,6 +75,23 @@ class ReasoningAgentTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 2)
         self.assertTrue(client.calls[-1]["json_mode"])
         self.assertIn("schema requested", client.calls[-1]["prompt"])
+
+    def test_cot_forwards_task_image_to_every_model_call(self):
+        client = FakeClient(["Visual reasoning.", '{"winning_tiles":["E"]}'])
+        agent = CoTAgent(client, ReasoningConfig())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path = Path(tmpdir) / "task.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+            task = SimpleNamespace(image_path=image_path)
+
+            agent.generate("Inspect the image.", task)
+
+        self.assertTrue(
+            all(
+                call["image_data_url"].startswith("data:image/png;base64,")
+                for call in client.calls
+            )
+        )
 
     def test_self_consistency_uses_majority_vote(self):
         client = FakeClient(["answer: C", "answer: B", "answer: C"])

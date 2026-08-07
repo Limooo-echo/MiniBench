@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 import json
 
-from minibench.core.agent import Agent, ChatClient, ReasoningConfig
+from minibench.core.agent import Agent, ChatClient, ReasoningConfig, task_image_data_url
 from minibench.core.prompts import (
     FINAL_ANSWER_SYSTEM_PROMPT,
     REASONING_SYSTEM_PROMPT,
@@ -22,6 +22,7 @@ class SelfConsistencyAgent(Agent):
         self.config = config or ReasoningConfig()
 
     def generate(self, prompt: str, task: Task) -> str:
+        image_data_url = task_image_data_url(task)
         samples = [
             self.client.complete(
                 cot_prompt(prompt),
@@ -29,8 +30,9 @@ class SelfConsistencyAgent(Agent):
                 temperature=self.config.reasoning_temperature,
                 max_tokens=self.config.max_reasoning_tokens,
                 json_mode=False,
+                image_data_url=image_data_url,
             )
-            for _ in range(self.config.samples)
+            for index in range(self.config.samples)
         ]
         answer_extractors = getattr(task, "answer_extractors", None)
         if answer_extractors is not None:
@@ -50,4 +52,5 @@ class SelfConsistencyAgent(Agent):
             temperature=self.config.final_temperature,
             max_tokens=self.config.final_max_tokens,
             json_mode=True,
+            image_data_url=image_data_url,
         )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from minibench.core.agent import Agent, ChatClient, ReasoningConfig
+from minibench.core.agent import Agent, ChatClient, ReasoningConfig, task_image_data_url
 from minibench.core.prompts import (
     CRITIC_SYSTEM_PROMPT,
     FINAL_ANSWER_SYSTEM_PROMPT,
@@ -19,12 +19,14 @@ class CriticRefineAgent(Agent):
         self.config = config or ReasoningConfig()
 
     def generate(self, prompt: str, task: Task) -> str:
+        image_data_url = task_image_data_url(task)
         draft = self.client.complete(
             direct_prompt(prompt),
             system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
             temperature=self.config.reasoning_temperature,
             max_tokens=self.config.max_reasoning_tokens,
             json_mode=False,
+            image_data_url=image_data_url,
         )
         critique = self.client.complete(
             critic_prompt(prompt, draft),
@@ -32,6 +34,7 @@ class CriticRefineAgent(Agent):
             temperature=self.config.final_temperature,
             max_tokens=self.config.max_reasoning_tokens,
             json_mode=False,
+            image_data_url=image_data_url,
         )
         return self.client.complete(
             refine_prompt(prompt, draft, critique),
@@ -39,4 +42,5 @@ class CriticRefineAgent(Agent):
             temperature=self.config.final_temperature,
             max_tokens=self.config.final_max_tokens,
             json_mode=True,
+            image_data_url=image_data_url,
         )

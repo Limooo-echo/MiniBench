@@ -1,3 +1,4 @@
+import http.client
 import json
 from unittest.mock import patch
 import unittest
@@ -116,6 +117,32 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertIn("Mahjong rules prompt.", system_content)
         self.assertIn("Finalize as JSON.", system_content)
 
+    def test_payload_uses_openai_multimodal_content_parts(self):
+        agent = OpenAICompatibleAgent(
+            model="vision-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+        )
+
+        payload = agent.build_payload(
+            "Inspect the attached image.",
+            image_data_url="data:image/png;base64,AAAA",
+        )
+
+        self.assertEqual(
+            payload["messages"][1]["content"],
+            [
+                {"type": "text", "text": "Inspect the attached image."},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/png;base64,AAAA",
+                        "detail": "high",
+                    },
+                },
+            ],
+        )
+
     def test_complete_uses_reasoning_content_when_visible_content_is_empty(self):
         agent = OpenAICompatibleAgent(
             model="test-model",
@@ -139,6 +166,52 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
                 output = agent.complete("Question?")
 
         self.assertEqual(output, "answer: C")
+
+    def test_complete_wraps_read_timeout_with_actionable_error(self):
+        agent = OpenAICompatibleAgent(
+            model="vision-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+            timeout=120,
+        )
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "timed out after 120 seconds.*vision-model",
+                ):
+                    agent.complete("Inspect the image.")
+
+    def test_complete_retries_incomplete_response(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+        )
+        payload = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": '{"answer":"A"}'},
+                }
+            ]
+        }
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch(
+                "urllib.request.urlopen",
+                side_effect=[
+                    http.client.IncompleteRead(b""),
+                    FakeHTTPResponse(payload),
+                ],
+            ) as urlopen:
+                with patch("time.sleep") as sleep:
+                    output = agent.complete("Question?")
+
+        self.assertEqual(output, '{"answer":"A"}')
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
 
 
 if __name__ == "__main__":
