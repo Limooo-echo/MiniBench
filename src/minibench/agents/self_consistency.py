@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter
-import json
+from typing import Any
 
 from minibench.core.agent import Agent, ChatClient, ReasoningConfig
 from minibench.core.prompts import (
@@ -10,8 +9,6 @@ from minibench.core.prompts import (
     cot_prompt,
     judge_prompt,
 )
-from minibench.datasets.multiple_choice.dataset import Task
-from minibench.datasets.multiple_choice.extraction import extract_answer
 
 
 class SelfConsistencyAgent(Agent):
@@ -21,7 +18,7 @@ class SelfConsistencyAgent(Agent):
         self.client = client
         self.config = config or ReasoningConfig()
 
-    def generate(self, prompt: str, task: Task) -> str:
+    def generate(self, prompt: str, task: Any) -> str:
         samples = [
             self.client.complete(
                 cot_prompt(prompt),
@@ -32,18 +29,6 @@ class SelfConsistencyAgent(Agent):
             )
             for _ in range(self.config.samples)
         ]
-        answer_extractors = getattr(task, "answer_extractors", None)
-        if answer_extractors is not None:
-            choices = [
-                extract_answer(sample, answer_extractors)[0]
-                for sample in samples
-            ]
-            counts = Counter(choice for choice in choices if choice)
-            if counts:
-                top = counts.most_common()
-                if len(top) == 1 or top[0][1] > top[1][1]:
-                    return json.dumps({"answer": top[0][0]}, ensure_ascii=False)
-
         return self.client.complete(
             judge_prompt(prompt, samples),
             system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,

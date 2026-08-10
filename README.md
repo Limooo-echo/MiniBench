@@ -6,8 +6,8 @@
 
 MiniBench is a small, reproducible benchmark for comparing LLM and
 agent-style reasoning behavior. It supports multiple task families, including
-multiple-choice questions, Xiangqi, one-stroke graph puzzles, static Mahjong
-tile-shape tasks, and local four-player Riichi Mahjong tasks.
+Zebra logic grids, Xiangqi, one-stroke graph puzzles, static Mahjong tile-shape
+tasks, and local four-player Riichi Mahjong tasks.
 
 The codebase is organized so task families, agents, providers, and experiment
 configuration stay separate. Adding a new task family should mostly mean adding
@@ -21,22 +21,16 @@ export PYTHONPATH=src
 python -m unittest discover -s tests
 ```
 
-Run the built-in oracle agent on the multiple-choice benchmark:
+Run the three-task Zebra smoke set with an OpenAI-compatible provider:
 
 ```bash
-python -m minibench.cli evaluate --agent oracle
+python -m minibench.cli evaluate-zebra --provider deepseek
 ```
 
 Run an experiment from YAML:
 
 ```bash
-./run.sh config/experiments/multiple_choice.yaml
-```
-
-Inspect one multiple-choice prompt:
-
-```bash
-python -m minibench.cli show-prompt mb-choice-001
+./run.sh config/experiments/zebra.yaml
 ```
 
 ### Source Layout
@@ -55,7 +49,7 @@ Task-family packages live only under `src/minibench/datasets/`:
 
 ```text
 src/minibench/datasets/
-  multiple_choice/
+  zebra/
   xiangqi/
     engines/
   one_stroke/
@@ -68,7 +62,7 @@ src/minibench/datasets/
 
 | Task family | Data file | Command |
 | --- | --- | --- |
-| Multiple choice | `data/multiple_choice/tasks.jsonl` | `evaluate` |
+| Zebra logic grids | `data/zebra/tasks.jsonl` | `evaluate-zebra` |
 | Simple Xiangqi | `data/xiangqi/tasks.jsonl` | `evaluate-xiangqi` |
 | Hard Xiangqi with Pikafish | `data/xiangqi/hard_tasks.jsonl` | `evaluate-xiangqi` |
 | One-stroke graph puzzles | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
@@ -80,12 +74,10 @@ src/minibench/datasets/
 
 Available agent names:
 
-- `oracle`: returns the gold answer for sanity checks.
-- `noisy`: returns loose text for extraction checks.
 - `openai-compatible`: direct OpenAI-compatible chat completion baseline.
 - `direct`: asks the model to answer directly with the required JSON.
 - `cot`: reason first, then finalize to JSON.
-- `self-consistency`: sample several reasoning paths and majority vote.
+- `self-consistency`: sample several reasoning paths and ask a judge to select.
 - `tot`: generate candidate reasoning paths, then judge.
 - `plan-then-solve`: plan first, solve from the plan, then finalize.
 - `critic-refine`: draft, critique, then refine.
@@ -105,21 +97,21 @@ DeepSeek:
 
 ```bash
 export DEEPSEEK_API_KEY="your_key_here"
-python -m minibench.cli evaluate --agent cot --provider deepseek
+python -m minibench.cli evaluate-zebra --agent cot --provider deepseek
 ```
 
 Qwen/DashScope:
 
 ```bash
 export DASHSCOPE_API_KEY="your_key_here"
-python -m minibench.cli evaluate --agent self-consistency --provider qwen
+python -m minibench.cli evaluate-zebra --agent self-consistency --provider qwen
 ```
 
 Custom OpenAI-compatible endpoint:
 
 ```bash
 export MY_MODEL_API_KEY="your_key_here"
-python -m minibench.cli evaluate \
+python -m minibench.cli evaluate-zebra \
   --agent critic-refine \
   --provider generic \
   --model my-model \
@@ -129,17 +121,24 @@ python -m minibench.cli evaluate \
 
 ### Task Commands
 
-Multiple choice:
+Zebra direct reasoning:
 
 ```bash
-python -m minibench.cli --tasks data/multiple_choice/tasks.jsonl evaluate \
+python -m minibench.cli evaluate-zebra \
+  --zebra-tasks data/zebra/tasks.jsonl \
   --agent openai-compatible \
   --provider deepseek \
   --model deepseek-chat \
   --json-mode \
-  --max-tokens 256 \
+  --max-tokens 4096 \
   --timeout 120
 ```
+
+The built-in smoke set contains one easy, medium, and hard record from
+`WildEval/ZebraLogic`. `rule_context` is already wired into prompts. Records
+with `capability: history_memory` run both real-chat protocols by default:
+`incremental_state` and `deferred_reasoning`. The provider-level message API is
+task-agnostic and can also be reused by Xiangqi and Mahjong history evaluators.
 
 Xiangqi:
 
@@ -419,7 +418,7 @@ Each evaluation writes a run directory under `runs/`:
 ## 中文
 
 MiniBench 是一个小型、可复现的 LLM/agent 推理评测项目。当前支持多种任务家族：
-选择题、象棋、一笔画、静态麻将牌型，以及本地四人 Riichi Mahjong。
+Zebra 逻辑网格、象棋、一笔画、静态麻将牌型，以及本地四人 Riichi Mahjong。
 
 代码结构的原则是：任务、agent、provider、实验配置彼此分离。新增任务时，主要只需要
 新增一个 `src/minibench/datasets/<family>/` 包、一份 `data/<family>/tasks.jsonl`
@@ -430,8 +429,8 @@ MiniBench 是一个小型、可复现的 LLM/agent 推理评测项目。当前�
 ```bash
 export PYTHONPATH=src
 python -m unittest discover -s tests
-python -m minibench.cli evaluate --agent oracle
-./run.sh config/experiments/multiple_choice.yaml
+python -m minibench.cli evaluate-zebra --provider deepseek
+./run.sh config/experiments/zebra.yaml
 ```
 
 ### 目录结构
@@ -453,12 +452,15 @@ src/minibench/
 
 | 任务家族 | 数据文件 | 命令 |
 | --- | --- | --- |
-| 选择题 | `data/multiple_choice/tasks.jsonl` | `evaluate` |
+| Zebra 逻辑网格 | `data/zebra/tasks.jsonl` | `evaluate-zebra` |
 | 简单象棋 | `data/xiangqi/tasks.jsonl` | `evaluate-xiangqi` |
 | Pikafish 困难象棋 | `data/xiangqi/hard_tasks.jsonl` | `evaluate-xiangqi` |
 | 一笔画 | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
 | 静态麻将牌型 | `data/mahjong/tasks.jsonl` | `evaluate-mahjong` |
 | 四人 Riichi Mahjong | `data/mahjong_riichi/tasks.jsonl` | `evaluate-mahjong-riichi` |
+
+内置 Zebra smoke 集从 `WildEval/ZebraLogic` 选取 easy、medium、hard 各一题。
+provider 的真实多轮消息接口不绑定 Zebra，后续象棋和麻将的历史记忆评测也可直接复用。
 
 ### 新增任务
 

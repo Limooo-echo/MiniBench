@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from minibench.core.agent import Agent, ChatClient, ReasoningConfig
 from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT, direct_prompt
-from minibench.datasets.multiple_choice.dataset import Task
 
 
 class DirectAgent(Agent):
@@ -12,7 +13,7 @@ class DirectAgent(Agent):
         self.client = client
         self.config = config or ReasoningConfig()
 
-    def generate(self, prompt: str, task: Task) -> str:
+    def generate(self, prompt: str, task: Any) -> str:
         return self.client.complete(
             direct_prompt(prompt),
             system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,

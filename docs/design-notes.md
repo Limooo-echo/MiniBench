@@ -5,20 +5,18 @@
 The first implementation follows this minimal loop:
 
 ```text
-question selection
-  -> four options labeled A-D
-  -> constrained prompt
+task selection
+  -> task-family prompt
   -> agent output
   -> JSON extraction
-  -> regex fallback
-  -> option-letter comparison
+  -> task-family scoring
   -> run artifacts
 ```
 
-This intentionally starts smaller than AgentBoard. The current unit is a
-single-turn multiple-choice task, but the code separates dataset loading,
-prompting, extraction, scoring, and run writing so the task unit can later become
-a multi-step environment.
+The code separates dataset loading, prompting, extraction, scoring, and run
+writing. The provider supports both single prompts and real `system/user/assistant`
+message histories, so Zebra, Xiangqi, and Mahjong can define independent
+multi-turn protocols without flattening history into one prompt.
 
 ## Borrowed Ideas
 
@@ -44,10 +42,9 @@ adapter open to local servers and other compatible APIs.
 
 ## Task Taxonomy
 
-The seed task set uses normalized `prefix:value` tags documented in
-`docs/task-authoring.md`. The required groups are `format`, `turn`, `source`,
-`domain`, `skill`, and `difficulty`, which keeps later AgentBoard-style
-diagnostic summaries straightforward.
+Task sets use normalized `prefix:value` tags documented in
+`docs/task-authoring.md`. Family, capability, source, size, and difficulty tags
+support AgentBoard-style diagnostic summaries.
 
 ## Near-Term Roadmap
 

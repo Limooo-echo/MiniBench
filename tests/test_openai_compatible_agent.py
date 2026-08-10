@@ -116,6 +116,65 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertIn("Mahjong rules prompt.", system_content)
         self.assertIn("Finalize as JSON.", system_content)
 
+    def test_messages_payload_preserves_explicit_role_order(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+            default_system_prompt="Should not replace explicit system history.",
+        )
+        messages = [
+            {"role": "system", "content": "Task rules."},
+            {"role": "user", "content": "Clue 1"},
+            {"role": "assistant", "content": '{"state":"A"}'},
+            {"role": "user", "content": "Clue 2"},
+        ]
+
+        payload = agent.build_messages_payload(messages)
+
+        self.assertEqual(payload["messages"], messages)
+
+    def test_messages_payload_prepends_default_system_when_missing(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+            default_system_prompt="Shared task rules.",
+        )
+
+        payload = agent.build_messages_payload(
+            [{"role": "user", "content": "Clue 1"}]
+        )
+
+        self.assertEqual(
+            [message["role"] for message in payload["messages"]],
+            ["system", "user"],
+        )
+        self.assertEqual(payload["messages"][0]["content"], "Shared task rules.")
+
+    def test_complete_messages_sends_real_chat_history(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+        )
+        response = {"choices": [{"message": {"content": '{"ok":true}'}}]}
+        messages = [
+            {"role": "system", "content": "Rules"},
+            {"role": "user", "content": "Turn 1"},
+            {"role": "assistant", "content": "State 1"},
+            {"role": "user", "content": "Turn 2"},
+        ]
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch("urllib.request.urlopen", return_value=FakeHTTPResponse(response)) as urlopen:
+                output = agent.complete_messages(messages)
+
+        request = urlopen.call_args.args[0]
+        sent_payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(output, '{"ok":true}')
+        self.assertEqual(sent_payload["messages"], messages)
+
     def test_complete_uses_reasoning_content_when_visible_content_is_empty(self):
         agent = OpenAICompatibleAgent(
             model="test-model",

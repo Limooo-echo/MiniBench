@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from minibench.core.agent import Agent, ChatClient, ReasoningConfig
 from minibench.core.prompts import (
     FINAL_ANSWER_SYSTEM_PROMPT,
@@ -8,7 +10,6 @@ from minibench.core.prompts import (
     plan_prompt,
     solve_with_plan_prompt,
 )
-from minibench.datasets.multiple_choice.dataset import Task
 
 
 class PlanThenSolveAgent(Agent):
@@ -18,7 +19,7 @@ class PlanThenSolveAgent(Agent):
         self.client = client
         self.config = config or ReasoningConfig()
 
-    def generate(self, prompt: str, task: Task) -> str:
+    def generate(self, prompt: str, task: Any) -> str:
         plan = self.client.complete(
             plan_prompt(prompt),
             system_prompt=REASONING_SYSTEM_PROMPT,

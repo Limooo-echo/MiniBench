@@ -2,34 +2,42 @@
 
 MiniBench currently has several task families:
 
-- Multiple-choice tasks in contributor-specific files such as `data/tasks-limo.jsonl`.
+- Zebra logic-grid tasks in `data/zebra/tasks.jsonl`.
 - Xiangqi environment tasks in `data/xiangqi_tasks.jsonl` and `data/xiangqi_hard_tasks.jsonl`.
 - One-stroke graph puzzles in `data/one_stroke_tasks.jsonl`.
 - Riichi Mahjong tile-shape tasks in `data/mahjong_tasks.jsonl`.
 - Local Riichi Mahjong v1 table tasks in `data/mahjong_riichi_tasks.jsonl`.
 
-## Multiple-Choice Tasks
+## Zebra Tasks
 
 Each JSONL line is one task:
 
 ```json
-{"id":"mb-choice-051","question":"Question text goes here.","options":{"A":"Option A","B":"Option B","C":"Option C","D":"Option D"},"correct_option":"B","tags":["format:multiple-choice","turn:single","source:synthetic","domain:tool-use","skill:tool-selection","difficulty:easy"]}
+{"id":"lgp-test-2x2-33","size":"2*2","puzzle":"Puzzle text and clues.","solution":{"header":["House","Name","Pet"],"rows":[["1","Eric","cat"],["2","Arnold","dog"]]},"capability":"direct","rule_context":null,"clue_turns":[],"tags":["source:WildEval/ZebraLogic"]}
 ```
 
 Required fields:
 
-- `id`: unique task id. Use `mb-choice-###`.
-- `question`: concise question text.
-- `options`: exactly four options labeled `A`, `B`, `C`, and `D`.
-- `correct_option`: one of `A`, `B`, `C`, or `D`.
-- `tags`: normalized tags for later analysis.
+- `id`, `size`, and `puzzle`: ZeroEval-compatible identity, grid size, and text.
+- `solution.header` and `solution.rows`: the complete gold grid. The first
+  header must be `House`.
+- `capability`: `direct`, `rule_condition`, or `history_memory`.
+- `tags`: normalized tags for later analysis. Size and difficulty tags are
+  derived by the loader.
 
 Optional fields:
 
-- `answer_extractors`: regexes for unusual outputs. If omitted, default A-D
-  extractors are used.
-- `prompt_constraints`: output rules. If omitted, default JSON-only constraints
-  are used.
+- `rule_context`: extra rules inserted into the prompt for rule-condition tasks.
+- `clue_turns`: ordered clues for history-memory tasks. These tasks are run with
+  both `incremental_state` and `deferred_reasoning` protocols.
+
+For a `history_memory` record, `puzzle` must contain only the shared setup and
+attribute domains; put every sequential clue exclusively in `clue_turns` so the
+initial system message does not reveal future clues.
+
+Do not use the masked `___` solutions from `allenai/ZebraLogicBench` as gold.
+Use `scripts/import_zebra_tasks.py`, which imports scoreable records from
+`WildEval/ZebraLogic`.
 
 ## Xiangqi Tasks
 
@@ -171,14 +179,12 @@ multi-ron, or complete round bookkeeping.
 
 ## Tag Schema
 
-Use flat tags with a `prefix:value` pattern where useful. Multiple-choice tasks
-should keep the original normalized groups:
+Use flat tags with a `prefix:value` pattern where useful. Zebra tags include:
 
-- `format:multiple-choice`
-- `turn:single`
-- `source:synthetic`, `source:agentboard-inspired`, or `source:swebench-inspired`
-- `domain:<domain>`
-- `skill:<skill>`
+- `task:zebra`
+- `source:WildEval/ZebraLogic`
+- `capability:direct`, `capability:rule_condition`, or `capability:history_memory`
+- `size:<N*M>` and `zeroeval-size:<group>`
 - `difficulty:easy`, `difficulty:medium`, or `difficulty:hard`
 
 Environment and game tasks can add task-family tags such as:
@@ -201,7 +207,7 @@ After editing tasks, run:
 ```powershell
 $env:PYTHONPATH="src"
 python -m unittest discover -s tests
-python -m minibench.cli evaluate --agent oracle
+python -m minibench.cli evaluate-zebra --provider deepseek
 ```
 
 In WSL:
@@ -212,8 +218,8 @@ export PYTHONPATH=src
 python3 -m unittest discover -s tests
 ```
 
-Inspect one multiple-choice prompt:
+Refresh the Zebra smoke set:
 
 ```powershell
-python -m minibench.cli show-prompt mb-choice-051
+python scripts/import_zebra_tasks.py --smoke-per-difficulty 1 --overwrite
 ```

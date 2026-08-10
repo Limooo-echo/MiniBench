@@ -13,6 +13,7 @@ class StaticAgentCliTests(unittest.TestCase):
         cases = [
             ["evaluate-xiangqi", "--agent", "cot"],
             ["evaluate-one-stroke", "--agent", "tot"],
+            ["evaluate-zebra", "--agent", "cot"],
             ["evaluate-mahjong", "--agent", "critic-refine"],
         ]
         for argv in cases:

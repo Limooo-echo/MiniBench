@@ -4,11 +4,11 @@ from dataclasses import dataclass
 import json
 import os
 from time import perf_counter
-from typing import Any
+from typing import Any, Sequence
 import urllib.error
 import urllib.request
 
-from minibench.core.agent import Agent
+from minibench.core.agent import Agent, ChatMessage
 from minibench.core.metrics import empty_token_usage, extract_token_usage
 from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT
 
@@ -95,15 +95,38 @@ class OpenAICompatibleAgent(Agent):
         max_tokens: int | None = None,
         json_mode: bool | None = None,
     ) -> dict[str, object]:
+        return self.build_messages_payload(
+            [{"role": "user", "content": prompt}],
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+        )
+
+    def build_messages_payload(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+    ) -> dict[str, object]:
+        normalized_messages = _validate_messages(messages)
+        if not any(message["role"] == "system" for message in normalized_messages):
+            normalized_messages.insert(
+                0,
+                {"role": "system", "content": self._system_prompt(system_prompt)},
+            )
+        elif system_prompt is not None:
+            raise ValueError(
+                "system_prompt cannot be combined with messages that already include "
+                "a system role"
+            )
+
         payload: dict[str, object] = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": self._system_prompt(system_prompt),
-                },
-                {"role": "user", "content": prompt},
-            ],
+            "messages": normalized_messages,
             "temperature": self.temperature if temperature is None else temperature,
             "max_tokens": self.max_tokens if max_tokens is None else max_tokens,
             "stream": False,
@@ -133,6 +156,23 @@ class OpenAICompatibleAgent(Agent):
         max_tokens: int | None = None,
         json_mode: bool | None = None,
     ) -> str:
+        return self.complete_messages(
+            [{"role": "user", "content": prompt}],
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+        )
+
+    def complete_messages(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+    ) -> str:
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
             raise RuntimeError(
@@ -143,8 +183,8 @@ class OpenAICompatibleAgent(Agent):
         request = urllib.request.Request(
             self.endpoint,
             data=json.dumps(
-                self.build_payload(
-                    prompt,
+                self.build_messages_payload(
+                    messages,
                     system_prompt=system_prompt,
                     temperature=temperature,
                     max_tokens=max_tokens,
@@ -198,6 +238,22 @@ class OpenAICompatibleAgent(Agent):
     def generate(self, prompt: str, task: Any) -> str:
         return self.complete(prompt)
 
+    def generate_messages(
+        self,
+        messages: Sequence[ChatMessage],
+        task: Any,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+    ) -> str:
+        return self.complete_messages(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+        )
+
     def metrics_snapshot(self) -> dict[str, Any]:
         return {
             "model_elapsed_seconds": self._model_elapsed_seconds,
@@ -233,6 +289,25 @@ def _content_part_to_text(part: object) -> str:
     if isinstance(content, str):
         return content
     return ""
+
+
+def _validate_messages(messages: Sequence[ChatMessage]) -> list[ChatMessage]:
+    if not messages:
+        raise ValueError("messages must not be empty")
+    normalized: list[ChatMessage] = []
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            raise ValueError(f"message {index} must be an object")
+        role = message.get("role")
+        content = message.get("content")
+        if role not in {"system", "user", "assistant"}:
+            raise ValueError(
+                f"message {index} role must be system, user, or assistant"
+            )
+        if not isinstance(content, str):
+            raise ValueError(f"message {index} content must be a string")
+        normalized.append({"role": role, "content": content})
+    return normalized
 
 
 def _content_to_text(content: object) -> str:

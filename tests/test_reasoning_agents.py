@@ -8,7 +8,6 @@ from minibench.agents import (
     TreeOfThoughtAgent,
 )
 from minibench.core.metrics import finish_task_metrics, start_task_metrics
-from minibench.datasets.multiple_choice.dataset import Task
 
 
 class FakeClient:
@@ -70,15 +69,7 @@ class MetricsClient(FakeClient):
 
 
 def sample_task():
-    return Task(
-        id="unit-task",
-        question="Pick C.",
-        options={"A": "A", "B": "B", "C": "C", "D": "D"},
-        correct_option="C",
-        answer_extractors=(),
-        prompt_constraints=(),
-        tags=(),
-    )
+    return object()
 
 
 class ReasoningAgentTests(unittest.TestCase):
@@ -96,14 +87,18 @@ class ReasoningAgentTests(unittest.TestCase):
         self.assertTrue(client.calls[-1]["json_mode"])
         self.assertIn("schema requested", client.calls[-1]["prompt"])
 
-    def test_self_consistency_uses_majority_vote(self):
-        client = FakeClient(["answer: C", "answer: B", "answer: C"])
+    def test_self_consistency_uses_generic_judge(self):
+        client = FakeClient(
+            ["candidate C", "candidate B", "candidate C", '{"answer":"C"}']
+        )
         agent = SelfConsistencyAgent(client, ReasoningConfig(samples=3))
 
         output = agent.generate("Question prompt", sample_task())
 
-        self.assertEqual(output, '{"answer": "C"}')
-        self.assertEqual(len(client.calls), 3)
+        self.assertEqual(output, '{"answer":"C"}')
+        self.assertEqual(len(client.calls), 4)
+        self.assertTrue(client.calls[-1]["json_mode"])
+        self.assertIn("Candidate solutions:", client.calls[-1]["prompt"])
 
     def test_tree_of_thought_generates_candidates_and_judges(self):
         client = FakeClient(

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "$#" -ne 1 ]; then
-  echo "Usage: ./run.sh config/experiments/multiple_choice.yaml" >&2
+  echo "Usage: ./run.sh config/experiments/zebra.yaml" >&2
   exit 2
 fi
 

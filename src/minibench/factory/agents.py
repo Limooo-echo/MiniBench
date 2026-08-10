@@ -8,7 +8,7 @@ from minibench.agents.cot import CoTAgent
 from minibench.agents.direct import DirectAgent
 from minibench.agents.plan_then_solve import PlanThenSolveAgent
 from minibench.agents.self_consistency import SelfConsistencyAgent
-from minibench.agents.simple import NoisyAgent, OracleAgent, PredictionFileAgent
+from minibench.agents.simple import PredictionFileAgent
 from minibench.agents.tree_of_thought import TreeOfThoughtAgent
 from minibench.core.agent import Agent, ChatClient, ReasoningConfig
 from minibench.factory.providers import OpenAICompatibleAgent, resolve_provider
@@ -27,8 +27,6 @@ REASONING_AGENTS: dict[str, ReasoningAgentFactory] = {
 }
 
 AGENT_NAMES = (
-    "oracle",
-    "noisy",
     "openai-compatible",
     *REASONING_AGENTS.keys(),
 )
@@ -87,10 +85,6 @@ def make_agent(
 ) -> Agent:
     if predictions:
         return PredictionFileAgent(predictions)
-    if name == "oracle":
-        return OracleAgent()
-    if name == "noisy":
-        return NoisyAgent()
     if name == "openai-compatible":
         return _make_openai_client(
             provider=provider,

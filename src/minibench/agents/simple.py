@@ -5,22 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from minibench.core.agent import Agent
-from minibench.datasets.multiple_choice.dataset import Task
-
-
-class OracleAgent(Agent):
-    name = "oracle"
-
-    def generate(self, prompt: str, task: Task) -> str:
-        return json.dumps({"answer": task.correct_option}, ensure_ascii=False)
-
-
-class NoisyAgent(Agent):
-    name = "noisy"
-
-    def generate(self, prompt: str, task: Task) -> str:
-        answer = task.correct_option
-        return f"I worked it out. answer: {answer}"
 
 
 class PredictionFileAgent(Agent):

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, Sequence, TypedDict
+
+
+class ChatMessage(TypedDict):
+    role: Literal["system", "user", "assistant"]
+    content: str
 
 
 class Agent:
@@ -11,10 +16,36 @@ class Agent:
         raise NotImplementedError
 
 
+class MessageAgent(Protocol):
+    """Reusable agent interface for tasks that require real chat history."""
+
+    def generate_messages(
+        self,
+        messages: Sequence[ChatMessage],
+        task: Any,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+    ) -> str:
+        raise NotImplementedError
+
+
 class ChatClient(Protocol):
     def complete(
         self,
         prompt: str,
+        *,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+    ) -> str:
+        raise NotImplementedError
+
+    def complete_messages(
+        self,
+        messages: Sequence[ChatMessage],
         *,
         system_prompt: str | None = None,
         temperature: float | None = None,

@@ -7,9 +7,6 @@ from typing import Any
 
 from minibench.evaluate import run_config
 from minibench.factory.agents import AGENT_NAMES, make_agent
-from minibench.datasets.multiple_choice.dataset import find_task, load_tasks
-from minibench.datasets.multiple_choice.evaluation import evaluate_tasks, summarize, write_run
-from minibench.datasets.multiple_choice.prompting import build_prompt
 
 
 PROVIDER_CHOICES = (
@@ -22,9 +19,7 @@ PROVIDER_CHOICES = (
 )
 
 ENV_AGENT_CHOICES = ("openai-compatible",)
-STATIC_GENERATIVE_AGENT_CHOICES = tuple(
-    name for name in AGENT_NAMES if name not in {"oracle", "noisy"}
-)
+STATIC_GENERATIVE_AGENT_CHOICES = AGENT_NAMES
 
 
 def _parse_extra_body_json(value: str | None) -> dict[str, object] | None:
@@ -133,22 +128,6 @@ def _add_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--task-id", action="append", default=None)
-
-
-def _cmd_evaluate(args: argparse.Namespace) -> int:
-    tasks = load_tasks(args.tasks)
-    tasks = _select_tasks(tasks, args.task_id)
-    if args.limit is not None:
-        tasks = tasks[: args.limit]
-    try:
-        agent = _make_cli_agent(args)
-        results = evaluate_tasks(tasks, agent)
-    except (KeyError, RuntimeError, ValueError) as exc:
-        raise SystemExit(f"evaluation failed: {exc}") from exc
-    run_dir = write_run(results, args.output_dir, args.run_name)
-    summary = summarize(results)
-    print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
-    return 0 if summary["correct"] == summary["total"] else 1
 
 
 def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
@@ -305,6 +284,40 @@ def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
     return 0 if summary["success"] == summary["total"] else 1
 
 
+def _cmd_evaluate_zebra(args: argparse.Namespace) -> int:
+    from minibench.datasets.zebra.dataset import load_zebra_tasks
+    from minibench.datasets.zebra.evaluation import (
+        MEMORY_MODES,
+        evaluate_zebra_tasks,
+        summarize_zebra,
+        write_zebra_run,
+    )
+    from minibench.datasets.zebra.prompting import ZEBRA_SYSTEM_PROMPT
+
+    tasks = load_zebra_tasks(args.zebra_tasks)
+    tasks = _select_tasks(tasks, args.task_id)
+    if args.limit is not None:
+        tasks = tasks[: args.limit]
+    memory_modes = MEMORY_MODES if args.memory_mode == "both" else (args.memory_mode,)
+    try:
+        agent = _make_cli_agent(args, system_prompt=ZEBRA_SYSTEM_PROMPT)
+        results = evaluate_zebra_tasks(
+            tasks,
+            agent,
+            memory_modes=memory_modes,
+            state_max_tokens=args.state_max_tokens,
+            ack_max_tokens=args.ack_max_tokens,
+            final_max_tokens=args.max_tokens,
+            show_progress=args.progress,
+        )
+    except (KeyError, RuntimeError, ValueError) as exc:
+        raise SystemExit(f"Zebra evaluation failed: {exc}") from exc
+    run_dir = write_zebra_run(results, args.output_dir, args.run_name)
+    summary = summarize_zebra(results)
+    print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
+    return 0 if summary["success"] == summary["total"] else 1
+
+
 def _cmd_evaluate_mahjong(args: argparse.Namespace) -> int:
     from minibench.datasets.mahjong.dataset import load_mahjong_tasks
     from minibench.datasets.mahjong.evaluation import (
@@ -412,13 +425,6 @@ def _cmd_evaluate_mahjong_riichi(args: argparse.Namespace) -> int:
     return 0 if summary["success"] == summary["total"] else 1
 
 
-def _cmd_show_prompt(args: argparse.Namespace) -> int:
-    tasks = load_tasks(args.tasks)
-    task = find_task(tasks, args.task_id)
-    print(build_prompt(task))
-    return 0
-
-
 def _cmd_run_config(args: argparse.Namespace) -> int:
     try:
         result = run_config(args.config)
@@ -430,7 +436,6 @@ def _cmd_run_config(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="minibench")
-    parser.add_argument("--tasks", type=Path, default=None, help="Path to tasks JSONL.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_config_parser = subparsers.add_parser(
@@ -439,16 +444,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_config_parser.add_argument("config", type=Path)
     run_config_parser.set_defaults(func=_cmd_run_config)
-
-    evaluate = subparsers.add_parser("evaluate", help="Run benchmark evaluation.")
-    evaluate.add_argument("--agent", choices=AGENT_NAMES, default="oracle")
-    _add_provider_args(evaluate, max_tokens=64)
-    _add_run_args(evaluate)
-    evaluate.set_defaults(func=_cmd_evaluate)
-
-    show_prompt = subparsers.add_parser("show-prompt", help="Print one task prompt.")
-    show_prompt.add_argument("task_id")
-    show_prompt.set_defaults(func=_cmd_show_prompt)
 
     evaluate_xiangqi = subparsers.add_parser(
         "evaluate-xiangqi",
@@ -716,6 +711,38 @@ def build_parser() -> argparse.ArgumentParser:
     _add_provider_args(evaluate_one_stroke, max_tokens=256)
     _add_run_args(evaluate_one_stroke)
     evaluate_one_stroke.set_defaults(func=_cmd_evaluate_one_stroke)
+
+    evaluate_zebra = subparsers.add_parser(
+        "evaluate-zebra",
+        help="Run ZeroEval-compatible Zebra logic grid evaluation.",
+    )
+    evaluate_zebra.add_argument(
+        "--zebra-tasks",
+        type=Path,
+        default=None,
+        help="Path to Zebra tasks JSONL. Defaults to data/zebra/tasks.jsonl.",
+    )
+    evaluate_zebra.add_argument(
+        "--agent",
+        choices=STATIC_GENERATIVE_AGENT_CHOICES,
+        default="openai-compatible",
+    )
+    evaluate_zebra.add_argument(
+        "--memory-mode",
+        choices=("both", "incremental_state", "deferred_reasoning"),
+        default="both",
+        help="History protocol(s) to run for history_memory tasks.",
+    )
+    evaluate_zebra.add_argument("--state-max-tokens", type=int, default=512)
+    evaluate_zebra.add_argument("--ack-max-tokens", type=int, default=32)
+    evaluate_zebra.add_argument(
+        "--progress",
+        action="store_true",
+        help="Show Zebra evaluation progress on stderr.",
+    )
+    _add_provider_args(evaluate_zebra, max_tokens=4096)
+    _add_run_args(evaluate_zebra)
+    evaluate_zebra.set_defaults(func=_cmd_evaluate_zebra)
 
     evaluate_mahjong = subparsers.add_parser(
         "evaluate-mahjong",

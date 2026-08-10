@@ -14,17 +14,55 @@ class EvaluateConfigTests(unittest.TestCase):
     def test_run_config_writes_run_artifacts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "runs"
+            tasks_path = Path(tmpdir) / "zebra.jsonl"
+            tasks_path.write_text(
+                json.dumps(
+                    {
+                        "id": "zebra-unit",
+                        "size": "2*2",
+                        "puzzle": "Two houses and two attributes.",
+                        "solution": {
+                            "header": ["House", "Name", "Drink"],
+                            "rows": [["1", "Alice", "tea"], ["2", "Bob", "milk"]],
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            predictions_path = Path(tmpdir) / "predictions.jsonl"
+            predictions_path.write_text(
+                json.dumps(
+                    {
+                        "task_id": "zebra-unit",
+                        "raw_output": json.dumps(
+                            {
+                                "reasoning": "unit",
+                                "solution": {
+                                    "House 1": {"Name": "Alice", "Drink": "tea"},
+                                    "House 2": {"Name": "Bob", "Drink": "milk"},
+                                },
+                            }
+                        ),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             config_path = Path(tmpdir) / "experiment.yaml"
             config_path.write_text(
                 yaml.safe_dump(
                     {
                         "task": {
-                            "family": "multiple_choice",
-                            "path": "data/multiple_choice/tasks.jsonl",
-                            "limit": 2,
+                            "family": "zebra",
+                            "path": str(tasks_path),
+                            "limit": 1,
                             "task_ids": [],
                         },
-                        "agent": {"name": "oracle"},
+                        "agent": {
+                            "name": "openai-compatible",
+                            "predictions": str(predictions_path),
+                        },
                         "provider": {"name": "generic"},
                         "run": {
                             "output_dir": str(output_dir),
@@ -38,14 +76,14 @@ class EvaluateConfigTests(unittest.TestCase):
             result = run_config(config_path)
 
             run_dir = Path(result["run_dir"])
-            self.assertEqual(result["total"], 2)
-            self.assertEqual(result["correct"], 2)
+            self.assertEqual(result["total"], 1)
+            self.assertEqual(result["success"], 1)
             self.assertTrue((run_dir / "predictions.jsonl").exists())
             self.assertTrue((run_dir / "results.json").exists())
             saved = json.loads(
                 (run_dir / "results.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(saved["accuracy"], 1.0)
+            self.assertEqual(saved["puzzle_accuracy"], 1.0)
             self.assertIn("metrics", saved)
             self.assertEqual(saved["metrics"]["total"]["llm_calls"], 0)
             prediction = json.loads(
@@ -107,7 +145,7 @@ class EvaluateConfigTests(unittest.TestCase):
             validate_experiment_config(
                 {
                     "task": {"family": "not-a-family"},
-                    "agent": {"name": "oracle"},
+                    "agent": {"name": "openai-compatible"},
                     "provider": {"name": "generic"},
                     "run": {"output_dir": "runs"},
                 }
@@ -117,16 +155,16 @@ class EvaluateConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing required section: provider"):
             validate_experiment_config(
                 {
-                    "task": {"family": "multiple_choice"},
-                    "agent": {"name": "oracle"},
+                    "task": {"family": "one_stroke"},
+                    "agent": {"name": "openai-compatible"},
                     "run": {"output_dir": "runs"},
                 }
             )
 
     def test_task_family_specs_are_available(self):
         self.assertEqual(
-            get_task_family_spec("multiple_choice").default_path,
-            Path("data/multiple_choice/tasks.jsonl"),
+            get_task_family_spec("zebra").default_path,
+            Path("data/zebra/tasks.jsonl"),
         )
 
 

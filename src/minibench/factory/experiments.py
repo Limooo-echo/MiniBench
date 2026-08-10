@@ -24,23 +24,6 @@ class TaskFamilySpec:
     system_prompt: str | None = None
 
 
-def _multiple_choice_spec() -> TaskFamilySpec:
-    from minibench.datasets.multiple_choice.dataset import load_tasks
-    from minibench.datasets.multiple_choice.evaluation import (
-        evaluate_tasks,
-        summarize,
-        write_run,
-    )
-
-    return TaskFamilySpec(
-        default_path=Path("data/multiple_choice/tasks.jsonl"),
-        load_tasks=load_tasks,
-        evaluate_tasks=evaluate_tasks,
-        summarize=summarize,
-        write_run=write_run,
-    )
-
-
 def _xiangqi_spec() -> TaskFamilySpec:
     from minibench.datasets.xiangqi.dataset import load_xiangqi_tasks
     from minibench.datasets.xiangqi.evaluation import (
@@ -76,6 +59,25 @@ def _one_stroke_spec() -> TaskFamilySpec:
         summarize=summarize_one_stroke,
         write_run=write_one_stroke_run,
         system_prompt=ONE_STROKE_SYSTEM_PROMPT,
+    )
+
+
+def _zebra_spec() -> TaskFamilySpec:
+    from minibench.datasets.zebra.dataset import load_zebra_tasks
+    from minibench.datasets.zebra.evaluation import (
+        evaluate_zebra_tasks,
+        summarize_zebra,
+        write_zebra_run,
+    )
+    from minibench.datasets.zebra.prompting import ZEBRA_SYSTEM_PROMPT
+
+    return TaskFamilySpec(
+        default_path=Path("data/zebra/tasks.jsonl"),
+        load_tasks=load_zebra_tasks,
+        evaluate_tasks=evaluate_zebra_tasks,
+        summarize=summarize_zebra,
+        write_run=write_zebra_run,
+        system_prompt=ZEBRA_SYSTEM_PROMPT,
     )
 
 
@@ -139,9 +141,9 @@ def _mahjong_riichi_spec() -> TaskFamilySpec:
 
 
 TASK_FAMILIES: dict[str, Callable[[], TaskFamilySpec]] = {
-    "multiple_choice": _multiple_choice_spec,
     "xiangqi": _xiangqi_spec,
     "one_stroke": _one_stroke_spec,
+    "zebra": _zebra_spec,
     "mahjong": _mahjong_spec,
     "mahjong_solo": _mahjong_solo_spec,
     "mahjong_riichi": _mahjong_riichi_spec,
@@ -219,6 +221,25 @@ def _evaluate(
             tasks,
             agent,
             prompt_variant=evaluation_config.get("prompt_variant", "baseline"),
+            show_progress=bool(evaluation_config.get("show_progress", False)),
+        )
+    if family == "zebra":
+        memory_modes = evaluation_config.get(
+            "memory_modes",
+            ("incremental_state", "deferred_reasoning"),
+        )
+        if isinstance(memory_modes, str):
+            memory_modes = (memory_modes,)
+        final_max_tokens = evaluation_config.get("final_max_tokens")
+        return spec.evaluate_tasks(
+            tasks,
+            agent,
+            memory_modes=tuple(memory_modes),
+            state_max_tokens=int(evaluation_config.get("state_max_tokens", 512)),
+            ack_max_tokens=int(evaluation_config.get("ack_max_tokens", 32)),
+            final_max_tokens=(
+                int(final_max_tokens) if final_max_tokens is not None else None
+            ),
             show_progress=bool(evaluation_config.get("show_progress", False)),
         )
     if family == "mahjong_riichi":
