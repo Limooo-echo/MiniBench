@@ -86,6 +86,20 @@ class ZebraTests(unittest.TestCase):
         )
         self.assertTrue(all("source:WildEval/ZebraLogic" in task.tags for task in tasks))
 
+    def test_formal_evaluation_set_has_fifteen_tasks_per_difficulty(self):
+        eval_path = Path(__file__).resolve().parents[1] / "data" / "zebra" / "eval.jsonl"
+        tasks = load_zebra_tasks(eval_path)
+
+        self.assertEqual(len(tasks), 45)
+        self.assertEqual(
+            {
+                difficulty: sum(task.difficulty == difficulty for task in tasks)
+                for difficulty in ("easy", "medium", "hard")
+            },
+            {"easy": 15, "medium": 15, "hard": 15},
+        )
+        self.assertTrue(all("benchmark:eval" in task.tags for task in tasks))
+
     def test_loader_accepts_zeroeval_shape_and_derives_difficulty(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "tasks.jsonl"
@@ -95,6 +109,8 @@ class ZebraTests(unittest.TestCase):
 
         self.assertEqual(task.solution.header, ("House", "Name", "Drink"))
         self.assertEqual(task.difficulty, "easy")
+        self.assertEqual(task.source_id, "zebra-unit")
+        self.assertEqual(task.variant, "direct")
         self.assertIn("difficulty:easy", task.tags)
 
     def test_size_mapping_uses_zeroeval_buckets(self):

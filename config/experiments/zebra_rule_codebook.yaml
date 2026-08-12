@@ -1,0 +1,22 @@
+task:
+  family: zebra
+  path: data/zebra/rule_codebook_eval.jsonl
+  limit: null
+  task_ids: []
+
+agent:
+  name: openai-compatible
+
+provider:
+  name: deepseek
+  temperature: 0.0
+  max_tokens: 4096
+  timeout: 120
+  json_mode: true
+
+evaluation:
+  show_progress: true
+
+run:
+  output_dir: runs
+  run_name: null

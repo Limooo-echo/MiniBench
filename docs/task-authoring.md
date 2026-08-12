@@ -2,7 +2,8 @@
 
 MiniBench currently has several task families:
 
-- Zebra logic-grid tasks in `data/zebra/tasks.jsonl`.
+- Zebra logic-grid smoke tasks in `data/zebra/tasks.jsonl` and the formal
+  evaluation set in `data/zebra/eval.jsonl`.
 - Xiangqi environment tasks in `data/xiangqi_tasks.jsonl` and `data/xiangqi_hard_tasks.jsonl`.
 - One-stroke graph puzzles in `data/one_stroke_tasks.jsonl`.
 - Riichi Mahjong tile-shape tasks in `data/mahjong_tasks.jsonl`.
@@ -30,6 +31,10 @@ Optional fields:
 - `rule_context`: extra rules inserted into the prompt for rule-condition tasks.
 - `clue_turns`: ordered clues for history-memory tasks. These tasks are run with
   both `incremental_state` and `deferred_reasoning` protocols.
+- `source_id`: shared id used to pair direct, rule, and history variants.
+- `variant`: concrete derived variant name.
+- `rule_mode`: `temporary_codebook` or `counterfactual_semantics` for rule tasks.
+- `derivation_seed`: fixed seed used to reproduce the derived record.
 
 For a `history_memory` record, `puzzle` must contain only the shared setup and
 attribute domains; put every sequential clue exclusively in `clue_turns` so the
@@ -38,6 +43,16 @@ initial system message does not reveal future clues.
 Do not use the masked `___` solutions from `allenai/ZebraLogicBench` as gold.
 Use `scripts/import_zebra_tasks.py`, which imports scoreable records from
 `WildEval/ZebraLogic`.
+
+The formal set uses 15 tasks per difficulty. Its fixed-seed sampler covers all
+official grid sizes, balances sizes as evenly as possible, balances
+low/middle/high within-size clue-count thirds, and excludes the three smoke
+ids. See `data/zebra/README.md` for the reproducible import command.
+
+Run `scripts/derive_zebra_variants.py` to derive the temporary-codebook,
+history-memory, and counterfactual-candidate files from the same 45 source ids.
+Counterfactual candidates have `solution: null` by design and must never be
+evaluated until their new unique solutions are independently verified.
 
 ## Xiangqi Tasks
 
@@ -222,4 +237,14 @@ Refresh the Zebra smoke set:
 
 ```powershell
 python scripts/import_zebra_tasks.py --smoke-per-difficulty 1 --overwrite
+```
+
+Refresh the formal Zebra evaluation set from a downloaded `grid_mode` Parquet
+file:
+
+```powershell
+python scripts/import_zebra_tasks.py --source-parquet <grid-mode.parquet> `
+  --evaluation-per-difficulty 15 `
+  --exclude-task-file data/zebra/tasks.jsonl `
+  --seed 20260810 --overwrite
 ```

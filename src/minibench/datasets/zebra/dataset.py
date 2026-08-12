@@ -38,12 +38,16 @@ class ZebraSolution:
 @dataclass(frozen=True)
 class ZebraTask:
     id: str
+    source_id: str
+    variant: str
     size: str
     puzzle: str
     solution: ZebraSolution
     capability: str
+    rule_mode: str | None
     rule_context: str | None
     clue_turns: tuple[str, ...]
+    derivation_seed: int | None
     tags: tuple[str, ...]
 
     @property
@@ -83,6 +87,9 @@ def zebra_task_from_dict(raw: dict[str, Any]) -> ZebraTask:
     task_id = raw.get("id")
     if not isinstance(task_id, str) or not task_id.strip():
         raise ValueError("Zebra task id must be a non-empty string")
+    source_id = raw.get("source_id", task_id)
+    if not isinstance(source_id, str) or not source_id.strip():
+        raise ValueError(f"{task_id}: source_id must be a non-empty string")
     size = raw.get("size")
     if not isinstance(size, str):
         raise ValueError(f"{task_id}: size must be a string")
@@ -99,6 +106,18 @@ def zebra_task_from_dict(raw: dict[str, Any]) -> ZebraTask:
         choices = ", ".join(sorted(set(CAPABILITY_ALIASES.values())))
         raise ValueError(f"{task_id}: capability must be one of {choices}")
     capability = CAPABILITY_ALIASES[capability_raw]
+    variant = raw.get("variant", capability)
+    if not isinstance(variant, str) or not variant.strip():
+        raise ValueError(f"{task_id}: variant must be a non-empty string")
+
+    rule_mode = raw.get("rule_mode")
+    if rule_mode not in (None, "temporary_codebook", "counterfactual_semantics"):
+        raise ValueError(
+            f"{task_id}: rule_mode must be temporary_codebook, "
+            "counterfactual_semantics, or null"
+        )
+    if rule_mode is not None and capability != "rule_condition":
+        raise ValueError(f"{task_id}: rule_mode requires capability rule_condition")
 
     rule_context = raw.get("rule_context")
     if rule_context is not None and not isinstance(rule_context, str):
@@ -107,10 +126,17 @@ def zebra_task_from_dict(raw: dict[str, Any]) -> ZebraTask:
     if capability == "history_memory" and not clue_turns:
         raise ValueError(f"{task_id}: history_memory tasks require clue_turns")
 
+    derivation_seed = raw.get("derivation_seed")
+    if derivation_seed is not None and (
+        isinstance(derivation_seed, bool) or not isinstance(derivation_seed, int)
+    ):
+        raise ValueError(f"{task_id}: derivation_seed must be an integer or null")
+
     tags = list(_string_tuple(task_id, raw.get("tags", []), "tags"))
     derived_tags = (
         "task:zebra",
         f"capability:{capability}",
+        f"variant:{variant}",
         f"size:{size}",
         f"zeroeval-size:{zeroeval_size_group(size)}",
         f"difficulty:{difficulty_for_size(size)}",
@@ -118,15 +144,23 @@ def zebra_task_from_dict(raw: dict[str, Any]) -> ZebraTask:
     for tag in derived_tags:
         if tag not in tags:
             tags.append(tag)
+    if rule_mode is not None:
+        rule_mode_tag = f"rule-mode:{rule_mode}"
+        if rule_mode_tag not in tags:
+            tags.append(rule_mode_tag)
 
     return ZebraTask(
         id=task_id,
+        source_id=source_id,
+        variant=variant,
         size=size,
         puzzle=puzzle,
         solution=solution,
         capability=capability,
+        rule_mode=rule_mode,
         rule_context=rule_context,
         clue_turns=clue_turns,
+        derivation_seed=derivation_seed,
         tags=tuple(tags),
     )
 

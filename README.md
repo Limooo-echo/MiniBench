@@ -62,7 +62,10 @@ src/minibench/datasets/
 
 | Task family | Data file | Command |
 | --- | --- | --- |
-| Zebra logic grids | `data/zebra/tasks.jsonl` | `evaluate-zebra` |
+| Zebra smoke set | `data/zebra/tasks.jsonl` | `evaluate-zebra` |
+| Zebra formal evaluation (15 per difficulty) | `data/zebra/eval.jsonl` | YAML config or `--zebra-tasks` |
+| Zebra temporary-rule evaluation | `data/zebra/rule_codebook_eval.jsonl` | `zebra_rule_codebook.yaml` |
+| Zebra history evaluation | `data/zebra/history_eval.jsonl` | `zebra_history.yaml` |
 | Simple Xiangqi | `data/xiangqi/tasks.jsonl` | `evaluate-xiangqi` |
 | Hard Xiangqi with Pikafish | `data/xiangqi/hard_tasks.jsonl` | `evaluate-xiangqi` |
 | One-stroke graph puzzles | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
@@ -125,7 +128,7 @@ Zebra direct reasoning:
 
 ```bash
 python -m minibench.cli evaluate-zebra \
-  --zebra-tasks data/zebra/tasks.jsonl \
+  --zebra-tasks data/zebra/eval.jsonl \
   --agent openai-compatible \
   --provider deepseek \
   --model deepseek-chat \
@@ -135,10 +138,16 @@ python -m minibench.cli evaluate-zebra \
 ```
 
 The built-in smoke set contains one easy, medium, and hard record from
-`WildEval/ZebraLogic`. `rule_context` is already wired into prompts. Records
+`WildEval/ZebraLogic`. The formal direct-reasoning set contains 15 records per
+difficulty and is used by `config/experiments/zebra.yaml`. `rule_context` is
+already wired into prompts. Records
 with `capability: history_memory` run both real-chat protocols by default:
 `incremental_state` and `deferred_reasoning`. The provider-level message API is
 task-agnostic and can also be reused by Xiangqi and Mahjong history evaluators.
+
+The same 45 source ids are reused for the temporary-codebook and history
+variants. Counterfactual-rule candidates are kept in a separate unscoreable
+JSONL until each changed solution has been manually or solver verified.
 
 Xiangqi:
 

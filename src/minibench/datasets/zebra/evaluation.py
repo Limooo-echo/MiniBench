@@ -29,9 +29,12 @@ MEMORY_MODES = ("incremental_state", "deferred_reasoning")
 @dataclass(frozen=True)
 class ZebraInstanceResult:
     task_id: str
+    source_id: str
+    variant: str
     size: str
     difficulty: str
     capability: str
+    rule_mode: str | None
     memory_mode: str | None
     success: bool
     score: float
@@ -173,9 +176,12 @@ def evaluate_zebra_tasks(
             results.append(
                 ZebraInstanceResult(
                     task_id=task.id,
+                    source_id=task.source_id,
+                    variant=task.variant,
                     size=task.size,
                     difficulty=task.difficulty,
                     capability=task.capability,
+                    rule_mode=task.rule_mode,
                     memory_mode=mode,
                     raw_output=raw_output,
                     conversation=conversation,
@@ -236,6 +242,11 @@ def summarize_zebra(results: list[ZebraInstanceResult]) -> dict[str, Any]:
     summary["by_size"] = _group_results(results, "size")
     summary["by_difficulty"] = _group_results(results, "difficulty")
     summary["by_capability"] = _group_results(results, "capability")
+    summary["by_variant"] = _group_results(results, "variant")
+    summary["by_rule_mode"] = _group_results(
+        [result for result in results if result.rule_mode is not None],
+        "rule_mode",
+    )
     summary["by_memory_mode"] = _group_results(
         [result for result in results if result.memory_mode is not None],
         "memory_mode",
