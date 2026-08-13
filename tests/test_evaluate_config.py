@@ -206,6 +206,79 @@ class EvaluateConfigTests(unittest.TestCase):
                 set(result["by_rule_mode"]), {"full", "conflicting_rule"}
             )
 
+    def test_run_config_expands_one_stroke_a4_input_modes(self):
+        from minibench.datasets.one_stroke.dataset import load_one_stroke_tasks
+
+        task = load_one_stroke_tasks("data/one_stroke/a4_multimodal.jsonl")[0]
+        raw_output = json.dumps(
+            {
+                "recognized_vertices": list(task.vertices),
+                "recognized_edges": [list(edge) for edge in task.edges],
+                "solvable": task.solution_exists,
+                "path": list(task.solution_path),
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            predictions = Path(tmpdir) / "predictions.jsonl"
+            predictions.write_text(
+                json.dumps(
+                    {"task_id": task.id, "raw_outputs": [raw_output] * 3}
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            config = Path(tmpdir) / "a4.yaml"
+            config.write_text(
+                yaml.safe_dump(
+                    {
+                        "task": {
+                            "family": "one_stroke",
+                            "path": "data/one_stroke/a4_multimodal.jsonl",
+                            "limit": 1,
+                            "task_ids": [],
+                        },
+                        "agent": {
+                            "name": "openai-compatible",
+                            "predictions": str(predictions),
+                        },
+                        "provider": {"name": "generic"},
+                        "evaluation": {
+                            "input_modes": [
+                                "text",
+                                "clear_image",
+                                "challenge_image",
+                            ]
+                        },
+                        "run": {
+                            "output_dir": str(Path(tmpdir) / "runs"),
+                            "run_name": "a4-unit-run",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_config(config)
+
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["success"], 3)
+        self.assertEqual(
+            set(result["by_input_mode"]),
+            {"text", "clear_image", "challenge_image"},
+        )
+
+    def test_cli_accepts_multimodal_all_modes(self):
+        from minibench.cli import build_parser
+
+        one_stroke = build_parser().parse_args(
+            ["evaluate-one-stroke", "--input-mode", "all"]
+        )
+        mahjong = build_parser().parse_args(
+            ["evaluate-mahjong", "--input-mode", "all"]
+        )
+        self.assertEqual(one_stroke.input_mode, "all")
+        self.assertEqual(mahjong.input_mode, "all")
+
     def test_invalid_task_family_reports_clear_error(self):
         with self.assertRaisesRegex(ValueError, "task.family must be one of"):
             validate_experiment_config(

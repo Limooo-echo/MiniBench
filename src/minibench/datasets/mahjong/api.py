@@ -178,6 +178,69 @@ def tenpai_discards(tiles: list[str] | tuple[str, ...]) -> tuple[str, ...]:
     return tuple(discards)
 
 
+def live_wait_counts(
+    tiles: list[str] | tuple[str, ...],
+    visible_tiles: list[str] | tuple[str, ...] = (),
+    *,
+    additional_visible: list[str] | tuple[str, ...] = (),
+) -> dict[str, int]:
+    """Return each structural wait and the number of unseen copies remaining."""
+
+    normalized = normalize_tiles(tiles)
+    visible = tuple(normalize_tile(tile) for tile in visible_tiles)
+    additional = tuple(normalize_tile(tile) for tile in additional_visible)
+    known_counts = Counter((*normalized, *visible, *additional))
+    overfull = sorted(tile for tile, count in known_counts.items() if count > 4)
+    if overfull:
+        raise ValueError(
+            "hand and visible tiles contain too many copies of: "
+            + ", ".join(overfull)
+        )
+    return {
+        tile: 4 - known_counts[tile]
+        for tile in winning_tiles(normalized)
+        if known_counts[tile] < 4
+    }
+
+
+def live_waits_by_discard(
+    tiles: list[str] | tuple[str, ...],
+    visible_tiles: list[str] | tuple[str, ...] = (),
+) -> dict[str, dict[str, int]]:
+    normalized = normalize_tiles(tiles)
+    if len(normalized) % 3 != 2:
+        raise ValueError("discard tasks require a 3n+2 hand, usually 14 tiles")
+    result: dict[str, dict[str, int]] = {}
+    for discard in sorted(set(normalized), key=tile_to_index):
+        remaining = list(normalized)
+        remaining.remove(discard)
+        waits = live_wait_counts(
+            remaining,
+            visible_tiles,
+            additional_visible=(discard,),
+        )
+        if waits:
+            result[discard] = waits
+    return result
+
+
+def max_ukeire_discards(
+    tiles: list[str] | tuple[str, ...],
+    visible_tiles: list[str] | tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Return all discards tied for the most live winning tile copies."""
+
+    waits = live_waits_by_discard(tiles, visible_tiles)
+    if not waits:
+        return ()
+    maximum = max(sum(counts.values()) for counts in waits.values())
+    return tuple(
+        discard
+        for discard, counts in waits.items()
+        if sum(counts.values()) == maximum
+    )
+
+
 def score_closed_hand(
     tiles: list[str] | tuple[str, ...],
     *,

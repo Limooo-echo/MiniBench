@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from minibench.core.agent import Agent
+from minibench.core.multimodal import ImageAttachment
 
 
 class PredictionFileAgent(Agent):
@@ -52,3 +53,12 @@ class PredictionFileAgent(Agent):
             )
         self.positions[task_id] = position + 1
         return task_outputs[position]
+
+    def generate_multimodal(
+        self,
+        prompt: str,
+        task: Any,
+        *,
+        images: Sequence[ImageAttachment],
+    ) -> str:
+        return self.generate(prompt, task)

@@ -3,8 +3,10 @@ from minibench.core.agent import (
     ChatClient,
     ChatMessage,
     MessageAgent,
+    MultimodalAgent,
     ReasoningConfig,
 )
+from minibench.core.multimodal import ImageAttachment
 from minibench.agents.critic_refine import CriticRefineAgent
 from minibench.agents.cot import CoTAgent
 from minibench.agents.direct import DirectAgent
@@ -21,9 +23,11 @@ __all__ = [
     "CriticRefineAgent",
     "DirectAgent",
     "MessageAgent",
+    "MultimodalAgent",
     "PlanThenSolveAgent",
     "PredictionFileAgent",
     "ReasoningConfig",
     "SelfConsistencyAgent",
     "TreeOfThoughtAgent",
+    "ImageAttachment",
 ]

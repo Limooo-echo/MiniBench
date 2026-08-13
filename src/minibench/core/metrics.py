@@ -95,7 +95,11 @@ def summarize_metrics(results: list[Any]) -> dict[str, Any]:
     totals["token_usage"] = empty_token_usage()
 
     for result in results:
-        metrics = getattr(result, "metrics", None) or empty_agent_run_metrics()
+        metrics = (
+            result.get("metrics")
+            if isinstance(result, dict)
+            else getattr(result, "metrics", None)
+        ) or empty_agent_run_metrics()
         totals["task_elapsed_seconds"] += float(metrics.get("task_elapsed_seconds", 0.0))
         totals["model_elapsed_seconds"] += float(metrics.get("model_elapsed_seconds", 0.0))
         totals["llm_calls"] += int(metrics.get("llm_calls", 0))

@@ -10,6 +10,7 @@ import urllib.request
 
 from minibench.core.agent import Agent, ChatMessage
 from minibench.core.metrics import empty_token_usage, extract_token_usage
+from minibench.core.multimodal import ImageAttachment
 from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT
 
 
@@ -94,6 +95,7 @@ class OpenAICompatibleAgent(Agent):
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool | None = None,
+        images: Sequence[ImageAttachment] = (),
     ) -> dict[str, object]:
         return self.build_messages_payload(
             [{"role": "user", "content": prompt}],
@@ -101,6 +103,7 @@ class OpenAICompatibleAgent(Agent):
             temperature=temperature,
             max_tokens=max_tokens,
             json_mode=json_mode,
+            images=images,
         )
 
     def build_messages_payload(
@@ -111,6 +114,7 @@ class OpenAICompatibleAgent(Agent):
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool | None = None,
+        images: Sequence[ImageAttachment] = (),
     ) -> dict[str, object]:
         normalized_messages = _validate_messages(messages)
         if not any(message["role"] == "system" for message in normalized_messages):
@@ -123,6 +127,9 @@ class OpenAICompatibleAgent(Agent):
                 "system_prompt cannot be combined with messages that already include "
                 "a system role"
             )
+
+        if images:
+            _attach_images_to_last_user_message(normalized_messages, images)
 
         payload: dict[str, object] = {
             "model": self.model,
@@ -155,6 +162,7 @@ class OpenAICompatibleAgent(Agent):
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool | None = None,
+        images: Sequence[ImageAttachment] = (),
     ) -> str:
         return self.complete_messages(
             [{"role": "user", "content": prompt}],
@@ -162,6 +170,7 @@ class OpenAICompatibleAgent(Agent):
             temperature=temperature,
             max_tokens=max_tokens,
             json_mode=json_mode,
+            images=images,
         )
 
     def complete_messages(
@@ -172,6 +181,7 @@ class OpenAICompatibleAgent(Agent):
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool | None = None,
+        images: Sequence[ImageAttachment] = (),
     ) -> str:
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
@@ -189,6 +199,7 @@ class OpenAICompatibleAgent(Agent):
                     temperature=temperature,
                     max_tokens=max_tokens,
                     json_mode=json_mode,
+                    images=images,
                 )
             ).encode("utf-8"),
             headers={
@@ -238,6 +249,15 @@ class OpenAICompatibleAgent(Agent):
     def generate(self, prompt: str, task: Any) -> str:
         return self.complete(prompt)
 
+    def generate_multimodal(
+        self,
+        prompt: str,
+        task: Any,
+        *,
+        images: Sequence[ImageAttachment],
+    ) -> str:
+        return self.complete(prompt, images=images)
+
     def generate_messages(
         self,
         messages: Sequence[ChatMessage],
@@ -246,12 +266,14 @@ class OpenAICompatibleAgent(Agent):
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool | None = None,
+        images: Sequence[ImageAttachment] = (),
     ) -> str:
         return self.complete_messages(
             messages,
             temperature=temperature,
             max_tokens=max_tokens,
             json_mode=json_mode,
+            images=images,
         )
 
     def metrics_snapshot(self) -> dict[str, Any]:
@@ -308,6 +330,24 @@ def _validate_messages(messages: Sequence[ChatMessage]) -> list[ChatMessage]:
             raise ValueError(f"message {index} content must be a string")
         normalized.append({"role": role, "content": content})
     return normalized
+
+
+def _attach_images_to_last_user_message(
+    messages: list[ChatMessage],
+    images: Sequence[ImageAttachment],
+) -> None:
+    for message in reversed(messages):
+        if message["role"] != "user":
+            continue
+        text = message["content"]
+        if not isinstance(text, str):
+            raise ValueError("cannot attach images to a non-text user message")
+        message["content"] = [
+            {"type": "text", "text": text},
+            *(image.content_part() for image in images),
+        ]
+        return
+    raise ValueError("images require at least one user message")
 
 
 def _content_to_text(content: object) -> str:

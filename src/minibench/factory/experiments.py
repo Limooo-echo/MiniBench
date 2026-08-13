@@ -226,6 +226,9 @@ def _evaluate(
         rule_modes = evaluation_config.get("rule_modes", ("full",))
         if isinstance(rule_modes, str):
             rule_modes = (rule_modes,)
+        input_modes = evaluation_config.get("input_modes", ("challenge_image",))
+        if isinstance(input_modes, str):
+            input_modes = (input_modes,)
         final_max_tokens = evaluation_config.get("final_max_tokens")
         return spec.evaluate_tasks(
             tasks,
@@ -233,6 +236,7 @@ def _evaluate(
             prompt_variant=evaluation_config.get("prompt_variant", "baseline"),
             memory_modes=tuple(memory_modes),
             rule_modes=tuple(rule_modes),
+            input_modes=tuple(input_modes),
             state_max_tokens=int(evaluation_config.get("state_max_tokens", 512)),
             ack_max_tokens=int(evaluation_config.get("ack_max_tokens", 32)),
             final_max_tokens=(
@@ -280,5 +284,14 @@ def _evaluate(
             mahjong_ai_mode=evaluation_config.get("mahjong_ai_mode", "stdio"),
             mahjong_ai_timeout=evaluation_config.get("mahjong_ai_timeout", 30.0),
             show_progress=bool(evaluation_config.get("show_progress", False)),
+        )
+    if family == "mahjong":
+        input_modes = evaluation_config.get("input_modes")
+        if isinstance(input_modes, str):
+            input_modes = (input_modes,)
+        return spec.evaluate_tasks(
+            tasks,
+            agent,
+            input_modes=(tuple(input_modes) if input_modes is not None else None),
         )
     return spec.evaluate_tasks(tasks, agent)

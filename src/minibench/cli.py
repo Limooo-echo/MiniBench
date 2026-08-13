@@ -276,12 +276,20 @@ def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
             if args.rule_mode == "all"
             else (args.rule_mode,)
         )
+        from minibench.datasets.one_stroke.prompting import ONE_STROKE_INPUT_MODES
+
+        input_modes = (
+            ONE_STROKE_INPUT_MODES
+            if args.input_mode == "all"
+            else (args.input_mode,)
+        )
         agent = _make_cli_agent(args, system_prompt=ONE_STROKE_SYSTEM_PROMPT)
         results = evaluate_one_stroke_tasks(
             tasks,
             agent,
             prompt_variant=args.prompt_variant,
             rule_modes=rule_modes,
+            input_modes=input_modes,
             show_progress=args.progress,
         )
     except (KeyError, RuntimeError, ValueError) as exc:
@@ -341,7 +349,10 @@ def _cmd_evaluate_mahjong(args: argparse.Namespace) -> int:
         tasks = tasks[: args.limit]
     try:
         agent = _make_cli_agent(args, system_prompt=MAHJONG_SYSTEM_PROMPT)
-        results = evaluate_mahjong_tasks(tasks, agent)
+        input_modes = (
+            ("text", "image") if args.input_mode == "all" else (args.input_mode,)
+        )
+        results = evaluate_mahjong_tasks(tasks, agent, input_modes=input_modes)
     except (KeyError, RuntimeError, ValueError) as exc:
         raise SystemExit(f"mahjong evaluation failed: {exc}") from exc
     run_dir = write_mahjong_run(results, args.output_dir, args.run_name)
@@ -724,6 +735,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Temporary-rule mode for rule-condition tasks; all runs four ablations.",
     )
     evaluate_one_stroke.add_argument(
+        "--input-mode",
+        choices=("text", "clear_image", "challenge_image", "all"),
+        default="challenge_image",
+        help="A4 input mode; all expands the three paired inputs.",
+    )
+    evaluate_one_stroke.add_argument(
         "--progress",
         action="store_true",
         help="Show one-stroke evaluation progress on stderr.",
@@ -778,6 +795,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--agent",
         choices=STATIC_GENERATIVE_AGENT_CHOICES,
         default="openai-compatible",
+    )
+    evaluate_mahjong.add_argument(
+        "--input-mode",
+        choices=("text", "image", "all"),
+        default="image",
+        help="Visual Mahjong input mode; non-visual legacy tasks remain text-only.",
     )
     _add_provider_args(evaluate_mahjong, max_tokens=256)
     _add_run_args(evaluate_mahjong)

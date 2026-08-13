@@ -130,7 +130,9 @@ src/minibench/datasets/
 | One-stroke A1 direct (10 per difficulty) | `data/one_stroke/a1_direct.jsonl` | `one_stroke_a1.yaml` |
 | One-stroke A2 temporary rules (10 per difficulty) | `data/one_stroke/a2_rule_condition.jsonl` | `one_stroke_a2.yaml` |
 | One-stroke A3 history (10 per difficulty) | `data/one_stroke/a3_history.jsonl` | `one_stroke_a3_history.yaml` |
+| One-stroke A4 paired multimodal (10 per difficulty) | `data/one_stroke/a4_multimodal.jsonl` | `one_stroke_a4.yaml` |
 | Static Mahjong tile shapes | `data/mahjong/tasks.jsonl` | `evaluate-mahjong` |
+| Mahjong visual tile tasks (60 paired states) | `data/mahjong/visual_tasks.jsonl` | `mahjong_multimodal.yaml` |
 | Single-player Riichi Mahjong draw-discard | `data/mahjong_solo/tasks.jsonl` | `evaluate-mahjong-solo` |
 | Four-player Riichi Mahjong v1 | `data/mahjong_riichi/tasks.jsonl` | `evaluate-mahjong-riichi` |
 
@@ -423,7 +425,33 @@ only, so 30 tasks produce 60 results:
 ./run.sh config/experiments/one_stroke_a2.yaml
 ./run.sh config/experiments/one_stroke_a2_ablation.yaml
 ./run.sh config/experiments/one_stroke_a3_history.yaml
+./run.sh config/experiments/one_stroke_a4.yaml
+./run.sh config/experiments/one_stroke_a4_ablation.yaml
 ```
+
+A4 is derived one-to-one from A1 without changing the A1 file. Its official run
+uses `challenge_image`; the ablation expands every source task to `text`,
+`clear_image`, and `challenge_image` (90 results). All modes return the same
+schema, including the model's graph transcription:
+
+```json
+{"recognized_vertices":["A","B"],"recognized_edges":[["A","B"]],"solvable":true,"path":["A","B"]}
+```
+
+The primary A4 score validates `path`/the no-solution declaration against hidden
+A1 truth. Transcription is reported separately with vertex and undirected-edge
+multiset precision/recall/F1, exact rates, `joint_success`, and
+`state_parse_error_rate`. Paired summaries report `by_input_mode`, Visual Gap
+(`text` accuracy minus image accuracy), and a deterministic paired-bootstrap
+95% confidence interval. Rebuild all A4 records and PNGs with:
+
+```bash
+python scripts/build_one_stroke_a4.py --overwrite
+```
+
+The common multimodal interface accepts path- or bytes-backed `ImageAttachment`
+objects and forwards one or more images through all reasoning architectures.
+Text-only calls keep their original chat payload.
 
 A2 path answers contain both vertex and edge-ID sequences so parallel edges and
 edge-specific rules remain unambiguous:
@@ -442,6 +470,25 @@ included in its denominator.
 
 The earlier `one_stroke_euler_theorem.yaml` is retained only as a legacy prompt
 ablation for the smoke set; it is not part of the MiniBench 2.0 A1 protocol.
+
+Mahjong visual evaluation keeps `hand` and `visible_tiles` as hidden scoring
+truth. Image prompts do not repeat their tile codes; answers additionally
+transcribe both regions. Use `mahjong_multimodal.yaml` for images and
+`mahjong_multimodal_ablation.yaml` for paired text/image diagnostics. The tile
+assets and Pillow renderer are package data, so the committed images can be
+regenerated without task-specific HTTP code.
+
+```bash
+python scripts/generate_mahjong_visual_tasks.py --overwrite
+```
+
+Xiangqi M2 remains available through `python scripts/run_task.py --task m2` with
+`text`, `img_cn`, and `img_ab`. Its renderer/evaluator now lives in the Xiangqi
+dataset package and `scripts/m2` is a compatibility wrapper. The legacy
+`M2_API_KEY`, `M2_BASE_URL`, `M2_MODEL`, `M2_THINKING`, and `M2_OPP_DEPTH`
+variables still work; common `MINIBENCH_PROVIDER`/`MINIBENCH_MODEL` settings may
+also be used. Step images, legality/optimality/success fields, and the original
+0.3/0.4/0.3 score are preserved.
 
 ### Xiangqi Evaluation Commands
 

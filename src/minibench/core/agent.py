@@ -3,16 +3,31 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, Sequence, TypedDict
 
+from minibench.core.multimodal import ImageAttachment
+
 
 class ChatMessage(TypedDict):
     role: Literal["system", "user", "assistant"]
-    content: str
+    content: str | list[dict[str, object]]
 
 
 class Agent:
     name = "base"
 
     def generate(self, prompt: str, task: Any) -> str:
+        raise NotImplementedError
+
+
+class MultimodalAgent(Protocol):
+    """Agent interface for calls containing one or more image attachments."""
+
+    def generate_multimodal(
+        self,
+        prompt: str,
+        task: Any,
+        *,
+        images: Sequence[ImageAttachment],
+    ) -> str:
         raise NotImplementedError
 
 
@@ -40,6 +55,7 @@ class ChatClient(Protocol):
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool | None = None,
+        images: Sequence[ImageAttachment] = (),
     ) -> str:
         raise NotImplementedError
 
@@ -51,6 +67,7 @@ class ChatClient(Protocol):
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool | None = None,
+        images: Sequence[ImageAttachment] = (),
     ) -> str:
         raise NotImplementedError
 

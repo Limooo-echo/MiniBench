@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from minibench.core.agent import Agent, ChatClient, ReasoningConfig
+from minibench.core.multimodal import ImageAttachment
 from minibench.core.prompts import (
     CRITIC_SYSTEM_PROMPT,
     FINAL_ANSWER_SYSTEM_PROMPT,
@@ -20,12 +21,30 @@ class CriticRefineAgent(Agent):
         self.config = config or ReasoningConfig()
 
     def generate(self, prompt: str, task: Any) -> str:
+        return self._generate(prompt, images=())
+
+    def generate_multimodal(
+        self,
+        prompt: str,
+        task: Any,
+        *,
+        images: Sequence[ImageAttachment],
+    ) -> str:
+        return self._generate(prompt, images=images)
+
+    def _generate(
+        self,
+        prompt: str,
+        *,
+        images: Sequence[ImageAttachment],
+    ) -> str:
         draft = self.client.complete(
             direct_prompt(prompt),
             system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
             temperature=self.config.reasoning_temperature,
             max_tokens=self.config.max_reasoning_tokens,
             json_mode=False,
+            images=images,
         )
         critique = self.client.complete(
             critic_prompt(prompt, draft),
@@ -33,6 +52,7 @@ class CriticRefineAgent(Agent):
             temperature=self.config.final_temperature,
             max_tokens=self.config.max_reasoning_tokens,
             json_mode=False,
+            images=images,
         )
         return self.client.complete(
             refine_prompt(prompt, draft, critique),
@@ -40,4 +60,5 @@ class CriticRefineAgent(Agent):
             temperature=self.config.final_temperature,
             max_tokens=self.config.final_max_tokens,
             json_mode=True,
+            images=images,
         )

@@ -1,0 +1,24 @@
+task:
+  family: mahjong
+  path: data/mahjong/visual_tasks.jsonl
+  limit: null
+  task_ids: []
+
+agent:
+  name: openai-compatible
+  samples: 1
+
+provider:
+  name: qwen
+  model: qwen3.8-max
+  json_mode: true
+  max_tokens: 1024
+  timeout: 120
+
+evaluation:
+  input_modes:
+    - image
+
+run:
+  output_dir: runs
+  run_name: null

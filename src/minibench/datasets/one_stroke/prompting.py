@@ -25,6 +25,7 @@ ONE_STROKE_SYSTEM_PROMPT = (
 )
 
 ONE_STROKE_MEMORY_MODES = ("incremental_state", "step_history_only")
+ONE_STROKE_INPUT_MODES = ("text", "clear_image", "challenge_image")
 
 
 def build_one_stroke_prompt(
@@ -32,12 +33,16 @@ def build_one_stroke_prompt(
     *,
     prompt_variant: str = "baseline",
     rule_mode: str = "full",
+    input_mode: str | None = None,
 ) -> str:
     if prompt_variant not in ONE_STROKE_PROMPT_VARIANTS:
         choices = ", ".join(ONE_STROKE_PROMPT_VARIANTS)
         raise ValueError(
             f"unknown one-stroke prompt variant {prompt_variant!r}: {choices}"
         )
+
+    if task.capability == "multimodal":
+        return _build_multimodal_prompt(task, input_mode or "challenge_image")
 
     is_rule_task = task.capability == "rule_condition"
     constraints = (
@@ -153,6 +158,45 @@ def build_one_stroke_prompt(
             "",
             f"A path answer must contain exactly {len(task.edges) + 1} vertex names "
             f"in order, because there are exactly {len(task.edges)} listed edges.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_multimodal_prompt(task: OneStrokeTask, input_mode: str) -> str:
+    if input_mode not in ONE_STROKE_INPUT_MODES:
+        choices = ", ".join(ONE_STROKE_INPUT_MODES)
+        raise ValueError(f"unknown one-stroke input mode {input_mode!r}: {choices}")
+    lines = [
+        "Recognize and solve this one-stroke graph puzzle.",
+        "The graph is undirected. Use every visible/listed edge exactly once; "
+        "parallel edges count separately. Vertices may be revisited.",
+    ]
+    if input_mode == "text":
+        lines.extend(
+            [
+                "Read the graph from the structured text below.",
+                f"Vertices: {', '.join(task.vertices)}",
+                "Edges (duplicates are separate parallel edges):",
+                *(f"- {a}-{b}" for a, b in task.edges),
+            ]
+        )
+    else:
+        lines.append(
+            "Read all vertex labels and connecting edges from the attached image. "
+            "Small gray background marks are visual noise, not edges."
+        )
+    lines.extend(
+        [
+            f"Required start vertex: {task.start if task.start is not None else 'not fixed'}",
+            f"Required end vertex: {task.end if task.end is not None else 'not fixed'}",
+            "Return exactly one JSON object with all four fields:",
+            '{"recognized_vertices":["A","B"],"recognized_edges":[["A","B"]],'
+            '"solvable":true,"path":["A","B"]}',
+            "recognized_edges must contain one unordered endpoint pair per edge; "
+            "repeat a pair when parallel edges are present.",
+            "If no valid one-stroke path exists, set solvable to false and path to null. "
+            "Do not include markdown, reasoning, task IDs, or commentary.",
         ]
     )
     return "\n".join(lines)

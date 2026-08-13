@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from minibench.core.agent import Agent, ChatClient, ReasoningConfig
+from minibench.core.multimodal import ImageAttachment
 from minibench.core.prompts import (
     FINAL_ANSWER_SYSTEM_PROMPT,
     REASONING_SYSTEM_PROMPT,
@@ -20,12 +21,30 @@ class PlanThenSolveAgent(Agent):
         self.config = config or ReasoningConfig()
 
     def generate(self, prompt: str, task: Any) -> str:
+        return self._generate(prompt, images=())
+
+    def generate_multimodal(
+        self,
+        prompt: str,
+        task: Any,
+        *,
+        images: Sequence[ImageAttachment],
+    ) -> str:
+        return self._generate(prompt, images=images)
+
+    def _generate(
+        self,
+        prompt: str,
+        *,
+        images: Sequence[ImageAttachment],
+    ) -> str:
         plan = self.client.complete(
             plan_prompt(prompt),
             system_prompt=REASONING_SYSTEM_PROMPT,
             temperature=self.config.reasoning_temperature,
             max_tokens=self.config.max_reasoning_tokens,
             json_mode=False,
+            images=images,
         )
         solution = self.client.complete(
             solve_with_plan_prompt(prompt, plan),
@@ -33,6 +52,7 @@ class PlanThenSolveAgent(Agent):
             temperature=self.config.reasoning_temperature,
             max_tokens=self.config.max_reasoning_tokens,
             json_mode=False,
+            images=images,
         )
         return self.client.complete(
             finalize_prompt(prompt, solution),
@@ -40,4 +60,5 @@ class PlanThenSolveAgent(Agent):
             temperature=self.config.final_temperature,
             max_tokens=self.config.final_max_tokens,
             json_mode=True,
+            images=images,
         )

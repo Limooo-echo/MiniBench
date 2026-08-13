@@ -16,6 +16,7 @@ dependencies = [
     "PyYAML>=6.0",
     "matplotlib>=3.7.0",
     "networkx>=3.0",
+    "Pillow>=10.0",
 ]
 
 [project.scripts]
@@ -23,6 +24,13 @@ minibench = "minibench.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"minibench.datasets.mahjong" = [
+    "assets/*.md",
+    "assets/tiles/*.svg",
+    "assets/tiles_png/*.png",
+]
 
 [tool.pyright]
 include = ["src", "tests"]

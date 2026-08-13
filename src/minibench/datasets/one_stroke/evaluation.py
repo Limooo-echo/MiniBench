@@ -16,6 +16,7 @@ from minibench.core.metrics import (
     summarize_metrics,
     summary_metrics_line,
 )
+from minibench.core.multimodal import ImageAttachment, summarize_paired_modes
 from minibench.datasets.one_stroke.dataset import (
     OneStrokeHistoryState,
     OneStrokeTask,
@@ -23,6 +24,7 @@ from minibench.datasets.one_stroke.dataset import (
     simulate_one_stroke_history,
 )
 from minibench.datasets.one_stroke.prompting import (
+    ONE_STROKE_INPUT_MODES,
     ONE_STROKE_MEMORY_MODES,
     build_one_stroke_prompt,
     history_event_prompt,
@@ -57,6 +59,20 @@ class OneStrokeInstanceResult:
     rule_types: tuple[str, ...]
     standard_path_valid: bool
     rule_ignored: bool
+    source_task_id: str
+    input_mode: str | None
+    recognized_vertices: list[str]
+    recognized_edges: list[list[str]]
+    vertex_precision: float | None
+    vertex_recall: float | None
+    vertex_f1: float | None
+    vertex_exact: bool | None
+    edge_precision: float | None
+    edge_recall: float | None
+    edge_f1: float | None
+    edge_exact: bool | None
+    graph_transcription_exact: bool | None
+    joint_success: bool | None
     conversation: tuple[ChatMessage, ...]
     tags: tuple[str, ...]
     metrics: dict[str, object]
@@ -97,6 +113,34 @@ def extract_edge_path(output: str) -> list[str] | None:
     ):
         return None
     return edge_path
+
+
+def extract_graph_transcription(
+    output: str,
+) -> tuple[list[str] | None, list[list[str]] | None]:
+    payload = _parse_json_object(output)
+    if payload is None:
+        return None, None
+    vertices = payload.get("recognized_vertices")
+    edges = payload.get("recognized_edges")
+    valid_vertices = (
+        vertices
+        if isinstance(vertices, list)
+        and all(isinstance(vertex, str) for vertex in vertices)
+        else None
+    )
+    valid_edges = (
+        edges
+        if isinstance(edges, list)
+        and all(
+            isinstance(edge, list)
+            and len(edge) == 2
+            and all(isinstance(vertex, str) for vertex in edge)
+            for edge in edges
+        )
+        else None
+    )
+    return valid_vertices, valid_edges
 
 
 def validate_one_stroke_path(
@@ -200,6 +244,7 @@ def evaluate_one_stroke_tasks(
     prompt_variant: str = "baseline",
     memory_modes: Sequence[str] = ONE_STROKE_MEMORY_MODES,
     rule_modes: Sequence[str] = ("full",),
+    input_modes: Sequence[str] = ("challenge_image",),
     state_max_tokens: int = 512,
     ack_max_tokens: int = 32,
     final_max_tokens: int | None = None,
@@ -224,6 +269,15 @@ def evaluate_one_stroke_tasks(
         )
     if not selected_rule_modes:
         raise ValueError("rule_modes must not be empty")
+    selected_input_modes = tuple(input_modes)
+    unknown_input_modes = set(selected_input_modes) - set(ONE_STROKE_INPUT_MODES)
+    if unknown_input_modes:
+        raise ValueError(
+            "unknown one-stroke input mode(s): "
+            + ", ".join(sorted(unknown_input_modes))
+        )
+    if not selected_input_modes:
+        raise ValueError("input_modes must not be empty")
     if state_max_tokens < 1 or ack_max_tokens < 1:
         raise ValueError("one-stroke history token limits must be positive")
     results: list[OneStrokeInstanceResult] = []
@@ -235,35 +289,50 @@ def evaluate_one_stroke_tasks(
         if task.capability == "history_memory"
         else len(selected_rule_modes)
         if task.capability == "rule_condition"
+        else len(selected_input_modes)
+        if task.capability == "multimodal"
         else 1
         for task in tasks
     )
     completed = 0
     for task in tasks:
-        memory_work_modes: tuple[str | None, ...] = (
-            tuple(selected_modes)
-            if task.capability == "history_memory"
-            else (None,)
-        )
-        rule_work_modes: tuple[str | None, ...] = (
-            tuple(selected_rule_modes)
-            if task.capability == "rule_condition"
-            else (None,)
-        )
-        work_modes = (
-            ((memory_mode, None) for memory_mode in memory_work_modes)
-            if task.capability == "history_memory"
-            else ((None, rule_mode) for rule_mode in rule_work_modes)
-        )
-        for memory_mode, rule_mode in work_modes:
+        if task.capability == "history_memory":
+            work_modes = tuple((mode, None, None) for mode in selected_modes)
+        elif task.capability == "rule_condition":
+            work_modes = tuple((None, mode, None) for mode in selected_rule_modes)
+        elif task.capability == "multimodal":
+            work_modes = tuple((None, None, mode) for mode in selected_input_modes)
+        else:
+            work_modes = ((None, None, None),)
+        for memory_mode, rule_mode, input_mode in work_modes:
             completed += 1
             if show_progress and progress_stream is not None:
-                suffix = memory_mode or rule_mode
+                suffix = memory_mode or rule_mode or input_mode
                 label = task.id if suffix is None else f"{task.id}:{suffix}"
                 _write_progress(progress_stream, completed, total, label)
 
             metrics_start = start_task_metrics(agent)
-            if memory_mode is None:
+            if input_mode is not None:
+                prompt = build_one_stroke_prompt(task, input_mode=input_mode)
+                if input_mode == "text":
+                    raw_output = agent.generate(prompt, task)
+                else:
+                    generate_multimodal = getattr(agent, "generate_multimodal", None)
+                    if not callable(generate_multimodal):
+                        raise ValueError(
+                            "one-stroke image evaluation requires an agent with "
+                            "generate_multimodal()"
+                        )
+                    variant = "clear" if input_mode == "clear_image" else "challenge"
+                    raw_output = generate_multimodal(
+                        prompt,
+                        task,
+                        images=[ImageAttachment(path=task.image_variants[variant])],
+                    )
+                scored = _score_multimodal_output(task, raw_output)
+                conversation = ()
+                result_prompt_variant = "multimodal"
+            elif memory_mode is None:
                 prompt = build_one_stroke_prompt(
                     task,
                     prompt_variant=prompt_variant,
@@ -331,6 +400,24 @@ def evaluate_one_stroke_tasks(
                     rule_types=tuple(scored["rule_types"]),
                     standard_path_valid=bool(scored["standard_path_valid"]),
                     rule_ignored=bool(scored["rule_ignored"]),
+                    source_task_id=task.source_task_id or task.id,
+                    input_mode=input_mode,
+                    recognized_vertices=list(scored.get("recognized_vertices", [])),
+                    recognized_edges=[
+                        list(edge) for edge in scored.get("recognized_edges", [])
+                    ],
+                    vertex_precision=scored.get("vertex_precision"),
+                    vertex_recall=scored.get("vertex_recall"),
+                    vertex_f1=scored.get("vertex_f1"),
+                    vertex_exact=scored.get("vertex_exact"),
+                    edge_precision=scored.get("edge_precision"),
+                    edge_recall=scored.get("edge_recall"),
+                    edge_f1=scored.get("edge_f1"),
+                    edge_exact=scored.get("edge_exact"),
+                    graph_transcription_exact=scored.get(
+                        "graph_transcription_exact"
+                    ),
+                    joint_success=scored.get("joint_success"),
                     conversation=conversation,
                     tags=task.tags,
                     metrics=finish_task_metrics(agent, metrics_start),
@@ -341,6 +428,87 @@ def evaluate_one_stroke_tasks(
         progress_stream.write("\n")
         progress_stream.flush()
     return results
+
+
+def _score_multimodal_output(
+    task: OneStrokeTask,
+    raw_output: str,
+) -> dict[str, object]:
+    path, task_success, score, reasons = _score_direct_output(task, raw_output)
+    payload = _parse_json_object(raw_output)
+    if payload is not None:
+        declared_solvable = payload.get("solvable")
+        if "path" not in payload:
+            task_success = False
+            score = 0.0
+            reasons = ["missing_path_field"]
+        elif declared_solvable is False and payload.get("path") is not None:
+            task_success = False
+            score = 0.0
+            reasons = ["unsolvable_answer_requires_null_path"]
+        elif not isinstance(declared_solvable, bool):
+            task_success = False
+            score = 0.0
+            reasons = ["missing_boolean_solvable"]
+
+    recognized_vertices, recognized_edges = extract_graph_transcription(raw_output)
+    predicted_vertices = recognized_vertices or []
+    predicted_edges = recognized_edges or []
+    vertex_precision, vertex_recall, vertex_f1, vertex_exact = _counter_metrics(
+        Counter(predicted_vertices),
+        Counter(task.vertices),
+    )
+    predicted_edge_counter = Counter(
+        _canonical_edge((edge[0], edge[1])) for edge in predicted_edges
+    )
+    expected_edge_counter = Counter(_canonical_edge(edge) for edge in task.edges)
+    edge_precision, edge_recall, edge_f1, edge_exact = _counter_metrics(
+        predicted_edge_counter,
+        expected_edge_counter,
+    )
+    graph_exact = bool(
+        recognized_vertices is not None
+        and recognized_edges is not None
+        and vertex_exact
+        and edge_exact
+    )
+    return {
+        "path": path,
+        "edge_path": [],
+        "success": task_success,
+        "score": score,
+        "reasons": reasons,
+        "constraint_reasons": [],
+        "solution_exists": task.solution_exists,
+        "rule_types": (),
+        "standard_path_valid": False,
+        "rule_ignored": False,
+        "recognized_vertices": predicted_vertices,
+        "recognized_edges": predicted_edges,
+        "vertex_precision": vertex_precision,
+        "vertex_recall": vertex_recall,
+        "vertex_f1": vertex_f1,
+        "vertex_exact": vertex_exact,
+        "edge_precision": edge_precision,
+        "edge_recall": edge_recall,
+        "edge_f1": edge_f1,
+        "edge_exact": edge_exact,
+        "graph_transcription_exact": graph_exact,
+        "joint_success": bool(task_success and graph_exact),
+    }
+
+
+def _counter_metrics(
+    predicted: Counter[Any],
+    expected: Counter[Any],
+) -> tuple[float, float, float, bool]:
+    true_positive = sum((predicted & expected).values())
+    predicted_total = sum(predicted.values())
+    expected_total = sum(expected.values())
+    precision = true_positive / predicted_total if predicted_total else 0.0
+    recall = true_positive / expected_total if expected_total else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return precision, recall, f1, predicted == expected
 
 
 def _score_rule_output(
@@ -559,6 +727,43 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
         group["rule_ignore_count"] = ignored
         group["rule_ignore_denominator"] = denominator
         group["rule_ignore_rate"] = ignored / denominator if denominator else None
+    multimodal_results = [result for result in results if result.input_mode is not None]
+    paired_summary = (
+        summarize_paired_modes(multimodal_results) if multimodal_results else {}
+    )
+    by_input_mode = paired_summary.get("by_input_mode", {})
+    for mode, group in by_input_mode.items():
+        selected = [result for result in multimodal_results if result.input_mode == mode]
+        difficulty_rates = [
+            sum(int(item.success) for item in selected if item.difficulty == difficulty)
+            / sum(1 for item in selected if item.difficulty == difficulty)
+            for difficulty in sorted({item.difficulty for item in selected})
+        ]
+        group["difficulty_macro_accuracy"] = (
+            sum(difficulty_rates) / len(difficulty_rates) if difficulty_rates else 0.0
+        )
+        graph_exact_count = sum(
+            int(bool(item.graph_transcription_exact)) for item in selected
+        )
+        joint_count = sum(int(bool(item.joint_success)) for item in selected)
+        group["graph_transcription_exact_rate"] = (
+            graph_exact_count / len(selected) if selected else 0.0
+        )
+        group["state_parse_error_rate"] = (
+            1.0 - group["graph_transcription_exact_rate"] if selected else 0.0
+        )
+        group["joint_success_rate"] = joint_count / len(selected) if selected else 0.0
+        for field in (
+            "vertex_precision",
+            "vertex_recall",
+            "vertex_f1",
+            "edge_precision",
+            "edge_recall",
+            "edge_f1",
+        ):
+            values = [getattr(item, field) for item in selected]
+            present = [float(value) for value in values if value is not None]
+            group[f"mean_{field}"] = sum(present) / len(present) if present else 0.0
     return {
         "total": total,
         "success": success_count,
@@ -572,6 +777,13 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
         ),
         "by_rule_mode": by_rule_mode,
         "by_rule_type": _group_rule_types(rule_results),
+        "by_input_mode": by_input_mode,
+        "visual_gap": paired_summary.get("visual_gap", {}),
+        "a4_score": (
+            by_input_mode["challenge_image"]["difficulty_macro_accuracy"]
+            if "challenge_image" in by_input_mode
+            else None
+        ),
         "rule_ignore_count": rule_ignored_count,
         "rule_ignore_denominator": rule_denominator,
         "rule_ignore_rate": (

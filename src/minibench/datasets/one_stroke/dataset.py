@@ -48,6 +48,8 @@ class OneStrokeTask:
     rule_constraints: tuple[OneStrokeRule, ...]
     key_rule_id: str | None
     conflicting_rule: OneStrokeRule | None
+    source_task_id: str | None
+    image_variants: dict[str, Path]
     tags: tuple[str, ...]
 
 
@@ -178,7 +180,11 @@ def _is_connected_on_edges(
     return seen <= visited
 
 
-def one_stroke_task_from_dict(raw: dict[str, Any]) -> OneStrokeTask:
+def one_stroke_task_from_dict(
+    raw: dict[str, Any],
+    *,
+    base_dir: Path | None = None,
+) -> OneStrokeTask:
     if not isinstance(raw.get("id"), str) or not raw["id"]:
         raise ValueError("task id must be a non-empty string")
 
@@ -218,9 +224,11 @@ def one_stroke_task_from_dict(raw: dict[str, Any]) -> OneStrokeTask:
         "direct",
         "rule_condition",
         "history_memory",
+        "multimodal",
     }:
         raise ValueError(
-            f"{raw['id']}: capability must be direct, rule_condition, or history_memory"
+            f"{raw['id']}: capability must be direct, rule_condition, "
+            "history_memory, or multimodal"
         )
 
     rule_constraints = _parse_rule_constraints(
@@ -327,6 +335,12 @@ def one_stroke_task_from_dict(raw: dict[str, Any]) -> OneStrokeTask:
     if not isinstance(difficulty, str):
         raise ValueError(f"{raw['id']}: difficulty must be a string")
     history_events = _parse_history_events(raw, vertex_set)
+    source_task_id = raw.get("source_task_id")
+    if source_task_id is not None and (
+        not isinstance(source_task_id, str) or not source_task_id
+    ):
+        raise ValueError(f"{raw['id']}: source_task_id must be a non-empty string")
+    image_variants = _parse_image_variants(raw, base_dir=base_dir)
 
     task = OneStrokeTask(
         id=raw["id"],
@@ -343,6 +357,8 @@ def one_stroke_task_from_dict(raw: dict[str, Any]) -> OneStrokeTask:
         rule_constraints=rule_constraints,
         key_rule_id=key_rule_id,
         conflicting_rule=conflicting_rule,
+        source_task_id=source_task_id,
+        image_variants=image_variants,
         tags=tags,
     )
     if capability != "history_memory" and history_events:
@@ -352,6 +368,17 @@ def one_stroke_task_from_dict(raw: dict[str, Any]) -> OneStrokeTask:
     ):
         raise ValueError(
             f"{raw['id']}: rule fields require capability rule_condition"
+        )
+    if capability == "multimodal":
+        if source_task_id is None:
+            raise ValueError(f"{raw['id']}: multimodal tasks require source_task_id")
+        if set(image_variants) != {"clear", "challenge"}:
+            raise ValueError(
+                f"{raw['id']}: multimodal image_variants must contain clear and challenge"
+            )
+    elif source_task_id is not None or image_variants:
+        raise ValueError(
+            f"{raw['id']}: source_task_id and image_variants require capability multimodal"
         )
     if capability == "rule_condition":
         _validate_rule_task_modes(task)
@@ -378,6 +405,29 @@ def one_stroke_task_from_dict(raw: dict[str, Any]) -> OneStrokeTask:
                 f"{raw['id']}: history leaves no valid one-stroke completion"
             )
     return task
+
+
+def _parse_image_variants(
+    raw: dict[str, Any],
+    *,
+    base_dir: Path | None,
+) -> dict[str, Path]:
+    value = raw.get("image_variants", {})
+    if not isinstance(value, dict):
+        raise ValueError(f"{raw['id']}: image_variants must be an object")
+    variants: dict[str, Path] = {}
+    for name, raw_path in value.items():
+        if not isinstance(name, str) or not isinstance(raw_path, str) or not raw_path:
+            raise ValueError(
+                f"{raw['id']}: image_variants must map names to non-empty paths"
+            )
+        path = Path(raw_path)
+        if base_dir is not None and not path.is_absolute():
+            path = (base_dir / path).resolve()
+        if base_dir is not None and not path.is_file():
+            raise ValueError(f"{raw['id']}: image file does not exist: {path}")
+        variants[name] = path
+    return variants
 
 
 def _parse_rule_constraints(
@@ -633,7 +683,7 @@ def load_one_stroke_tasks(path: str | Path | None = None) -> list[OneStrokeTask]
                 raw = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise ValueError(f"{task_path}:{line_number}: invalid JSON") from exc
-            tasks.append(one_stroke_task_from_dict(raw))
+            tasks.append(one_stroke_task_from_dict(raw, base_dir=task_path.parent))
     if not tasks:
         raise ValueError(f"{task_path} contains no tasks")
     return tasks

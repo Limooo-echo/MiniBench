@@ -3,6 +3,8 @@ import unittest
 from minibench.agents import (
     CoTAgent,
     CriticRefineAgent,
+    DirectAgent,
+    PlanThenSolveAgent,
     ReasoningConfig,
     SelfConsistencyAgent,
     TreeOfThoughtAgent,
@@ -23,6 +25,7 @@ class FakeClient:
         temperature=None,
         max_tokens=None,
         json_mode=None,
+        images=(),
     ):
         self.calls.append(
             {
@@ -31,6 +34,7 @@ class FakeClient:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "json_mode": json_mode,
+                "images": images,
             }
         )
         if not self.responses:
@@ -73,6 +77,28 @@ def sample_task():
 
 
 class ReasoningAgentTests(unittest.TestCase):
+    def test_every_reasoning_stage_receives_images(self):
+        from minibench.core.multimodal import ImageAttachment
+
+        image = ImageAttachment(data=b"\x89PNG\r\n\x1a\n", mime_type="image/png")
+        cases = [
+            (DirectAgent, ReasoningConfig(), 1),
+            (CoTAgent, ReasoningConfig(), 2),
+            (SelfConsistencyAgent, ReasoningConfig(samples=2), 3),
+            (TreeOfThoughtAgent, ReasoningConfig(samples=2), 3),
+            (CriticRefineAgent, ReasoningConfig(), 3),
+            (PlanThenSolveAgent, ReasoningConfig(), 3),
+        ]
+        for agent_type, config, call_count in cases:
+            with self.subTest(agent=agent_type.__name__):
+                client = FakeClient(["draft"] * (call_count - 1) + ['{"ok":true}'])
+                agent = agent_type(client, config)
+                agent.generate_multimodal("Question", object(), images=[image])
+                self.assertEqual(len(client.calls), call_count)
+                self.assertTrue(
+                    all(call["images"] == [image] for call in client.calls)
+                )
+
     def test_cot_finalizes_non_choice_json_schema(self):
         client = FakeClient(["The pair wait is E.", '{"winning_tiles":["E"]}'])
         agent = CoTAgent(client, ReasoningConfig())

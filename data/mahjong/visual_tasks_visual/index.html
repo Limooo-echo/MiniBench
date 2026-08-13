@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MiniBench Mahjong Visual Tasks</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #101818; color: #f4f0e4; font-family: Arial, sans-serif; }
+    header { min-height: 64px; padding: 14px 22px; display: flex; align-items: center; gap: 18px; background: #172323; border-bottom: 1px solid #33413e; }
+    h1 { margin: 0; font-size: 18px; letter-spacing: 0; }
+    select { min-width: 330px; margin-left: auto; padding: 9px 34px 9px 10px; border: 1px solid #60716d; border-radius: 4px; background: #f6f1e4; color: #16211f; font: inherit; }
+    main { padding: 20px; }
+    img { display: block; width: min(100%, 1280px); height: auto; margin: 0 auto; border: 1px solid #40534e; border-radius: 6px; background: #174f3c; }
+    @media (max-width: 680px) { header { align-items: stretch; flex-direction: column; } select { width: 100%; min-width: 0; margin-left: 0; } main { padding: 10px; } }
+  </style>
+</head>
+<body>
+  <header><h1>MiniBench Mahjong Visual Tasks</h1><select id="task"><option value="mj-visual-v10-ukeire-001.png">mj-visual-v10-ukeire-001 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-002.png">mj-visual-v10-ukeire-002 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-003.png">mj-visual-v10-ukeire-003 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-004.png">mj-visual-v10-ukeire-004 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-005.png">mj-visual-v10-ukeire-005 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-006.png">mj-visual-v10-ukeire-006 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-007.png">mj-visual-v10-ukeire-007 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-008.png">mj-visual-v10-ukeire-008 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-009.png">mj-visual-v10-ukeire-009 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-010.png">mj-visual-v10-ukeire-010 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-011.png">mj-visual-v10-ukeire-011 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-012.png">mj-visual-v10-ukeire-012 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-013.png">mj-visual-v10-ukeire-013 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-014.png">mj-visual-v10-ukeire-014 - max_ukeire_discard</option>
+<option value="mj-visual-v10-ukeire-015.png">mj-visual-v10-ukeire-015 - max_ukeire_discard</option>
+<option value="mj-visual-v10-wait-001.png">mj-visual-v10-wait-001 - winning_tiles</option>
+<option value="mj-visual-v10-wait-002.png">mj-visual-v10-wait-002 - winning_tiles</option>
+<option value="mj-visual-v10-wait-003.png">mj-visual-v10-wait-003 - winning_tiles</option>
+<option value="mj-visual-v10-wait-004.png">mj-visual-v10-wait-004 - winning_tiles</option>
+<option value="mj-visual-v10-wait-005.png">mj-visual-v10-wait-005 - winning_tiles</option>
+<option value="mj-visual-v10-wait-006.png">mj-visual-v10-wait-006 - winning_tiles</option>
+<option value="mj-visual-v10-wait-007.png">mj-visual-v10-wait-007 - winning_tiles</option>
+<option value="mj-visual-v10-wait-008.png">mj-visual-v10-wait-008 - winning_tiles</option>
+<option value="mj-visual-v10-wait-009.png">mj-visual-v10-wait-009 - winning_tiles</option>
+<option value="mj-visual-v10-wait-010.png">mj-visual-v10-wait-010 - winning_tiles</option>
+<option value="mj-visual-v10-wait-011.png">mj-visual-v10-wait-011 - winning_tiles</option>
+<option value="mj-visual-v10-wait-012.png">mj-visual-v10-wait-012 - winning_tiles</option>
+<option value="mj-visual-v10-wait-013.png">mj-visual-v10-wait-013 - winning_tiles</option>
+<option value="mj-visual-v10-wait-014.png">mj-visual-v10-wait-014 - winning_tiles</option>
+<option value="mj-visual-v10-wait-015.png">mj-visual-v10-wait-015 - winning_tiles</option>
+<option value="mj-visual-v20-ukeire-001.png">mj-visual-v20-ukeire-001 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-002.png">mj-visual-v20-ukeire-002 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-003.png">mj-visual-v20-ukeire-003 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-004.png">mj-visual-v20-ukeire-004 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-005.png">mj-visual-v20-ukeire-005 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-006.png">mj-visual-v20-ukeire-006 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-007.png">mj-visual-v20-ukeire-007 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-008.png">mj-visual-v20-ukeire-008 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-009.png">mj-visual-v20-ukeire-009 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-010.png">mj-visual-v20-ukeire-010 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-011.png">mj-visual-v20-ukeire-011 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-012.png">mj-visual-v20-ukeire-012 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-013.png">mj-visual-v20-ukeire-013 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-014.png">mj-visual-v20-ukeire-014 - max_ukeire_discard</option>
+<option value="mj-visual-v20-ukeire-015.png">mj-visual-v20-ukeire-015 - max_ukeire_discard</option>
+<option value="mj-visual-v20-wait-001.png">mj-visual-v20-wait-001 - winning_tiles</option>
+<option value="mj-visual-v20-wait-002.png">mj-visual-v20-wait-002 - winning_tiles</option>
+<option value="mj-visual-v20-wait-003.png">mj-visual-v20-wait-003 - winning_tiles</option>
+<option value="mj-visual-v20-wait-004.png">mj-visual-v20-wait-004 - winning_tiles</option>
+<option value="mj-visual-v20-wait-005.png">mj-visual-v20-wait-005 - winning_tiles</option>
+<option value="mj-visual-v20-wait-006.png">mj-visual-v20-wait-006 - winning_tiles</option>
+<option value="mj-visual-v20-wait-007.png">mj-visual-v20-wait-007 - winning_tiles</option>
+<option value="mj-visual-v20-wait-008.png">mj-visual-v20-wait-008 - winning_tiles</option>
+<option value="mj-visual-v20-wait-009.png">mj-visual-v20-wait-009 - winning_tiles</option>
+<option value="mj-visual-v20-wait-010.png">mj-visual-v20-wait-010 - winning_tiles</option>
+<option value="mj-visual-v20-wait-011.png">mj-visual-v20-wait-011 - winning_tiles</option>
+<option value="mj-visual-v20-wait-012.png">mj-visual-v20-wait-012 - winning_tiles</option>
+<option value="mj-visual-v20-wait-013.png">mj-visual-v20-wait-013 - winning_tiles</option>
+<option value="mj-visual-v20-wait-014.png">mj-visual-v20-wait-014 - winning_tiles</option>
+<option value="mj-visual-v20-wait-015.png">mj-visual-v20-wait-015 - winning_tiles</option></select></header>
+  <main><img id="board" src="mj-visual-v10-ukeire-001.png" alt="Mahjong task board"></main>
+  <script>
+    const task = document.getElementById('task');
+    const board = document.getElementById('board');
+    task.addEventListener('change', () => { board.src = task.value; });
+  </script>
+</body>
+</html>
