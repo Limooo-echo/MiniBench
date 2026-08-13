@@ -43,8 +43,15 @@ def _goal_guidance(task: XiangqiTask) -> str:
 
     if "category:tactical-win" in tags or task.goal == "agent_win":
         return (
-            "Success condition: force a win. Prefer forcing checks, captures, "
-            "and mating threats over passive survival moves."
+            "Goal: force checkmate. Prefer a checking move that ALSO restricts "
+            "the enemy general's escape squares or sets up the next mating "
+            "threat; if no check is available, choose the move that best "
+            "advances the mating net (control escape squares and key "
+            "files/ranks). A forced win counts as success, including when the "
+            "opponent ends up with NO legal move (checkmate OR stalemate). "
+            "在当前状况下，请选择一步可以将军的棋，并尽可能实现必杀，或者有助于后续实现必杀；而不是只让它将军。"
+            "不要沉溺于防守：当前你方优势，应主动进攻尽快将杀；每回合优先选择将军或逼近将杀的着法，"
+            "避免保守退守；即使损失一些子力也要保持攻势，不要退回去防守。"
         )
     if "category:advantage-play" in tags:
         return (
@@ -60,7 +67,7 @@ def _goal_guidance(task: XiangqiTask) -> str:
     return "Success condition: satisfy the stated goal while keeping your general safe."
 
 
-def build_xiangqi_prompt(task: XiangqiTask, env, history: list[str]) -> str:
+def build_xiangqi_prompt(task: XiangqiTask, env, history: list[str], caution: str = "") -> str:
     actions = strict_legal_actions(env)
     action_lines = "\n".join(format_action(a) for a in actions)
 
@@ -77,6 +84,7 @@ Opponent: {task.opponent}
 Side to move: {current_side}
 Max steps: {task.max_steps}
 {_goal_guidance(task)}
+{caution}
 
 Board encoding:
 - positive number = ally piece

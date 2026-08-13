@@ -336,28 +336,21 @@ class XiangqiPikafishTests(unittest.TestCase):
 
         self.assertEqual(task.goal, "agent_survive")
 
-    def test_hard_dataset_has_three_categories(self):
-        tasks = load_xiangqi_tasks(Path("data/xiangqi/hard_tasks.jsonl"))
-        categories = {
-            tag
+    def test_d3_dataset_has_three_difficulties(self):
+        tasks = load_xiangqi_tasks(Path("data/d3/d3_250.jsonl"))
+        difficulties = {
+            tag.split(":")[1]
             for task in tasks
             for tag in task.tags
-            if tag.startswith("category:")
+            if tag.startswith("difficulty:")
         }
 
-        self.assertEqual(len(tasks), 9)
-        self.assertEqual(
-            categories,
-            {
-                "category:tactical-win",
-                "category:advantage-play",
-                "category:survival-defense",
-            },
-        )
-        for category in categories:
+        self.assertEqual(len(tasks), 250)
+        self.assertEqual(difficulties, {"easy", "medium", "hard"})
+        for difficulty in difficulties:
             self.assertEqual(
-                sum(category in task.tags for task in tasks),
-                3,
+                sum(f"difficulty:{difficulty}" in task.tags for task in tasks),
+                80 if difficulty == "easy" else 85,
             )
 
     @unittest.skipUnless(XIANGQI_ENV_AVAILABLE, "gym-xiangqi is not installed")

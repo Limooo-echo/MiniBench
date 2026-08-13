@@ -1,28 +1,68 @@
-task:
-  family: xiangqi
-  path: data/xiangqi/tasks.jsonl
-  limit: null
-  task_ids: []
+# 象棋四任务统一配置 (D3/C2/H2/M2)
+# 评测入口: scripts/run_all.py / scripts/run_task.py (读环境变量, 不读此yaml)
+# 此yaml供旧CLI (minibench.cli) 或文档参考用
 
-agent:
-  name: openai-compatible
-  samples: 3
-  reasoning_temperature: 0.7
-  final_temperature: 0.0
-  max_reasoning_tokens: 512
+# ---- D3 一步杀 ----
+d3:
+  task:
+    family: xiangqi_d3
+    path: data/d3/d3_250.jsonl      # 250题 (easy80/medium85/hard85)
+  agent:
+    name: openai-compatible
+    max_tokens: 64
+  provider:
+    name: deepseek                   # 默认; 测试时 MINIBENCH_PROVIDER 覆盖
+    model: deepseek-v4-flash
+  evaluation:
+    pikafish_depth: 15              # oracle 深度
+    pikafish_timeout: 60.0
 
-provider:
-  name: deepseek
-  model: deepseek-chat
-  json_mode: true
-  max_tokens: 256
-  timeout: 120
+# ---- C2 规则变体 ----
+c2:
+  task:
+    family: xiangqi_c2
+    path: data/c2/c2_250.jsonl       # 250题 (standard70 + 马不蹩脚60 + 车禁中心60 + 兵可后退60)
+  agent:
+    name: openai-compatible
+    max_tokens: 64
+  provider:
+    name: deepseek
+    model: deepseek-v4-flash
+  evaluation:
+    max_steps: 12                   # 对弈最大步数
+    search_depth: 3                # 变体引擎对手深度
 
-evaluation:
-  opponent: null
-  pikafish_depth: 8
-  pikafish_timeout: 30.0
+# ---- H2 历史多步杀 ----
+h2:
+  task:
+    family: xiangqi_h2
+    path: data/h2/h2_250.jsonl      # 250题 (多步杀4-12步为主)
+  agent:
+    name: openai-compatible
+    max_tokens: 512
+  provider:
+    name: deepseek
+    model: deepseek-v4-flash
+  evaluation:
+    history_mode: full             # full=每步当前局面 / agent_only=初始+历史走法
+    pikafish_depth: 8
+    pikafish_timeout: 60.0
 
-run:
-  output_dir: runs
-  run_name: null
+# ---- M2 多模态 ----
+m2:
+  task:
+    family: xiangqi_m2
+    path: data/m2/m2_250.jsonl      # 250题 (复杂局面16-17子)
+  agent:
+    name: openai-compatible         # 仅此agent (multimodal调用)
+    max_tokens: 60
+  provider:
+    name: qwen                      # 阿里云百炼
+    model: qwen3.8-max
+    extra_body:
+      thinking:
+        type: disabled              # 关思考 (60s -> 0.8s)
+  evaluation:
+    modes: [text, img_cn]           # 文字组 + 汉字图组 (每步当前棋局)
+    opp_depth: 4                   # 对手深度
+    step_image_dir: vis_outputs/m2_steps  # 每步棋盘图保存

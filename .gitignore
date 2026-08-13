@@ -10,9 +10,11 @@ __pycache__/
 dist/
 build/
 runs/
+vis_outputs/
+outputs/
+data/*/sample_*.jsonl
 .env
 .DS_Store
-
 .env.*
 !.env.example
 .coverage
