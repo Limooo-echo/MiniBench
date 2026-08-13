@@ -68,7 +68,9 @@ src/minibench/datasets/
 | Zebra history evaluation | `data/zebra/history_eval.jsonl` | `zebra_history.yaml` |
 | Simple Xiangqi | `data/xiangqi/tasks.jsonl` | `evaluate-xiangqi` |
 | Hard Xiangqi with Pikafish | `data/xiangqi/hard_tasks.jsonl` | `evaluate-xiangqi` |
-| One-stroke graph puzzles | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
+| One-stroke smoke set | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
+| One-stroke A1 direct (10 per difficulty) | `data/one_stroke/a1_direct.jsonl` | `one_stroke_a1.yaml` |
+| One-stroke A3 history (10 per difficulty) | `data/one_stroke/a3_history.jsonl` | `one_stroke_a3_history.yaml` |
 | Static Mahjong tile shapes | `data/mahjong/tasks.jsonl` | `evaluate-mahjong` |
 | Single-player Riichi Mahjong draw-discard | `data/mahjong_solo/tasks.jsonl` | `evaluate-mahjong-solo` |
 | Four-player Riichi Mahjong v1 | `data/mahjong_riichi/tasks.jsonl` | `evaluate-mahjong-riichi` |
@@ -178,11 +180,11 @@ python -m minibench.cli evaluate-xiangqi \
   --timeout 120
 ```
 
-One-stroke graph puzzles:
+MiniBench 2.0 A1 direct one-stroke puzzles (no Euler-theorem hint):
 
 ```bash
 python -m minibench.cli evaluate-one-stroke \
-  --one-stroke-tasks data/one_stroke/tasks.jsonl \
+  --one-stroke-tasks data/one_stroke/a1_direct.jsonl \
   --agent cot \
   --provider deepseek \
   --model deepseek-chat \
@@ -352,12 +354,18 @@ python -m minibench.cli evaluate-one-stroke \
   --timeout 120
 ```
 
-The same two configurations are also available as YAML experiments:
+The formal A1 and A3 configurations are available as YAML experiments. A3 runs
+every task once with explicit incremental state and once with raw step history
+only, so 30 tasks produce 60 results:
 
 ```bash
 ./run.sh config/experiments/one_stroke.yaml
-./run.sh config/experiments/one_stroke_euler_theorem.yaml
+./run.sh config/experiments/one_stroke_a1.yaml
+./run.sh config/experiments/one_stroke_a3_history.yaml
 ```
+
+The earlier `one_stroke_euler_theorem.yaml` is retained only as a legacy prompt
+ablation for the smoke set; it is not part of the MiniBench 2.0 A1 protocol.
 
 ### Xiangqi Evaluation Commands
 

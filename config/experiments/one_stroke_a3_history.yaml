@@ -1,26 +1,30 @@
 task:
   family: one_stroke
-  path: data/one_stroke/a1_direct.jsonl
+  path: data/one_stroke/a3_history.jsonl
   limit: null
   task_ids: []
 
 agent:
   name: openai-compatible
-  samples: 3
-  reasoning_temperature: 0.7
+  samples: 1
+  reasoning_temperature: 0.0
   final_temperature: 0.0
-  max_reasoning_tokens: 512
+  max_reasoning_tokens: 1024
 
 provider:
   name: deepseek
   model: deepseek-chat
   json_mode: true
-  max_tokens: 512
+  max_tokens: 1024
   timeout: 120
 
 evaluation:
-  # Formal MiniBench 2.0 A1 setting: no Euler-theorem hint.
-  prompt_variant: baseline
+  memory_modes:
+    - incremental_state
+    - step_history_only
+  state_max_tokens: 512
+  ack_max_tokens: 32
+  final_max_tokens: 1024
   show_progress: true
 
 run:

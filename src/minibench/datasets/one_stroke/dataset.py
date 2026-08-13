@@ -8,6 +8,21 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class OneStrokeHistoryEvent:
+    action: str
+    edge_id: str
+    from_vertex: str
+    to_vertex: str
+
+
+@dataclass(frozen=True)
+class OneStrokeHistoryState:
+    current_vertex: str
+    used_edge_ids: tuple[str, ...]
+    remaining_edge_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class OneStrokeTask:
     id: str
     vertices: tuple[str, ...]
@@ -16,6 +31,9 @@ class OneStrokeTask:
     end: str | None
     solution_exists: bool
     solution_path: tuple[str, ...] | None
+    capability: str
+    difficulty: str
+    history_events: tuple[OneStrokeHistoryEvent, ...]
     tags: tuple[str, ...]
 
 
@@ -97,7 +115,11 @@ def _has_euler_trail(
         return False
 
     if len(odd) == 2:
-        return (start is None or start in odd) and (end is None or end in odd)
+        if start is not None and start not in odd:
+            return False
+        if end is not None and end not in odd:
+            return False
+        return start is None or end is None or start != end
     return start is None or end is None or start == end
 
 
@@ -187,7 +209,21 @@ def one_stroke_task_from_dict(raw: dict[str, Any]) -> OneStrokeTask:
             end=end,
         )
 
-    return OneStrokeTask(
+    tags = _require_string_list(raw, "tags")
+    capability = raw.get("capability", "direct")
+    if not isinstance(capability, str) or capability not in {
+        "direct",
+        "history_memory",
+    }:
+        raise ValueError(
+            f"{raw['id']}: capability must be direct or history_memory"
+        )
+    difficulty = raw.get("difficulty") or _tag_value(tags, "difficulty:") or "unknown"
+    if not isinstance(difficulty, str):
+        raise ValueError(f"{raw['id']}: difficulty must be a string")
+    history_events = _parse_history_events(raw, vertex_set)
+
+    task = OneStrokeTask(
         id=raw["id"],
         vertices=vertices,
         edges=edge_tuple,
@@ -195,8 +231,151 @@ def one_stroke_task_from_dict(raw: dict[str, Any]) -> OneStrokeTask:
         end=end,
         solution_exists=solution_exists,
         solution_path=solution_path,
-        tags=_require_string_list(raw, "tags"),
+        capability=capability,
+        difficulty=difficulty,
+        history_events=history_events,
+        tags=tags,
     )
+    if capability == "direct" and history_events:
+        raise ValueError(f"{raw['id']}: direct tasks must not define history_events")
+    if capability == "history_memory":
+        if not solution_exists:
+            raise ValueError(f"{raw['id']}: history tasks must be solvable")
+        if start is None:
+            raise ValueError(f"{raw['id']}: history tasks require a start vertex")
+        if not history_events:
+            raise ValueError(f"{raw['id']}: history tasks require history_events")
+        state = simulate_one_stroke_history(task)
+        remaining_edges = tuple(
+            edge
+            for edge_id, edge in zip(one_stroke_edge_ids(task.edges), task.edges)
+            if edge_id in set(state.remaining_edge_ids)
+        )
+        if not has_one_stroke_solution(
+            task.vertices,
+            remaining_edges,
+            start=state.current_vertex,
+            end=task.end,
+        ):
+            raise ValueError(
+                f"{raw['id']}: history leaves no valid one-stroke completion"
+            )
+    return task
+
+
+def _parse_history_events(
+    raw: dict[str, Any],
+    vertices: set[str],
+) -> tuple[OneStrokeHistoryEvent, ...]:
+    value = raw.get("history_events", [])
+    if not isinstance(value, list):
+        raise ValueError(f"{raw['id']}: history_events must be a list")
+    events: list[OneStrokeHistoryEvent] = []
+    for index, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"{raw['id']}: history event {index} must be an object")
+        action = item.get("action")
+        edge_id = item.get("edge_id")
+        from_vertex = item.get("from")
+        to_vertex = item.get("to")
+        if action not in {"move", "undo"}:
+            raise ValueError(
+                f"{raw['id']}: history event {index} action must be move or undo"
+            )
+        if not isinstance(edge_id, str) or not edge_id:
+            raise ValueError(
+                f"{raw['id']}: history event {index} edge_id must be a string"
+            )
+        if (
+            not isinstance(from_vertex, str)
+            or not isinstance(to_vertex, str)
+            or from_vertex not in vertices
+            or to_vertex not in vertices
+        ):
+            raise ValueError(
+                f"{raw['id']}: history event {index} references an unknown vertex"
+            )
+        events.append(
+            OneStrokeHistoryEvent(
+                action=action,
+                edge_id=edge_id,
+                from_vertex=from_vertex,
+                to_vertex=to_vertex,
+            )
+        )
+    return tuple(events)
+
+
+def one_stroke_edge_ids(
+    edges: tuple[tuple[str, str], ...],
+) -> tuple[str, ...]:
+    width = max(2, len(str(len(edges))))
+    return tuple(f"e{index:0{width}d}" for index in range(1, len(edges) + 1))
+
+
+def simulate_one_stroke_history(task: OneStrokeTask) -> OneStrokeHistoryState:
+    if task.start is None:
+        raise ValueError(f"{task.id}: cannot simulate history without a start vertex")
+    edge_map = dict(zip(one_stroke_edge_ids(task.edges), task.edges))
+    current = task.start
+    used_stack: list[tuple[str, str, str]] = []
+    used = set[str]()
+    for index, event in enumerate(task.history_events, start=1):
+        if event.edge_id not in edge_map:
+            raise ValueError(
+                f"{task.id}: history event {index} references unknown edge {event.edge_id}"
+            )
+        if event.from_vertex != current:
+            raise ValueError(
+                f"{task.id}: history event {index} starts at {event.from_vertex}, "
+                f"but current vertex is {current}"
+            )
+        edge = edge_map[event.edge_id]
+        if _canonical_edge(edge) != _canonical_edge(
+            (event.from_vertex, event.to_vertex)
+        ):
+            raise ValueError(
+                f"{task.id}: history event {index} does not traverse {event.edge_id}"
+            )
+        if event.action == "move":
+            if event.edge_id in used:
+                raise ValueError(
+                    f"{task.id}: history event {index} reuses {event.edge_id}"
+                )
+            used.add(event.edge_id)
+            used_stack.append(
+                (event.edge_id, event.from_vertex, event.to_vertex)
+            )
+        else:
+            if not used_stack:
+                raise ValueError(f"{task.id}: history event {index} has nothing to undo")
+            edge_id, previous_from, previous_to = used_stack[-1]
+            if (
+                edge_id != event.edge_id
+                or previous_to != event.from_vertex
+                or previous_from != event.to_vertex
+            ):
+                raise ValueError(
+                    f"{task.id}: history event {index} must undo the latest move"
+                )
+            used_stack.pop()
+            used.remove(event.edge_id)
+        current = event.to_vertex
+    all_edge_ids = one_stroke_edge_ids(task.edges)
+    return OneStrokeHistoryState(
+        current_vertex=current,
+        used_edge_ids=tuple(edge_id for edge_id in all_edge_ids if edge_id in used),
+        remaining_edge_ids=tuple(
+            edge_id for edge_id in all_edge_ids if edge_id not in used
+        ),
+    )
+
+
+def _tag_value(tags: tuple[str, ...], prefix: str) -> str | None:
+    for tag in tags:
+        if tag.startswith(prefix):
+            return tag[len(prefix) :]
+    return None
 
 
 def _validate_solution_path(

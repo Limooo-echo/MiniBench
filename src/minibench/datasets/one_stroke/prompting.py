@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from collections import Counter
 
-from minibench.datasets.one_stroke.dataset import OneStrokeTask
+from minibench.datasets.one_stroke.dataset import (
+    OneStrokeHistoryEvent,
+    OneStrokeTask,
+    one_stroke_edge_ids,
+)
 
 
 ONE_STROKE_PROMPT_VARIANTS = ("baseline", "euler_theorem")
@@ -15,6 +19,8 @@ ONE_STROKE_SYSTEM_PROMPT = (
     "include markdown or commentary. If no valid path exists, do not invent or "
     "guess a path; return exactly {\"solvable\":false}."
 )
+
+ONE_STROKE_MEMORY_MODES = ("incremental_state", "step_history_only")
 
 
 def build_one_stroke_prompt(
@@ -111,6 +117,108 @@ def build_one_stroke_prompt(
         ]
     )
     return "\n".join(lines)
+
+
+def history_system_prompt(task: OneStrokeTask, memory_mode: str) -> str:
+    if memory_mode not in ONE_STROKE_MEMORY_MODES:
+        choices = ", ".join(ONE_STROKE_MEMORY_MODES)
+        raise ValueError(f"unknown one-stroke memory mode {memory_mode!r}: {choices}")
+    lines = [
+        "You are participating in a multi-turn one-stroke graph task.",
+        "The graph is undirected. Each edge has a unique ID and may be used once.",
+        "Vertices may be revisited. Undo events make their edge unused again.",
+        "Track the event history exactly. Do not assume any unreported move.",
+        "At the final turn, continue from the current vertex and use every remaining "
+        "edge exactly once.",
+        "",
+        f"Task ID: {task.id}",
+        f"Initial vertex: {task.start}",
+        f"Required final vertex: {task.end if task.end is not None else 'not fixed'}",
+        f"Vertices: {', '.join(task.vertices)}",
+        "Static edge list:",
+    ]
+    for edge_id, (a, b) in zip(one_stroke_edge_ids(task.edges), task.edges):
+        lines.append(f"- {edge_id}: {a}-{b}")
+    lines.extend(["", _memory_mode_instruction(memory_mode)])
+    return "\n".join(lines)
+
+
+def history_event_prompt(
+    task: OneStrokeTask,
+    memory_mode: str,
+    step_number: int,
+) -> str:
+    if memory_mode not in ONE_STROKE_MEMORY_MODES:
+        choices = ", ".join(ONE_STROKE_MEMORY_MODES)
+        raise ValueError(f"unknown one-stroke memory mode {memory_mode!r}: {choices}")
+    if not 1 <= step_number <= len(task.history_events):
+        raise ValueError(f"history step out of range: {step_number}")
+    event = task.history_events[step_number - 1]
+    if event.action == "move":
+        action_text = (
+            f"A move occurred: {event.from_vertex} -> {event.to_vertex} "
+            f"using {event.edge_id}. That edge is now used."
+        )
+    else:
+        action_text = (
+            f"The latest move was undone: {event.from_vertex} -> {event.to_vertex} "
+            f"along {event.edge_id}. That edge is unused again."
+        )
+    incident = _incident_edge_text(task, event.to_vertex)
+    lines = [
+        f"Step {step_number} of {len(task.history_events)}.",
+        action_text,
+        f"Current vertex: {event.to_vertex}",
+        f"Original incident edges at {event.to_vertex}: {incident}",
+        "The incident list is static and does not indicate which edges are already used.",
+    ]
+    if memory_mode == "incremental_state":
+        lines.extend(
+            [
+                "Record the complete intermediate state now. Return only JSON:",
+                '{"current_vertex":"A","used_edges":["e01"],'
+                '"remaining_edges":["e02"]}',
+            ]
+        )
+    else:
+        lines.append(f'Return only JSON: {{"step":{step_number}}}')
+    return "\n".join(lines)
+
+
+def history_final_prompt(task: OneStrokeTask) -> str:
+    return "\n".join(
+        [
+            "The event history is complete.",
+            "Continue from the current vertex using every edge that remains unused "
+            "exactly once. Do not include already-used steps in the returned path.",
+            "If a completion exists, return only JSON using the schema "
+            '{"path":["CURRENT","NEXT","FINAL"]}. The first vertex must be the '
+            "current vertex.",
+            "If no completion exists, return only JSON: {\"solvable\":false}.",
+        ]
+    )
+
+
+def _memory_mode_instruction(memory_mode: str) -> str:
+    if memory_mode == "incremental_state":
+        return (
+            "After each event, explicitly record the current vertex plus the complete "
+            "used-edge and remaining-edge sets. Your own record will stay in chat "
+            "history for the final decision."
+        )
+    return (
+        "After each event, acknowledge only its step number. Do not write an "
+        "intermediate state, edge set, summary, or reasoning. The raw sequence of "
+        "step events will stay in chat history for the final decision."
+    )
+
+
+def _incident_edge_text(task: OneStrokeTask, vertex: str) -> str:
+    items = []
+    for edge_id, (a, b) in zip(one_stroke_edge_ids(task.edges), task.edges):
+        if vertex in {a, b}:
+            items.append(f"{edge_id}({a}-{b})")
+    return ", ".join(items)
 
 
 def _degree_table(task: OneStrokeTask) -> Counter[str]:

@@ -7,17 +7,28 @@ from pathlib import Path
 import re
 import sys
 from time import strftime
-from typing import Any, TextIO
+from typing import Any, Sequence, TextIO
 
-from minibench.core.agent import Agent
+from minibench.core.agent import Agent, ChatMessage
 from minibench.core.metrics import (
     finish_task_metrics,
     start_task_metrics,
     summarize_metrics,
     summary_metrics_line,
 )
-from minibench.datasets.one_stroke.dataset import OneStrokeTask
-from minibench.datasets.one_stroke.prompting import build_one_stroke_prompt
+from minibench.datasets.one_stroke.dataset import (
+    OneStrokeHistoryState,
+    OneStrokeTask,
+    one_stroke_edge_ids,
+    simulate_one_stroke_history,
+)
+from minibench.datasets.one_stroke.prompting import (
+    ONE_STROKE_MEMORY_MODES,
+    build_one_stroke_prompt,
+    history_event_prompt,
+    history_final_prompt,
+    history_system_prompt,
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +41,10 @@ class OneStrokeInstanceResult:
     raw_output: str
     path: list[str]
     reasons: list[str]
+    capability: str
+    difficulty: str
+    memory_mode: str | None
+    conversation: tuple[ChatMessage, ...]
     tags: tuple[str, ...]
     metrics: dict[str, object]
 
@@ -104,83 +119,236 @@ def validate_one_stroke_path(
     return not reasons, reasons
 
 
+def validate_one_stroke_completion(
+    task: OneStrokeTask,
+    state: OneStrokeHistoryState,
+    path: list[str],
+) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    if not path:
+        return False, ["empty_path"]
+    remaining_ids = set(state.remaining_edge_ids)
+    edge_ids = one_stroke_edge_ids(task.edges)
+    remaining_edges = tuple(
+        edge
+        for edge_id, edge in zip(edge_ids, task.edges)
+        if edge_id in remaining_ids
+    )
+    expected_length = len(remaining_edges) + 1
+    if len(path) != expected_length:
+        reasons.append(
+            f"wrong_completion_length:expected={expected_length},actual={len(path)}"
+        )
+    unknown_vertices = sorted({vertex for vertex in path if vertex not in task.vertices})
+    if unknown_vertices:
+        reasons.append(f"unknown_vertices:{','.join(unknown_vertices)}")
+    if path[0] != state.current_vertex:
+        reasons.append(
+            f"wrong_completion_start:expected={state.current_vertex},actual={path[0]}"
+        )
+    if task.end is not None and path[-1] != task.end:
+        reasons.append(f"wrong_end:expected={task.end},actual={path[-1]}")
+
+    available_edges = Counter(_canonical_edge(edge) for edge in remaining_edges)
+    used_edges = Counter[tuple[str, str]]()
+    for index, (a, b) in enumerate(zip(path, path[1:]), start=1):
+        edge = _canonical_edge((a, b))
+        if edge not in available_edges:
+            reasons.append(f"nonexistent_remaining_edge:{index}:{a}-{b}")
+            continue
+        used_edges[edge] += 1
+        if used_edges[edge] > available_edges[edge]:
+            reasons.append(f"reused_remaining_edge:{index}:{a}-{b}")
+    missing_edges = available_edges - used_edges
+    if missing_edges:
+        missing_text = ",".join(
+            f"{a}-{b}x{count}" for (a, b), count in sorted(missing_edges.items())
+        )
+        reasons.append(f"missing_remaining_edges:{missing_text}")
+    return not reasons, reasons
+
+
 def evaluate_one_stroke_tasks(
     tasks: list[OneStrokeTask],
     agent: Agent,
     *,
     prompt_variant: str = "baseline",
+    memory_modes: Sequence[str] = ONE_STROKE_MEMORY_MODES,
+    state_max_tokens: int = 512,
+    ack_max_tokens: int = 32,
+    final_max_tokens: int | None = None,
     show_progress: bool = False,
     progress_stream: TextIO | None = None,
 ) -> list[OneStrokeInstanceResult]:
+    selected_modes = tuple(memory_modes)
+    unknown_modes = set(selected_modes) - set(ONE_STROKE_MEMORY_MODES)
+    if unknown_modes:
+        raise ValueError(
+            "unknown one-stroke memory mode(s): "
+            + ", ".join(sorted(unknown_modes))
+        )
+    if not selected_modes:
+        raise ValueError("memory_modes must not be empty")
+    if state_max_tokens < 1 or ack_max_tokens < 1:
+        raise ValueError("one-stroke history token limits must be positive")
     results: list[OneStrokeInstanceResult] = []
     if show_progress and progress_stream is None:
         progress_stream = sys.stderr
 
-    total = len(tasks)
-    for index, task in enumerate(tasks, start=1):
-        if show_progress and progress_stream is not None:
-            _write_progress(progress_stream, index, total, task.id)
-
-        metrics_start = start_task_metrics(agent)
-        prompt = build_one_stroke_prompt(task, prompt_variant=prompt_variant)
-        raw_output = agent.generate(prompt, task)
-        path = extract_path(raw_output)
-        no_solution = extract_no_solution(raw_output)
-
-        if not task.solution_exists:
-            if no_solution:
-                success = True
-                score = 1.0
-                path = []
-                reasons = ["correct_no_solution"]
-            elif path is None:
-                success = False
-                score = 0.0
-                path = []
-                reasons = ["no_path_or_no_solution_extracted"]
-            else:
-                path_success, path_reasons = validate_one_stroke_path(task, path)
-                success = False
-                score = 0.0
-                reasons = (
-                    ["task_marked_unsolvable_but_valid_path_found"]
-                    if path_success
-                    else ["claimed_path_for_unsolvable", *path_reasons]
-                )
-        elif no_solution:
-            success = False
-            score = 0.0
-            path = []
-            reasons = ["incorrect_no_solution_claim"]
-        elif path is None:
-            success = False
-            score = 0.0
-            path = []
-            reasons = ["no_path_extracted"]
-        else:
-            success, reasons = validate_one_stroke_path(task, path)
-            score = 1.0 if success else 0.0
-            if success:
-                reasons = ["valid_one_stroke_path"]
-        results.append(
-            OneStrokeInstanceResult(
-                task_id=task.id,
-                prompt_variant=prompt_variant,
-                solution_exists=task.solution_exists,
-                success=success,
-                score=score,
-                raw_output=raw_output,
-                path=path,
-                reasons=reasons,
-                tags=task.tags,
-                metrics=finish_task_metrics(agent, metrics_start),
-            )
+    total = sum(
+        len(selected_modes) if task.capability == "history_memory" else 1
+        for task in tasks
+    )
+    completed = 0
+    for task in tasks:
+        modes: tuple[str | None, ...] = (
+            tuple(selected_modes)
+            if task.capability == "history_memory"
+            else (None,)
         )
+        for memory_mode in modes:
+            completed += 1
+            if show_progress and progress_stream is not None:
+                label = task.id if memory_mode is None else f"{task.id}:{memory_mode}"
+                _write_progress(progress_stream, completed, total, label)
+
+            metrics_start = start_task_metrics(agent)
+            if memory_mode is None:
+                prompt = build_one_stroke_prompt(task, prompt_variant=prompt_variant)
+                raw_output = agent.generate(prompt, task)
+                conversation: tuple[ChatMessage, ...] = ()
+                path, success, score, reasons = _score_direct_output(task, raw_output)
+                result_prompt_variant = prompt_variant
+            else:
+                raw_output, conversation = _run_history_protocol(
+                    task,
+                    agent,
+                    memory_mode,
+                    state_max_tokens=state_max_tokens,
+                    ack_max_tokens=ack_max_tokens,
+                    final_max_tokens=final_max_tokens,
+                )
+                path, success, score, reasons = _score_history_output(task, raw_output)
+                result_prompt_variant = "history"
+            results.append(
+                OneStrokeInstanceResult(
+                    task_id=task.id,
+                    prompt_variant=result_prompt_variant,
+                    solution_exists=task.solution_exists,
+                    success=success,
+                    score=score,
+                    raw_output=raw_output,
+                    path=path,
+                    reasons=reasons,
+                    capability=task.capability,
+                    difficulty=task.difficulty,
+                    memory_mode=memory_mode,
+                    conversation=conversation,
+                    tags=task.tags,
+                    metrics=finish_task_metrics(agent, metrics_start),
+                )
+            )
     if show_progress and progress_stream is not None:
         _write_progress(progress_stream, total, total, "done")
         progress_stream.write("\n")
         progress_stream.flush()
     return results
+
+
+def _score_direct_output(
+    task: OneStrokeTask,
+    raw_output: str,
+) -> tuple[list[str], bool, float, list[str]]:
+    path = extract_path(raw_output)
+    no_solution = extract_no_solution(raw_output)
+    if not task.solution_exists:
+        if no_solution:
+            return [], True, 1.0, ["correct_no_solution"]
+        if path is None:
+            return [], False, 0.0, ["no_path_or_no_solution_extracted"]
+        path_success, path_reasons = validate_one_stroke_path(task, path)
+        reasons = (
+            ["task_marked_unsolvable_but_valid_path_found"]
+            if path_success
+            else ["claimed_path_for_unsolvable", *path_reasons]
+        )
+        return path, False, 0.0, reasons
+    if no_solution:
+        return [], False, 0.0, ["incorrect_no_solution_claim"]
+    if path is None:
+        return [], False, 0.0, ["no_path_extracted"]
+    success, reasons = validate_one_stroke_path(task, path)
+    return (
+        path,
+        success,
+        1.0 if success else 0.0,
+        ["valid_one_stroke_path"] if success else reasons,
+    )
+
+
+def _score_history_output(
+    task: OneStrokeTask,
+    raw_output: str,
+) -> tuple[list[str], bool, float, list[str]]:
+    if extract_no_solution(raw_output):
+        return [], False, 0.0, ["incorrect_no_solution_claim"]
+    path = extract_path(raw_output)
+    if path is None:
+        return [], False, 0.0, ["no_path_extracted"]
+    state = simulate_one_stroke_history(task)
+    success, reasons = validate_one_stroke_completion(task, state, path)
+    return (
+        path,
+        success,
+        1.0 if success else 0.0,
+        ["valid_history_completion"] if success else reasons,
+    )
+
+
+def _run_history_protocol(
+    task: OneStrokeTask,
+    agent: Agent,
+    memory_mode: str,
+    *,
+    state_max_tokens: int,
+    ack_max_tokens: int,
+    final_max_tokens: int | None,
+) -> tuple[str, tuple[ChatMessage, ...]]:
+    generate_messages = getattr(agent, "generate_messages", None)
+    if not callable(generate_messages):
+        raise ValueError(
+            "one-stroke history evaluation requires an agent with "
+            "generate_messages(); use openai-compatible or a message-aware agent"
+        )
+    messages: list[ChatMessage] = [
+        {"role": "system", "content": history_system_prompt(task, memory_mode)}
+    ]
+    per_turn_limit = (
+        state_max_tokens if memory_mode == "incremental_state" else ack_max_tokens
+    )
+    for step_number in range(1, len(task.history_events) + 1):
+        messages.append(
+            {
+                "role": "user",
+                "content": history_event_prompt(task, memory_mode, step_number),
+            }
+        )
+        response = generate_messages(
+            tuple(messages),
+            task,
+            max_tokens=per_turn_limit,
+            json_mode=True,
+        )
+        messages.append({"role": "assistant", "content": response})
+    messages.append({"role": "user", "content": history_final_prompt(task)})
+    final_output = generate_messages(
+        tuple(messages),
+        task,
+        max_tokens=final_max_tokens,
+        json_mode=True,
+    )
+    messages.append({"role": "assistant", "content": final_output})
+    return final_output, tuple(messages)
 
 
 def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, Any]:
@@ -199,7 +367,32 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
         "success": success_count,
         "success_rate": success_count / total if total else 0.0,
         "by_tag": by_tag,
+        "by_difficulty": _group_results(results, "difficulty"),
+        "by_capability": _group_results(results, "capability"),
+        "by_memory_mode": _group_results(
+            [result for result in results if result.memory_mode is not None],
+            "memory_mode",
+        ),
         "metrics": summarize_metrics(results),
+    }
+
+
+def _group_results(
+    results: list[OneStrokeInstanceResult],
+    field: str,
+) -> dict[str, dict[str, int | float]]:
+    groups: dict[str, list[OneStrokeInstanceResult]] = {}
+    for result in results:
+        groups.setdefault(str(getattr(result, field)), []).append(result)
+    return {
+        key: {
+            "total": len(items),
+            "success": sum(int(item.success) for item in items),
+            "success_rate": (
+                sum(int(item.success) for item in items) / len(items) if items else 0.0
+            ),
+        }
+        for key, items in sorted(groups.items())
     }
 
 

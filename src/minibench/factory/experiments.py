@@ -217,10 +217,23 @@ def _evaluate(
             pikafish_timeout=evaluation_config.get("pikafish_timeout", 30.0),
         )
     if family == "one_stroke":
+        memory_modes = evaluation_config.get(
+            "memory_modes",
+            ("incremental_state", "step_history_only"),
+        )
+        if isinstance(memory_modes, str):
+            memory_modes = (memory_modes,)
+        final_max_tokens = evaluation_config.get("final_max_tokens")
         return spec.evaluate_tasks(
             tasks,
             agent,
             prompt_variant=evaluation_config.get("prompt_variant", "baseline"),
+            memory_modes=tuple(memory_modes),
+            state_max_tokens=int(evaluation_config.get("state_max_tokens", 512)),
+            ack_max_tokens=int(evaluation_config.get("ack_max_tokens", 32)),
+            final_max_tokens=(
+                int(final_max_tokens) if final_max_tokens is not None else None
+            ),
             show_progress=bool(evaluation_config.get("show_progress", False)),
         )
     if family == "zebra":

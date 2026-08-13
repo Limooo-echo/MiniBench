@@ -9,17 +9,17 @@ agent:
   samples: 3
   reasoning_temperature: 0.7
   final_temperature: 0.0
-  max_reasoning_tokens: 512
+  max_reasoning_tokens: 1024
 
 provider:
   name: deepseek
   model: deepseek-chat
   json_mode: true
-  max_tokens: 512
+  max_tokens: 1024
   timeout: 120
 
 evaluation:
-  # Formal MiniBench 2.0 A1 setting: no Euler-theorem hint.
+  # MiniBench 2.0 A1 deliberately provides no Euler-theorem hint.
   prompt_variant: baseline
   show_progress: true
 

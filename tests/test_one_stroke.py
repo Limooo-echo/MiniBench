@@ -1,18 +1,25 @@
 import io
 import json
 import unittest
+from collections import Counter
 
 from minibench.datasets.one_stroke.dataset import (
     load_one_stroke_tasks,
     one_stroke_task_from_dict,
+    simulate_one_stroke_history,
 )
 from minibench.datasets.one_stroke.evaluation import (
     evaluate_one_stroke_tasks,
     extract_no_solution,
     extract_path,
+    summarize_one_stroke,
+    validate_one_stroke_completion,
     validate_one_stroke_path,
 )
-from minibench.datasets.one_stroke.prompting import build_one_stroke_prompt
+from minibench.datasets.one_stroke.prompting import (
+    build_one_stroke_prompt,
+    history_event_prompt,
+)
 
 
 class FixedPathAgent:
@@ -28,6 +35,26 @@ class FixedPathAgent:
 class NoSolutionAgent:
     def generate(self, prompt, task):
         return json.dumps({"solvable": False})
+
+
+class HistoryCompletionAgent:
+    def __init__(self, path):
+        self.path = path
+        self.calls = []
+
+    def generate_messages(self, messages, task, **kwargs):
+        self.calls.append((tuple(messages), kwargs))
+        if "event history is complete" in messages[-1]["content"]:
+            return json.dumps({"path": self.path})
+        if "complete intermediate state" in messages[-1]["content"]:
+            return json.dumps(
+                {
+                    "current_vertex": "B",
+                    "used_edges": ["e01"],
+                    "remaining_edges": ["e02", "e03"],
+                }
+            )
+        return json.dumps({"step": 1})
 
 
 def sample_task():
@@ -57,11 +84,64 @@ def unsolvable_task():
     )
 
 
+def history_task():
+    return one_stroke_task_from_dict(
+        {
+            "id": "unit-one-stroke-history",
+            "capability": "history_memory",
+            "difficulty": "easy",
+            "vertices": ["A", "B", "C"],
+            "edges": [["A", "B"], ["B", "C"], ["C", "A"]],
+            "start": "A",
+            "end": "A",
+            "solution_path": ["A", "B", "C", "A"],
+            "history_events": [
+                {
+                    "action": "move",
+                    "edge_id": "e01",
+                    "from": "A",
+                    "to": "B",
+                }
+            ],
+            "tags": ["one-stroke", "difficulty:easy"],
+        }
+    )
+
+
 class OneStrokeTests(unittest.TestCase):
     def test_loads_builtin_tasks(self):
         tasks = load_one_stroke_tasks()
 
         self.assertGreaterEqual(len(tasks), 10)
+
+    def test_formal_a1_inventory_and_unsolvable_quota(self):
+        tasks = load_one_stroke_tasks("data/one_stroke/a1_direct.jsonl")
+
+        self.assertEqual(len(tasks), 30)
+        for difficulty in ("easy", "medium", "hard"):
+            selected = [task for task in tasks if task.difficulty == difficulty]
+            self.assertEqual(len(selected), 10)
+            self.assertEqual(sum(task.solution_exists for task in selected), 7)
+            self.assertEqual(sum(not task.solution_exists for task in selected), 3)
+            for task in selected:
+                prompt = build_one_stroke_prompt(task, prompt_variant="baseline")
+                self.assertNotIn("Useful theorem and checklist", prompt)
+                self.assertNotIn("Odd-degree vertices", prompt)
+
+    def test_formal_a3_inventory_and_history_ranges(self):
+        tasks = load_one_stroke_tasks("data/one_stroke/a3_history.jsonl")
+        expected_ranges = {"easy": (4, 6), "medium": (7, 12), "hard": (12, 20)}
+
+        self.assertEqual(len(tasks), 30)
+        for difficulty, (minimum, maximum) in expected_ranges.items():
+            selected = [task for task in tasks if task.difficulty == difficulty]
+            self.assertEqual(len(selected), 10)
+            self.assertTrue(all(task.capability == "history_memory" for task in selected))
+            self.assertTrue(
+                all(minimum <= len(task.history_events) <= maximum for task in selected)
+            )
+        hard = [task for task in tasks if task.difficulty == "hard"]
+        self.assertTrue(all(any(e.action == "undo" for e in task.history_events) for task in hard))
 
     def test_extracts_path_from_json_output(self):
         self.assertEqual(extract_path('{"path":["A","B","C"]}'), ["A", "B", "C"])
@@ -100,11 +180,41 @@ class OneStrokeTests(unittest.TestCase):
                 }
             )
 
+    def test_rejects_same_required_endpoints_for_open_trail(self):
+        with self.assertRaisesRegex(ValueError, "graph has no one-stroke solution"):
+            one_stroke_task_from_dict(
+                {
+                    "id": "unit-same-open-endpoints",
+                    "vertices": ["A", "B", "C"],
+                    "edges": [["A", "B"], ["B", "C"]],
+                    "start": "A",
+                    "end": "A",
+                    "tags": ["one-stroke"],
+                }
+            )
+
     def test_validates_correct_path(self):
         ok, reasons = validate_one_stroke_path(sample_task(), ["A", "B", "C"])
 
         self.assertTrue(ok)
         self.assertEqual(reasons, [])
+
+    def test_simulates_and_scores_history_completion(self):
+        task = history_task()
+        state = simulate_one_stroke_history(task)
+
+        self.assertEqual(state.current_vertex, "B")
+        self.assertEqual(state.used_edge_ids, ("e01",))
+        ok, reasons = validate_one_stroke_completion(task, state, ["B", "C", "A"])
+        self.assertTrue(ok)
+        self.assertEqual(reasons, [])
+
+    def test_history_prompt_does_not_reveal_used_edge_state(self):
+        prompt = history_event_prompt(history_task(), "step_history_only", 1)
+
+        self.assertIn("Original incident edges", prompt)
+        self.assertIn('{"step":1}', prompt)
+        self.assertNotIn("remaining_edges", prompt)
 
     def test_rejects_nonexistent_or_missing_edges(self):
         ok, reasons = validate_one_stroke_path(sample_task(), ["A", "C", "B"])
@@ -190,6 +300,26 @@ class OneStrokeTests(unittest.TestCase):
         self.assertIn("one-stroke", stream.getvalue())
         self.assertIn("1/1", stream.getvalue())
         self.assertIn("done", stream.getvalue())
+
+    def test_history_evaluation_runs_both_memory_modes(self):
+        agent = HistoryCompletionAgent(["B", "C", "A"])
+
+        results = evaluate_one_stroke_tasks([history_task()], agent)
+
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(result.success for result in results))
+        self.assertEqual(
+            Counter(result.memory_mode for result in results),
+            Counter({"incremental_state": 1, "step_history_only": 1}),
+        )
+        self.assertTrue(all(result.conversation for result in results))
+        summary = summarize_one_stroke(results)
+        self.assertEqual(summary["by_memory_mode"]["incremental_state"]["total"], 1)
+        self.assertEqual(summary["by_memory_mode"]["step_history_only"]["total"], 1)
+
+    def test_history_requires_message_aware_agent(self):
+        with self.assertRaisesRegex(ValueError, "requires an agent with generate_messages"):
+            evaluate_one_stroke_tasks([history_task()], FixedPathAgent(["B", "C", "A"]))
 
 
 if __name__ == "__main__":
