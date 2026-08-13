@@ -223,12 +223,16 @@ def _evaluate(
         )
         if isinstance(memory_modes, str):
             memory_modes = (memory_modes,)
+        rule_modes = evaluation_config.get("rule_modes", ("full",))
+        if isinstance(rule_modes, str):
+            rule_modes = (rule_modes,)
         final_max_tokens = evaluation_config.get("final_max_tokens")
         return spec.evaluate_tasks(
             tasks,
             agent,
             prompt_variant=evaluation_config.get("prompt_variant", "baseline"),
             memory_modes=tuple(memory_modes),
+            rule_modes=tuple(rule_modes),
             state_max_tokens=int(evaluation_config.get("state_max_tokens", 512)),
             ack_max_tokens=int(evaluation_config.get("ack_max_tokens", 32)),
             final_max_tokens=(

@@ -29,6 +29,13 @@ from minibench.datasets.one_stroke.prompting import (
     history_final_prompt,
     history_system_prompt,
 )
+from minibench.datasets.one_stroke.rules import (
+    ONE_STROKE_RULE_MODES,
+    OneStrokeRule,
+    find_constrained_one_stroke_path,
+    rules_for_mode,
+    validate_edge_path,
+)
 
 
 @dataclass(frozen=True)
@@ -40,10 +47,16 @@ class OneStrokeInstanceResult:
     score: float
     raw_output: str
     path: list[str]
+    edge_path: list[str]
     reasons: list[str]
+    constraint_reasons: list[str]
     capability: str
     difficulty: str
     memory_mode: str | None
+    rule_mode: str | None
+    rule_types: tuple[str, ...]
+    standard_path_valid: bool
+    rule_ignored: bool
     conversation: tuple[ChatMessage, ...]
     tags: tuple[str, ...]
     metrics: dict[str, object]
@@ -72,6 +85,18 @@ def extract_no_solution(output: str) -> bool:
     if payload.get("no_solution") is True:
         return True
     return False
+
+
+def extract_edge_path(output: str) -> list[str] | None:
+    payload = _parse_json_object(output)
+    if payload is None:
+        return None
+    edge_path = payload.get("edge_path")
+    if not isinstance(edge_path, list) or not all(
+        isinstance(item, str) for item in edge_path
+    ):
+        return None
+    return edge_path
 
 
 def validate_one_stroke_path(
@@ -174,6 +199,7 @@ def evaluate_one_stroke_tasks(
     *,
     prompt_variant: str = "baseline",
     memory_modes: Sequence[str] = ONE_STROKE_MEMORY_MODES,
+    rule_modes: Sequence[str] = ("full",),
     state_max_tokens: int = 512,
     ack_max_tokens: int = 32,
     final_max_tokens: int | None = None,
@@ -189,6 +215,15 @@ def evaluate_one_stroke_tasks(
         )
     if not selected_modes:
         raise ValueError("memory_modes must not be empty")
+    selected_rule_modes = tuple(rule_modes)
+    unknown_rule_modes = set(selected_rule_modes) - set(ONE_STROKE_RULE_MODES)
+    if unknown_rule_modes:
+        raise ValueError(
+            "unknown one-stroke rule mode(s): "
+            + ", ".join(sorted(unknown_rule_modes))
+        )
+    if not selected_rule_modes:
+        raise ValueError("rule_modes must not be empty")
     if state_max_tokens < 1 or ack_max_tokens < 1:
         raise ValueError("one-stroke history token limits must be positive")
     results: list[OneStrokeInstanceResult] = []
@@ -196,28 +231,63 @@ def evaluate_one_stroke_tasks(
         progress_stream = sys.stderr
 
     total = sum(
-        len(selected_modes) if task.capability == "history_memory" else 1
+        len(selected_modes)
+        if task.capability == "history_memory"
+        else len(selected_rule_modes)
+        if task.capability == "rule_condition"
+        else 1
         for task in tasks
     )
     completed = 0
     for task in tasks:
-        modes: tuple[str | None, ...] = (
+        memory_work_modes: tuple[str | None, ...] = (
             tuple(selected_modes)
             if task.capability == "history_memory"
             else (None,)
         )
-        for memory_mode in modes:
+        rule_work_modes: tuple[str | None, ...] = (
+            tuple(selected_rule_modes)
+            if task.capability == "rule_condition"
+            else (None,)
+        )
+        work_modes = (
+            ((memory_mode, None) for memory_mode in memory_work_modes)
+            if task.capability == "history_memory"
+            else ((None, rule_mode) for rule_mode in rule_work_modes)
+        )
+        for memory_mode, rule_mode in work_modes:
             completed += 1
             if show_progress and progress_stream is not None:
-                label = task.id if memory_mode is None else f"{task.id}:{memory_mode}"
+                suffix = memory_mode or rule_mode
+                label = task.id if suffix is None else f"{task.id}:{suffix}"
                 _write_progress(progress_stream, completed, total, label)
 
             metrics_start = start_task_metrics(agent)
             if memory_mode is None:
-                prompt = build_one_stroke_prompt(task, prompt_variant=prompt_variant)
+                prompt = build_one_stroke_prompt(
+                    task,
+                    prompt_variant=prompt_variant,
+                    rule_mode=rule_mode or "full",
+                )
                 raw_output = agent.generate(prompt, task)
                 conversation: tuple[ChatMessage, ...] = ()
-                path, success, score, reasons = _score_direct_output(task, raw_output)
+                if task.capability == "rule_condition":
+                    assert rule_mode is not None
+                    scored = _score_rule_output(task, raw_output, rule_mode)
+                else:
+                    path, success, score, reasons = _score_direct_output(task, raw_output)
+                    scored = {
+                        "path": path,
+                        "edge_path": [],
+                        "success": success,
+                        "score": score,
+                        "reasons": reasons,
+                        "constraint_reasons": [],
+                        "solution_exists": task.solution_exists,
+                        "rule_types": (),
+                        "standard_path_valid": False,
+                        "rule_ignored": False,
+                    }
                 result_prompt_variant = prompt_variant
             else:
                 raw_output, conversation = _run_history_protocol(
@@ -229,20 +299,38 @@ def evaluate_one_stroke_tasks(
                     final_max_tokens=final_max_tokens,
                 )
                 path, success, score, reasons = _score_history_output(task, raw_output)
+                scored = {
+                    "path": path,
+                    "edge_path": [],
+                    "success": success,
+                    "score": score,
+                    "reasons": reasons,
+                    "constraint_reasons": [],
+                    "solution_exists": task.solution_exists,
+                    "rule_types": (),
+                    "standard_path_valid": False,
+                    "rule_ignored": False,
+                }
                 result_prompt_variant = "history"
             results.append(
                 OneStrokeInstanceResult(
                     task_id=task.id,
                     prompt_variant=result_prompt_variant,
-                    solution_exists=task.solution_exists,
-                    success=success,
-                    score=score,
+                    solution_exists=bool(scored["solution_exists"]),
+                    success=bool(scored["success"]),
+                    score=float(scored["score"]),
                     raw_output=raw_output,
-                    path=path,
-                    reasons=reasons,
+                    path=list(scored["path"]),
+                    edge_path=list(scored["edge_path"]),
+                    reasons=list(scored["reasons"]),
+                    constraint_reasons=list(scored["constraint_reasons"]),
                     capability=task.capability,
                     difficulty=task.difficulty,
                     memory_mode=memory_mode,
+                    rule_mode=rule_mode,
+                    rule_types=tuple(scored["rule_types"]),
+                    standard_path_valid=bool(scored["standard_path_valid"]),
+                    rule_ignored=bool(scored["rule_ignored"]),
                     conversation=conversation,
                     tags=task.tags,
                     metrics=finish_task_metrics(agent, metrics_start),
@@ -253,6 +341,98 @@ def evaluate_one_stroke_tasks(
         progress_stream.write("\n")
         progress_stream.flush()
     return results
+
+
+def _score_rule_output(
+    task: OneStrokeTask,
+    raw_output: str,
+    rule_mode: str,
+) -> dict[str, object]:
+    constraints = rules_for_mode(
+        task.rule_constraints,
+        task.key_rule_id,
+        task.conflicting_rule,
+        rule_mode,
+    )
+    oracle = find_constrained_one_stroke_path(
+        task.vertices,
+        task.edges,
+        start=task.start,
+        end=task.end,
+        constraints=constraints,
+    )
+    solution_exists = oracle is not None
+    no_solution = extract_no_solution(raw_output)
+    path = extract_path(raw_output)
+    edge_path = extract_edge_path(raw_output)
+
+    standard_path_valid = False
+    constrained_valid = False
+    reasons: list[str] = []
+    constraint_reasons: list[str] = []
+    if path is not None and edge_path is not None:
+        standard_path_valid, standard_reasons = validate_edge_path(
+            task.vertices,
+            task.edges,
+            path,
+            edge_path,
+            start=task.start,
+            end=task.end,
+        )
+        constrained_valid, constrained_reasons = validate_edge_path(
+            task.vertices,
+            task.edges,
+            path,
+            edge_path,
+            start=task.start,
+            end=task.end,
+            constraints=constraints,
+        )
+        constraint_reasons = [
+            reason for reason in constrained_reasons if reason.startswith("rule_violation:")
+        ]
+        reasons = constrained_reasons
+        if not standard_path_valid and not reasons:
+            reasons = standard_reasons
+
+    rule_ignored = bool(constraints) and standard_path_valid and not constrained_valid
+    if not solution_exists:
+        if no_solution:
+            success = True
+            reasons = ["correct_no_solution"]
+        elif path is None or edge_path is None:
+            success = False
+            reasons = ["no_path_edge_path_or_no_solution_extracted"]
+        else:
+            success = False
+            if not reasons:
+                reasons = ["claimed_path_for_rule_unsolvable"]
+    elif no_solution:
+        success = False
+        reasons = ["incorrect_no_solution_claim"]
+    elif path is None:
+        success = False
+        reasons = ["no_path_extracted"]
+    elif edge_path is None:
+        success = False
+        reasons = ["no_edge_path_extracted"]
+    else:
+        success = constrained_valid
+        if success:
+            reasons = ["valid_constrained_one_stroke_path"]
+
+    return {
+        "path": path or [],
+        "edge_path": edge_path or [],
+        "success": success,
+        "score": 1.0 if success else 0.0,
+        "reasons": reasons,
+        "constraint_reasons": constraint_reasons,
+        "solution_exists": solution_exists,
+        "rule_types": tuple(sorted({rule.type for rule in constraints})),
+        "standard_path_valid": standard_path_valid,
+        "rule_ignored": rule_ignored,
+    }
 
 
 def _score_direct_output(
@@ -362,6 +542,23 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
             item["success"] = int(item["success"]) + int(result.success)
     for item in by_tag.values():
         item["success_rate"] = int(item["success"]) / int(item["total"])
+    rule_results = [result for result in results if result.rule_mode is not None]
+    rule_denominator = sum(
+        int(result.standard_path_valid and bool(result.rule_types))
+        for result in rule_results
+    )
+    rule_ignored_count = sum(int(result.rule_ignored) for result in rule_results)
+    by_rule_mode = _group_results(rule_results, "rule_mode")
+    for mode, group in by_rule_mode.items():
+        selected = [result for result in rule_results if result.rule_mode == mode]
+        denominator = sum(
+            int(result.standard_path_valid and bool(result.rule_types))
+            for result in selected
+        )
+        ignored = sum(int(result.rule_ignored) for result in selected)
+        group["rule_ignore_count"] = ignored
+        group["rule_ignore_denominator"] = denominator
+        group["rule_ignore_rate"] = ignored / denominator if denominator else None
     return {
         "total": total,
         "success": success_count,
@@ -372,6 +569,13 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
         "by_memory_mode": _group_results(
             [result for result in results if result.memory_mode is not None],
             "memory_mode",
+        ),
+        "by_rule_mode": by_rule_mode,
+        "by_rule_type": _group_rule_types(rule_results),
+        "rule_ignore_count": rule_ignored_count,
+        "rule_ignore_denominator": rule_denominator,
+        "rule_ignore_rate": (
+            rule_ignored_count / rule_denominator if rule_denominator else None
         ),
         "metrics": summarize_metrics(results),
     }
@@ -391,6 +595,23 @@ def _group_results(
             "success_rate": (
                 sum(int(item.success) for item in items) / len(items) if items else 0.0
             ),
+        }
+        for key, items in sorted(groups.items())
+    }
+
+
+def _group_rule_types(
+    results: list[OneStrokeInstanceResult],
+) -> dict[str, dict[str, int | float]]:
+    groups: dict[str, list[OneStrokeInstanceResult]] = {}
+    for result in results:
+        for rule_type in result.rule_types:
+            groups.setdefault(rule_type, []).append(result)
+    return {
+        key: {
+            "total": len(items),
+            "success": sum(int(item.success) for item in items),
+            "success_rate": sum(int(item.success) for item in items) / len(items),
         }
         for key, items in sorted(groups.items())
     }
@@ -418,6 +639,13 @@ def write_one_stroke_run(
     (run_dir / "summary.txt").write_text(
         f"total={summary['total']} success={summary['success']} "
         f"success_rate={summary['success_rate']:.3f}\n"
+        + (
+            f"rule_ignore_rate={summary['rule_ignore_rate']:.3f} "
+            f"({summary['rule_ignore_count']}/"
+            f"{summary['rule_ignore_denominator']})\n"
+            if summary["rule_ignore_rate"] is not None
+            else ""
+        )
         + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
     )

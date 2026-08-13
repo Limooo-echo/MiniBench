@@ -269,11 +269,19 @@ def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
     if args.limit is not None:
         tasks = tasks[: args.limit]
     try:
+        from minibench.datasets.one_stroke.rules import ONE_STROKE_RULE_MODES
+
+        rule_modes = (
+            ONE_STROKE_RULE_MODES
+            if args.rule_mode == "all"
+            else (args.rule_mode,)
+        )
         agent = _make_cli_agent(args, system_prompt=ONE_STROKE_SYSTEM_PROMPT)
         results = evaluate_one_stroke_tasks(
             tasks,
             agent,
             prompt_variant=args.prompt_variant,
+            rule_modes=rule_modes,
             show_progress=args.progress,
         )
     except (KeyError, RuntimeError, ValueError) as exc:
@@ -702,6 +710,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=ONE_STROKE_PROMPT_VARIANTS,
         default="baseline",
         help="One-stroke prompt variant to use.",
+    )
+    evaluate_one_stroke.add_argument(
+        "--rule-mode",
+        choices=(
+            "full",
+            "standard",
+            "drop_key_rule",
+            "conflicting_rule",
+            "all",
+        ),
+        default="full",
+        help="Temporary-rule mode for rule-condition tasks; all runs four ablations.",
     )
     evaluate_one_stroke.add_argument(
         "--progress",

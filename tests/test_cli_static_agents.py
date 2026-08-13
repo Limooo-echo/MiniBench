@@ -62,6 +62,13 @@ class StaticAgentCliTests(unittest.TestCase):
 
         self.assertIn("only supported for static Xiangqi", str(raised.exception))
 
+    def test_one_stroke_accepts_rule_ablation_modes(self):
+        args = build_parser().parse_args(
+            ["evaluate-one-stroke", "--rule-mode", "all"]
+        )
+
+        self.assertEqual(args.rule_mode, "all")
+
 
 if __name__ == "__main__":
     unittest.main()

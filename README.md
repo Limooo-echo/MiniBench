@@ -70,6 +70,7 @@ src/minibench/datasets/
 | Hard Xiangqi with Pikafish | `data/xiangqi/hard_tasks.jsonl` | `evaluate-xiangqi` |
 | One-stroke smoke set | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
 | One-stroke A1 direct (10 per difficulty) | `data/one_stroke/a1_direct.jsonl` | `one_stroke_a1.yaml` |
+| One-stroke A2 temporary rules (10 per difficulty) | `data/one_stroke/a2_rule_condition.jsonl` | `one_stroke_a2.yaml` |
 | One-stroke A3 history (10 per difficulty) | `data/one_stroke/a3_history.jsonl` | `one_stroke_a3_history.yaml` |
 | Static Mahjong tile shapes | `data/mahjong/tasks.jsonl` | `evaluate-mahjong` |
 | Single-player Riichi Mahjong draw-discard | `data/mahjong_solo/tasks.jsonl` | `evaluate-mahjong-solo` |
@@ -354,15 +355,32 @@ python -m minibench.cli evaluate-one-stroke \
   --timeout 120
 ```
 
-The formal A1 and A3 configurations are available as YAML experiments. A3 runs
+The formal A1, A2, and A3 configurations are available as YAML experiments. A3 runs
 every task once with explicit incremental state and once with raw step history
 only, so 30 tasks produce 60 results:
 
 ```bash
 ./run.sh config/experiments/one_stroke.yaml
 ./run.sh config/experiments/one_stroke_a1.yaml
+./run.sh config/experiments/one_stroke_a2.yaml
+./run.sh config/experiments/one_stroke_a2_ablation.yaml
 ./run.sh config/experiments/one_stroke_a3_history.yaml
 ```
+
+A2 path answers contain both vertex and edge-ID sequences so parallel edges and
+edge-specific rules remain unambiguous:
+
+```json
+{"path":["A","B","C"],"edge_path":["e01","e02"]}
+```
+
+The formal A2 run uses the complete temporary-rule set. The ablation config runs
+`full`, `standard`, `drop_key_rule`, and `conflicting_rule`; the last mode removes
+the designated key rule and replaces it with a verified logical reverse. Every
+mode is scored against its own recomputed constrained-path oracle. The reported
+`rule_ignore_rate` is the fraction of ordinary valid Euler paths that violate at
+least one displayed temporary rule; malformed or ordinary-invalid paths are not
+included in its denominator.
 
 The earlier `one_stroke_euler_theorem.yaml` is retained only as a legacy prompt
 ablation for the smoke set; it is not part of the MiniBench 2.0 A1 protocol.

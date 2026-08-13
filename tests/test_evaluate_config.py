@@ -140,6 +140,72 @@ class EvaluateConfigTests(unittest.TestCase):
             self.assertEqual(result["success"], 1)
             self.assertEqual(saved_prediction["prompt_variant"], "euler_theorem")
 
+    def test_run_config_expands_one_stroke_rule_modes(self):
+        from minibench.datasets.one_stroke.dataset import load_one_stroke_tasks
+        from minibench.datasets.one_stroke.rules import (
+            find_constrained_one_stroke_path,
+            rules_for_mode,
+        )
+
+        task = load_one_stroke_tasks(
+            "data/one_stroke/a2_rule_condition.jsonl"
+        )[0]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "runs"
+            predictions_path = Path(tmpdir) / "predictions.jsonl"
+            raw_outputs = []
+            for mode in ("full", "conflicting_rule"):
+                constraints = rules_for_mode(
+                    task.rule_constraints,
+                    task.key_rule_id,
+                    task.conflicting_rule,
+                    mode,
+                )
+                oracle = find_constrained_one_stroke_path(
+                    task.vertices, task.edges, constraints=constraints
+                )
+                raw_outputs.append(
+                    json.dumps({"path": oracle[0], "edge_path": oracle[1]})
+                )
+            predictions_path.write_text(
+                json.dumps({"task_id": task.id, "raw_outputs": raw_outputs}) + "\n",
+                encoding="utf-8",
+            )
+            config_path = Path(tmpdir) / "a2.yaml"
+            config_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "task": {
+                            "family": "one_stroke",
+                            "path": "data/one_stroke/a2_rule_condition.jsonl",
+                            "limit": 1,
+                            "task_ids": [],
+                        },
+                        "agent": {
+                            "name": "openai-compatible",
+                            "predictions": str(predictions_path),
+                        },
+                        "provider": {"name": "generic"},
+                        "evaluation": {
+                            "rule_modes": ["full", "conflicting_rule"]
+                        },
+                        "run": {
+                            "output_dir": str(output_dir),
+                            "run_name": "a2-unit-run",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_config(config_path)
+
+            self.assertEqual(result["total"], 2)
+            self.assertEqual(result["success"], 2)
+            self.assertEqual(
+                set(result["by_rule_mode"]), {"full", "conflicting_rule"}
+            )
+
     def test_invalid_task_family_reports_clear_error(self):
         with self.assertRaisesRegex(ValueError, "task.family must be one of"):
             validate_experiment_config(

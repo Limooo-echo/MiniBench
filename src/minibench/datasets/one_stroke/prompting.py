@@ -7,13 +7,17 @@ from minibench.datasets.one_stroke.dataset import (
     OneStrokeTask,
     one_stroke_edge_ids,
 )
+from minibench.datasets.one_stroke.rules import (
+    OneStrokeRule,
+    rules_for_mode,
+)
 
 
 ONE_STROKE_PROMPT_VARIANTS = ("baseline", "euler_theorem")
 
 ONE_STROKE_SYSTEM_PROMPT = (
     "You solve one-stroke graph puzzles. Return exactly one JSON object with "
-    'either the schema {"path":["A","B","C"]} when a one-stroke path exists, '
+    "the path schema requested in the task when a one-stroke path exists, "
     'or {"solvable":false} when no such path exists. A path must visit every '
     "listed edge exactly once, may repeat vertices when needed, and must not "
     "include markdown or commentary. If no valid path exists, do not invent or "
@@ -27,6 +31,7 @@ def build_one_stroke_prompt(
     task: OneStrokeTask,
     *,
     prompt_variant: str = "baseline",
+    rule_mode: str = "full",
 ) -> str:
     if prompt_variant not in ONE_STROKE_PROMPT_VARIANTS:
         choices = ", ".join(ONE_STROKE_PROMPT_VARIANTS)
@@ -34,6 +39,22 @@ def build_one_stroke_prompt(
             f"unknown one-stroke prompt variant {prompt_variant!r}: {choices}"
         )
 
+    is_rule_task = task.capability == "rule_condition"
+    constraints = (
+        rules_for_mode(
+            task.rule_constraints,
+            task.key_rule_id,
+            task.conflicting_rule,
+            rule_mode,
+        )
+        if is_rule_task
+        else ()
+    )
+    path_schema = (
+        '{"path":["A","B"],"edge_path":["e01"]}'
+        if is_rule_task
+        else '{"path":["A","B"]}'
+    )
     lines = [
         "Solve this one-stroke graph puzzle, or determine that it has no solution.",
         "",
@@ -41,7 +62,7 @@ def build_one_stroke_prompt(
         "- Move along one listed undirected edge at a time.",
         "- Use every edge exactly once.",
         "- You may revisit a vertex, but you may not reuse an edge.",
-        "- If a one-stroke path exists, return only JSON: {\"path\":[\"A\",\"B\"]}.",
+        f"- If a one-stroke path exists, return only JSON: {path_schema}.",
         "- If no one-stroke path exists, return only JSON: {\"solvable\":false}.",
         "- Do not force a path for an unsolvable graph. A guessed path that repeats, "
         "skips, or invents edges is wrong; use {\"solvable\":false} instead.",
@@ -103,12 +124,30 @@ def build_one_stroke_prompt(
             "Edges:",
         ]
     )
-    for index, (a, b) in enumerate(task.edges, start=1):
-        lines.append(f"{index}. {a}-{b}")
+    for index, (edge_id, (a, b)) in enumerate(
+        zip(one_stroke_edge_ids(task.edges), task.edges),
+        start=1,
+    ):
+        label = f"{edge_id}:" if is_rule_task else f"{index}."
+        lines.append(f"{label} {a}-{b}")
     if task.start is not None:
         lines.append(f"Required start vertex: {task.start}")
     if task.end is not None:
         lines.append(f"Required end vertex: {task.end}")
+    if is_rule_task:
+        lines.extend(["", "Temporary rules for this puzzle:"])
+        if constraints:
+            lines.extend(f"- {_rule_prompt_text(rule)}" for rule in constraints)
+        else:
+            lines.append("- No additional temporary rules apply.")
+        lines.extend(
+            [
+                "- These temporary rules override any default choice among otherwise "
+                "valid one-stroke paths.",
+                "- The edge_path array must list the exact edge ID used at every "
+                "step and must align one-to-one with consecutive vertices in path.",
+            ]
+        )
     lines.extend(
         [
             "",
@@ -117,6 +156,47 @@ def build_one_stroke_prompt(
         ]
     )
     return "\n".join(lines)
+
+
+def _rule_prompt_text(rule: OneStrokeRule) -> str:
+    if rule.type == "start_vertex":
+        return f"The path must start at vertex {rule.vertex}."
+    if rule.type == "end_vertex":
+        return f"The path must end at vertex {rule.vertex}."
+    if rule.type == "first_edge":
+        return f"The first edge used must be {rule.edge_id}."
+    if rule.type == "last_edge":
+        return f"The last edge used must be {rule.edge_id}."
+    if rule.type == "directed_edge":
+        return (
+            f"Edge {rule.edge_id} must be traversed from {rule.from_vertex} "
+            f"to {rule.to_vertex}."
+        )
+    if rule.type == "edge_before":
+        return f"Edge {rule.before_edge_id} must be used before {rule.after_edge_id}."
+    if rule.type == "vertex_at_step":
+        return (
+            f"After exactly {rule.step} edge-steps, the current vertex must be "
+            f"{rule.vertex}. The initial vertex is step 0."
+        )
+    if rule.type == "adjacent_edges":
+        assert rule.edge_ids is not None
+        return (
+            f"Edges {rule.edge_ids[0]} and {rule.edge_ids[1]} must be used in "
+            "consecutive steps, in either order."
+        )
+    if rule.type == "nonconsecutive_edges":
+        assert rule.edge_ids is not None
+        return (
+            f"Edges {rule.edge_ids[0]} and {rule.edge_ids[1]} must not be used in "
+            "consecutive steps."
+        )
+    if rule.type == "edge_step_window":
+        return (
+            f"Edge {rule.edge_id} must be used at a step from {rule.min_step} "
+            f"through {rule.max_step}, inclusive. Edge-steps are numbered from 1."
+        )
+    raise ValueError(f"unknown one-stroke rule type: {rule.type}")
 
 
 def history_system_prompt(task: OneStrokeTask, memory_mode: str) -> str:
