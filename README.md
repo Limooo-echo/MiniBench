@@ -2,6 +2,64 @@
 
 [English](#english) | [中文](#中文)
 
+## 象棋四任务评测 (Xiangqi Benchmark)
+
+MiniBench 包含 4 个中国象棋残局评测任务：
+
+| 任务 | 评测内容 | 题库 | 打分 |
+|---|---|---|---|
+| **D3** | 一步杀（静态单步，Pikafish oracle） | `data/d3/d3_250.jsonl` | correctness70% + quality20% + legality10% |
+| **C2** | 规则变体对弈（马不蹩脚/车禁中心/兵可后退） | `data/c2/c2_250.jsonl` | 0.3合法 + 0.4每步最优 + 0.3success |
+| **H2** | 历史多步杀（full / agent_only 记忆模式） | `data/h2/h2_250.jsonl` | correctness/quality/legality（多步累计） |
+| **M2** | 多模态（文字 / 汉字图 / 符号图，每步当前棋局） | `data/m2/m2_250.jsonl` | 0.3合法 + 0.4每步最优 + 0.3success |
+
+### 环境变量（API Key）
+
+```bash
+# qwen 系列 (d3/c2/h2/m2 默认模型 qwen3.8-max, 阿里云百炼)
+export DASHSCOPE_API_KEY=sk-your-key
+# 可选: 覆盖默认 provider/model (如 deepseek)
+export MINIBENCH_PROVIDER=deepseek
+export MINIBENCH_MODEL=deepseek-v4-flash
+export DEEPSEEK_API_KEY=sk-your-key
+```
+
+### 一键运行
+
+```bash
+# 安装依赖
+pip install -e .            # 或 pip install gym-xiangqi mahjong PyYAML matplotlib networkx
+
+# 全量: 4 任务 × 9 agent
+./run.sh
+
+# 指定任务 + 抽样 (每次测试前自动抽题)
+./run.sh --tasks d3,c2,h2 --sample 42
+
+# 单任务单 agent
+./run.sh --task d3 --agent cot --sample 42
+./run.sh --task h2 --agent openai-compatible --sample 42 --mode full
+
+# 等价命令 (直接调 python 入口)
+python scripts/run_all.py --tasks d3,c2,h2 --agents openai-compatible --sample 42
+python scripts/run_task.py --task d3 --agent openai-compatible --sample 42
+```
+
+### 抽题 / 验证 / 清理
+
+```bash
+python -m scripts.common.sample --task d3 --seed 42    # 按规则抽题 (d3按难度/c2按比例)
+python -m scripts.common.verify data/d3/d3_250.jsonl   # 题集验证 (Pikafish 推演)
+bash scripts/clean_before_test.sh                       # 每次测试前清理上次结果/抽样
+```
+
+### 结果与测试
+
+- 结果输出到 `runs/`（按时间归档），M2 步图在 `vis_outputs/`
+- 单元测试: `python -m unittest discover -s tests`
+
+[English](#english) | [中文](#中文)
+
 ## English
 
 MiniBench is a small, reproducible benchmark for comparing LLM and
