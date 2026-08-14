@@ -131,9 +131,11 @@ src/minibench/datasets/
 | One-stroke A2 temporary rules (10 per difficulty) | `data/one_stroke/a2_rule_condition.jsonl` | `one_stroke_a2.yaml` |
 | One-stroke A3 history (10 per difficulty) | `data/one_stroke/a3_history.jsonl` | `one_stroke_a3_history.yaml` |
 | One-stroke A4 paired multimodal (10 per difficulty) | `data/one_stroke/a4_multimodal.jsonl` | `one_stroke_a4.yaml` |
-| Static Mahjong tile shapes | `data/mahjong/tasks.jsonl` | `evaluate-mahjong` |
-| Mahjong visual tile tasks (60 paired states) | `data/mahjong/visual_tasks.jsonl` | `mahjong_multimodal.yaml` |
-| Single-player Riichi Mahjong draw-discard | `data/mahjong_solo/tasks.jsonl` | `evaluate-mahjong-solo` |
+| Mahjong 1: text static reasoning | `data/mahjong/tasks.jsonl` | `generate-mahjong-static` / `evaluate-mahjong` |
+| Mahjong 2: full-hand rule adaptation | `data/mahjong_solo/tasks_win.jsonl` | `evaluate-mahjong-rules` |
+| Mahjong 3: history-only memory comparison | `data/mahjong_solo/tasks_win.jsonl` | `evaluate-mahjong-rules` |
+| Mahjong 4: visual tile reasoning (60 paired states) | `data/mahjong/visual_tasks.jsonl` | `generate-mahjong-visual` / `mahjong_multimodal.yaml` |
+| Single-player Mahjong compatibility runner | `data/mahjong_solo/tasks_win.jsonl` | `evaluate-mahjong-solo` |
 | Four-player Riichi Mahjong v1 | `data/mahjong_riichi/tasks.jsonl` | `evaluate-mahjong-riichi` |
 
 ### Agent Architectures
@@ -254,7 +256,26 @@ python -m minibench.cli evaluate-one-stroke \
   --timeout 120
 ```
 
-Static Mahjong tile-shape tasks:
+### Mahjong 2.0 capabilities
+
+The Mahjong benchmark has four authoritative panels. All three text/gameplay
+panels use binary success, and every Mahjong evaluator checkpoints completed
+results so an interrupted provider call does not erase earlier predictions.
+
+#### 1. Text static reasoning
+
+The formal 60-task set is balanced across easy/hard and
+`winning_tiles`/`max_wait_discard`. The latter maximizes distinct structural
+wait types; it is separate from the visual task's live-copy
+`max_ukeire_discard` goal.
+
+```bash
+python -m minibench.cli generate-mahjong-static \
+  --output data/mahjong/tasks_generated.jsonl \
+  --count 60 \
+  --seed 20260807 \
+  --overwrite
+```
 
 ```bash
 python -m minibench.cli evaluate-mahjong \
@@ -267,17 +288,89 @@ python -m minibench.cli evaluate-mahjong \
   --timeout 120
 ```
 
-Single-player Riichi Mahjong draw-discard tasks:
+#### 2. Full-hand rule adaptation
+
+The 15 shared source tasks expand to eight channels: standard, the three
+single-rule channels, all three rule pairs, and the three-rule combination.
+`--limit` counts source tasks before channel expansion. Use `--rule-channel`
+for a canonical channel, or repeat `--rule` to select a combination.
+
+```bash
+python -m minibench.cli evaluate-mahjong-rules \
+  --mahjong-rule-tasks data/mahjong_solo/tasks_win.jsonl \
+  --observation-mode full-hand \
+  --agent cot \
+  --provider deepseek \
+  --model deepseek-chat \
+  --json-mode \
+  --reasoning-temperature 0 \
+  --final-temperature 0 \
+  --progress \
+  --timeout 120
+```
+
+#### 3. History-only memory comparison
+
+Run the same standard-rule source tasks in both modes. `history-only` provides
+the initial 13 tiles, current draw, completed draw/discard history, cumulative
+discards, and remaining draws, while hiding the reconstructed current hand.
+
+```bash
+python -m minibench.cli evaluate-mahjong-rules \
+  --mahjong-rule-tasks data/mahjong_solo/tasks_win.jsonl \
+  --rule-channel standard \
+  --observation-mode history-only \
+  --agent cot \
+  --provider deepseek \
+  --model deepseek-chat \
+  --json-mode \
+  --reasoning-temperature 0 \
+  --final-temperature 0 \
+  --progress \
+  --timeout 120
+```
+
+For the controlled comparison, repeat the command with
+`--observation-mode full-hand`; task IDs, walls, retry behavior, and evaluation
+logic remain identical.
+
+#### 4. Visual tile reasoning
+
+The existing 60 visual tasks and paired text/image scoring remain unchanged.
+
+```bash
+python -m minibench.cli evaluate-mahjong \
+  --mahjong-tasks data/mahjong/visual_tasks.jsonl \
+  --input-mode all \
+  --agent cot \
+  --provider qwen \
+  --model qwen3.8-max \
+  --json-mode \
+  --progress \
+  --timeout 120
+```
+
+All four evaluation commands also accept `--predictions PATH`; this selects the
+deterministic prediction-file agent and allows offline smoke runs without a
+provider credential. Dynamic rule/history prediction records may contain a
+`raw_outputs` list with one action JSON string per model call.
+
+#### Compatibility diagnostics
+
+The standalone solo runner uses the same feature-standard local winning-shape
+success check and supports both observation modes. Its optional shanten and
+Akochan scorers are diagnostic only and do not determine binary success:
 
 ```bash
 python -m minibench.cli evaluate-mahjong-solo \
-  --mahjong-solo-tasks data/mahjong_solo/tasks.jsonl \
+  --mahjong-solo-tasks data/mahjong_solo/tasks_win.jsonl \
   --agent cot \
   --provider deepseek \
   --model deepseek-chat \
   --json-mode \
   --max-tokens 512 \
   --move-scorer shanten \
+  --observation-mode full-hand \
   --progress \
   --timeout 120
 ```
@@ -373,15 +466,22 @@ Generate single-player Mahjong draw-discard tasks:
 
 ```bash
 python -m minibench.cli generate-mahjong-solo \
-  --output data/mahjong_solo/tasks.jsonl \
-  --count 50 \
-  --max-draws 18 \
+  --output data/mahjong_solo/tasks_generated.jsonl \
+  --count 15 \
+  --max-draws 50 \
+  --require-oracle-win \
+  --max-initial-shanten 2 \
+  --min-initial-ukeire 12 \
+  --max-oracle-win-turn 18 \
+  --greedy-simulations 10 \
+  --min-greedy-win-rate 0.8 \
+  --max-attempts 20000 \
   --seed 20260702 \
   --overwrite
 ```
 
-Add `--require-oracle-win` to keep only tasks that the local shanten/ukeire
-oracle can win within the draw limit.
+These deterministic fairness filters create the same feature-standard shape of
+15 playable source tasks used by the rule and memory panels.
 
 ### One-Stroke Prompt Variants
 

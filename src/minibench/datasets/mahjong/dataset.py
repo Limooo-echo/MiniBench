@@ -8,13 +8,19 @@ from typing import Any
 
 from minibench.datasets.mahjong.api import (
     max_ukeire_discards,
+    max_wait_discards,
     normalize_tiles,
     tenpai_discards,
     winning_tiles,
 )
 
 
-MAHJONG_GOALS = {"tenpai_discard", "winning_tiles", "max_ukeire_discard"}
+MAHJONG_GOALS = {
+    "tenpai_discard",
+    "winning_tiles",
+    "max_wait_discard",
+    "max_ukeire_discard",
+}
 
 
 @dataclass(frozen=True)
@@ -81,10 +87,17 @@ def mahjong_task_from_dict(
         if not tenpai_discards(hand):
             raise ValueError(f"{raw['id']}: no discard reaches tenpai")
     elif goal == "winning_tiles":
-        if len(hand) % 3 != 1:
-            raise ValueError(f"{raw['id']}: winning_tiles hand must have 3n+1 tiles")
+        if len(hand) != 13:
+            raise ValueError(
+                f"{raw['id']}: winning_tiles hand must have exactly 13 tiles"
+            )
         if not winning_tiles(hand):
             raise ValueError(f"{raw['id']}: hand is not waiting on any winning tile")
+    elif goal == "max_wait_discard":
+        if len(hand) != 14:
+            raise ValueError(f"{raw['id']}: max_wait_discard hand must have exactly 14 tiles")
+        if not max_wait_discards(hand):
+            raise ValueError(f"{raw['id']}: no discard reaches tenpai")
     elif goal == "max_ukeire_discard":
         if len(hand) != 14:
             raise ValueError(f"{raw['id']}: max_ukeire_discard hand must have 14 tiles")
@@ -101,6 +114,21 @@ def mahjong_task_from_dict(
         image=image,
         image_path=image_path,
     )
+
+
+def task_to_record(task: MahjongTask) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "id": task.id,
+        "goal": task.goal,
+        "hand": list(task.hand),
+        "tags": list(task.tags),
+    }
+    if task.visible_tiles:
+        record["visible_tiles"] = list(task.visible_tiles)
+        record["table_columns"] = task.table_columns
+    if task.image is not None:
+        record["image"] = task.image
+    return record
 
 
 def load_mahjong_tasks(path: str | Path | None = None) -> list[MahjongTask]:

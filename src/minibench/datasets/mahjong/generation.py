@@ -15,10 +15,12 @@ from minibench.datasets.mahjong.api import (
     live_wait_counts,
     live_waits_by_discard,
     max_ukeire_discards,
+    max_wait_discards,
     tile_to_index,
+    waits_by_discard,
     winning_tiles,
 )
-from minibench.datasets.mahjong.dataset import MahjongTask
+from minibench.datasets.mahjong.dataset import MahjongTask, task_to_record
 from minibench.datasets.mahjong.visualization import render_mahjong_gallery
 
 
@@ -35,6 +37,210 @@ ALL_MELDS = tuple(
 
 def default_visual_tasks_path() -> Path:
     return Path(__file__).resolve().parents[4] / "data" / "mahjong" / "visual_tasks.jsonl"
+
+
+def default_static_generated_tasks_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[4]
+        / "data"
+        / "mahjong"
+        / "tasks_generated.jsonl"
+    )
+
+
+STATIC_TASK_GROUPS = (
+    ("easy", "winning_tiles"),
+    ("easy", "max_wait_discard"),
+    ("hard", "winning_tiles"),
+    ("hard", "max_wait_discard"),
+)
+
+
+def generate_mahjong_static_tasks(
+    *,
+    output: str | Path | None = None,
+    count: int = 60,
+    seed: int = 20260807,
+    prefix: str = "mj-generated",
+    max_attempts: int | None = None,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    if count <= 0:
+        raise ValueError("count must be positive")
+    if not prefix:
+        raise ValueError("prefix must be non-empty")
+
+    output_path = Path(output) if output else default_static_generated_tasks_path()
+    if output_path.exists() and not overwrite:
+        raise ValueError(f"{output_path} already exists; pass --overwrite")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    base_count, remainder = divmod(count, len(STATIC_TASK_GROUPS))
+    targets = {
+        group: base_count + int(index < remainder)
+        for index, group in enumerate(STATIC_TASK_GROUPS)
+    }
+    attempts_limit = max_attempts or max(5000, count * 1000)
+    rng = random.Random(seed)
+    tasks: list[MahjongTask] = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    attempts_by_type: dict[str, int] = {}
+
+    for difficulty, goal in STATIC_TASK_GROUPS:
+        target = targets[(difficulty, goal)]
+        generated = 0
+        attempts = 0
+        while generated < target and attempts < attempts_limit:
+            attempts += 1
+            waiting_hand = _random_static_waiting_hand(rng, difficulty=difficulty)
+            if goal == "winning_tiles":
+                hand = waiting_hand
+            else:
+                candidate = _make_static_max_wait_hand(
+                    waiting_hand,
+                    difficulty=difficulty,
+                    rng=rng,
+                )
+                if candidate is None:
+                    continue
+                hand = candidate
+
+            signature = (goal, tuple(hand))
+            if signature in seen:
+                continue
+            seen.add(signature)
+            generated += 1
+            task_label = "wait" if goal == "winning_tiles" else "max-wait-discard"
+            task = MahjongTask(
+                id=f"{prefix}-{difficulty}-{task_label}-{generated:03d}",
+                goal=goal,
+                hand=hand,
+                tags=(difficulty, f"task:{goal}"),
+            )
+            _validate_generated_static_task(task)
+            tasks.append(task)
+
+        type_key = f"{difficulty}/{goal}"
+        attempts_by_type[type_key] = attempts
+        if generated < target:
+            raise RuntimeError(
+                f"only generated {generated}/{target} tasks for {type_key} "
+                f"after {attempts} attempts; increase --max-attempts"
+            )
+
+    with output_path.open("w", encoding="utf-8") as handle:
+        for task in tasks:
+            handle.write(json.dumps(task_to_record(task), ensure_ascii=False) + "\n")
+
+    return {
+        "output": str(output_path),
+        "count": len(tasks),
+        "seed": seed,
+        "counts_by_type": {
+            f"{difficulty}/{goal}": targets[(difficulty, goal)]
+            for difficulty, goal in STATIC_TASK_GROUPS
+        },
+        "attempts": sum(attempts_by_type.values()),
+        "attempts_by_type": attempts_by_type,
+    }
+
+
+def _random_static_waiting_hand(
+    rng: random.Random,
+    *,
+    difficulty: str,
+) -> tuple[str, ...]:
+    if difficulty not in {"easy", "hard"}:
+        raise ValueError("difficulty must be easy or hard")
+
+    for _ in range(2000):
+        if difficulty == "hard":
+            suit = rng.choice("mps")
+            tile_pool = tuple(f"{rank}{suit}" for rank in range(1, 10))
+            meld_pool = tuple(
+                [(f"{rank}{suit}",) * 3 for rank in range(1, 10)]
+                + [
+                    (f"{start}{suit}", f"{start + 1}{suit}", f"{start + 2}{suit}")
+                    for start in range(1, 8)
+                ]
+            )
+        else:
+            tile_pool = ALL_TILES
+            meld_pool = ALL_MELDS
+
+        counts: Counter[str] = Counter()
+        pair = rng.choice(tile_pool)
+        counts[pair] = 2
+        melds: list[tuple[str, str, str]] = []
+        for _meld_index in range(4):
+            valid = [
+                meld
+                for meld in meld_pool
+                if all(counts[tile] + meld.count(tile) <= 4 for tile in set(meld))
+            ]
+            if not valid:
+                break
+            meld = rng.choice(valid)
+            counts.update(meld)
+            melds.append(meld)
+        if len(melds) != 4:
+            continue
+
+        winning_hand = [pair, pair, *(tile for meld in melds for tile in meld)]
+        if not is_winning_hand(winning_hand):
+            continue
+        waiting_hand = list(winning_hand)
+        waiting_hand.pop(rng.randrange(len(waiting_hand)))
+        waiting_hand.sort(key=tile_to_index)
+        if _difficulty(waiting_hand) != difficulty:
+            continue
+        if winning_tiles(waiting_hand):
+            return tuple(waiting_hand)
+    raise RuntimeError(f"failed to construct a {difficulty} waiting hand")
+
+
+def _make_static_max_wait_hand(
+    waiting_hand: tuple[str, ...],
+    *,
+    difficulty: str,
+    rng: random.Random,
+) -> tuple[str, ...] | None:
+    waits = set(winning_tiles(waiting_hand))
+    extras = [tile for tile in _remaining_wall(waiting_hand) if tile not in waits]
+    if difficulty == "hard":
+        suit = waiting_hand[0][1]
+        extras = [tile for tile in extras if len(tile) == 2 and tile[1] == suit]
+    rng.shuffle(extras)
+
+    for extra in extras[:24]:
+        hand = tuple(sorted((*waiting_hand, extra), key=tile_to_index))
+        if _difficulty(hand) != difficulty:
+            continue
+        discard_waits = waits_by_discard(hand)
+        if len(discard_waits) < 2:
+            continue
+        wait_totals = {tile: len(waits) for tile, waits in discard_waits.items()}
+        best = max_wait_discards(hand)
+        if len(best) != 1 or len(set(wait_totals.values())) < 2:
+            continue
+        return hand
+    return None
+
+
+def _validate_generated_static_task(task: MahjongTask) -> None:
+    if _difficulty(task.hand) != task.tags[0]:
+        raise RuntimeError(f"generated task {task.id} has an incorrect difficulty")
+    if task.goal == "winning_tiles":
+        if len(task.hand) != 13 or not winning_tiles(task.hand):
+            raise RuntimeError(f"generated task {task.id} is not a valid wait task")
+        return
+    if task.goal == "max_wait_discard":
+        if len(task.hand) != 14 or len(max_wait_discards(task.hand)) != 1:
+            raise RuntimeError(
+                f"generated task {task.id} has no unique maximum-wait discard"
+            )
+        return
+    raise RuntimeError(f"generated task {task.id} has an unsupported goal")
 
 
 def generate_mahjong_visual_tasks(

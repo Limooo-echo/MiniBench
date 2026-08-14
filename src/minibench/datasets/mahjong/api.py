@@ -50,12 +50,58 @@ INDEX_TO_TILE = {
     33: "C",
 }
 
+CHINESE_NUMBER_TO_DIGIT = {
+    "一": "1",
+    "二": "2",
+    "三": "3",
+    "四": "4",
+    "五": "5",
+    "六": "6",
+    "七": "7",
+    "八": "8",
+    "九": "9",
+}
+
+CHINESE_SUIT_TO_CODE = {
+    "萬": "m",
+    "万": "m",
+    "筒": "p",
+    "餅": "p",
+    "饼": "p",
+    "條": "s",
+    "条": "s",
+    "索": "s",
+}
+
+CHINESE_HONOR_TO_CODE = {
+    "東": "E",
+    "东": "E",
+    "南": "S",
+    "西": "W",
+    "北": "N",
+    "白": "P",
+    "白板": "P",
+    "發": "F",
+    "发": "F",
+    "中": "C",
+    "紅中": "C",
+    "红中": "C",
+}
+
 
 def normalize_tile(tile: str) -> str:
     value = tile.strip()
     upper = value.upper()
     if upper in HONOR_TO_INDEX:
         return INDEX_TO_TILE[HONOR_TO_INDEX[upper]]
+    if value in CHINESE_HONOR_TO_CODE:
+        return CHINESE_HONOR_TO_CODE[value]
+
+    if len(value) == 2:
+        chinese_number = CHINESE_NUMBER_TO_DIGIT.get(value[0])
+        chinese_suit = CHINESE_SUIT_TO_CODE.get(value[1])
+        if chinese_number is not None and chinese_suit is not None:
+            return f"{chinese_number}{chinese_suit}"
 
     if len(value) != 2:
         raise ValueError(f"invalid tile notation: {tile!r}")
@@ -176,6 +222,37 @@ def tenpai_discards(tiles: list[str] | tuple[str, ...]) -> tuple[str, ...]:
         if calculate_shanten(remaining) == 0:
             discards.append(tile)
     return tuple(discards)
+
+
+def waits_by_discard(
+    tiles: list[str] | tuple[str, ...],
+) -> dict[str, tuple[str, ...]]:
+    """Return every tenpai discard and its distinct winning tile types."""
+    normalized = normalize_tiles(tiles)
+    if len(normalized) % 3 != 2:
+        raise ValueError("discard tasks require a 3n+2 hand, usually 14 tiles")
+
+    result: dict[str, tuple[str, ...]] = {}
+    for tile in sorted(set(normalized), key=tile_to_index):
+        remaining = list(normalized)
+        remaining.remove(tile)
+        waits = winning_tiles(remaining)
+        if waits:
+            result[tile] = waits
+    return result
+
+
+def max_wait_discards(tiles: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    """Return all discards tied for the most distinct winning tile types."""
+    discard_waits = waits_by_discard(tiles)
+    if not discard_waits:
+        return ()
+    maximum = max(len(waits) for waits in discard_waits.values())
+    return tuple(
+        discard
+        for discard, waits in discard_waits.items()
+        if len(waits) == maximum
+    )
 
 
 def live_wait_counts(

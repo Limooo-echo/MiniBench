@@ -21,7 +21,12 @@ class MahjongSoloTask:
 
 
 def default_mahjong_solo_tasks_path() -> Path:
-    return Path(__file__).resolve().parents[4] / "data" / "mahjong_solo" / "tasks.jsonl"
+    return (
+        Path(__file__).resolve().parents[4]
+        / "data"
+        / "mahjong_solo"
+        / "tasks_win.jsonl"
+    )
 
 
 def mahjong_solo_task_from_dict(raw: dict[str, Any]) -> MahjongSoloTask:
@@ -37,8 +42,8 @@ def mahjong_solo_task_from_dict(raw: dict[str, Any]) -> MahjongSoloTask:
         raise ValueError(f"{raw['id']}: max_draws must be a positive integer")
 
     initial_hand = normalize_tiles(_require_string_list(raw, "initial_hand"))
-    if len(initial_hand) % 3 != 1:
-        raise ValueError(f"{raw['id']}: initial_hand must have 3n+1 tiles, usually 13")
+    if len(initial_hand) != 13:
+        raise ValueError(f"{raw['id']}: initial_hand must have exactly 13 tiles")
 
     wall = normalize_tiles(_require_string_list(raw, "wall"))
     if len(wall) < max_draws:

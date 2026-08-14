@@ -6,7 +6,8 @@ from pathlib import Path
 import re
 from time import strftime
 from collections import Counter
-from typing import Any, Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from minibench.core.agent import Agent
 from minibench.core.metrics import (
@@ -17,9 +18,13 @@ from minibench.core.metrics import (
 )
 from minibench.core.multimodal import ImageAttachment, summarize_paired_modes
 from minibench.datasets.mahjong.api import (
+    live_wait_counts,
+    live_waits_by_discard,
     max_ukeire_discards,
+    max_wait_discards,
     normalize_tile,
     tenpai_discards,
+    waits_by_discard,
     winning_tiles,
 )
 from minibench.datasets.mahjong.dataset import MahjongTask
@@ -88,9 +93,14 @@ def evaluate_mahjong_tasks(
     agent: Agent,
     *,
     input_modes: Sequence[str] | None = None,
+    show_progress: bool = False,
+    on_result: Callable[[MahjongInstanceResult], None] | None = None,
 ) -> list[MahjongInstanceResult]:
     results: list[MahjongInstanceResult] = []
-    for task in tasks:
+    total = len(tasks)
+    for index, task in enumerate(tasks, start=1):
+        if show_progress:
+            print(f"[mahjong] {index}/{total} {task.id}", flush=True)
         visual_task = "visual" in task.tags or task.image is not None
         modes = tuple(input_modes or (("image",) if visual_task else ("text",)))
         if set(modes) - {"text", "image"}:
@@ -119,17 +129,18 @@ def evaluate_mahjong_tasks(
                 success, reasons = False, ["no_json_answer_extracted"]
             else:
                 success, reasons = validate_mahjong_answer(task, parsed)
-            results.append(
-                _make_result(
-                    task,
-                    input_mode=input_mode,
-                    raw_output=raw_output,
-                    parsed_answer=parsed,
-                    success=success,
-                    reasons=reasons,
-                    metrics=finish_task_metrics(agent, metrics_start),
-                )
+            result = _make_result(
+                task,
+                input_mode=input_mode,
+                raw_output=raw_output,
+                parsed_answer=parsed,
+                success=success,
+                reasons=reasons,
+                metrics=finish_task_metrics(agent, metrics_start),
             )
+            results.append(result)
+            if on_result is not None:
+                on_result(result)
     return results
 
 
@@ -137,11 +148,15 @@ def validate_mahjong_answer(
     task: MahjongTask,
     parsed_answer: dict[str, Any],
 ) -> tuple[bool, list[str]]:
-    if task.goal in {"tenpai_discard", "max_ukeire_discard"}:
+    if task.goal in {"tenpai_discard", "max_wait_discard", "max_ukeire_discard"}:
         expected = set(
             tenpai_discards(task.hand)
             if task.goal == "tenpai_discard"
-            else max_ukeire_discards(task.hand, task.visible_tiles)
+            else (
+                max_ukeire_discards(task.hand, task.visible_tiles)
+                if task.goal == "max_ukeire_discard"
+                else max_wait_discards(task.hand)
+            )
         )
         discard = parsed_answer.get("discard")
         if not isinstance(discard, str):
@@ -177,14 +192,42 @@ def expected_answer(task: MahjongTask) -> dict[str, Any]:
     if task.goal == "tenpai_discard":
         return {"discard_any": list(tenpai_discards(task.hand))}
     if task.goal == "max_ukeire_discard":
-        return {"discard_any": list(max_ukeire_discards(task.hand, task.visible_tiles))}
+        discard_waits = live_waits_by_discard(task.hand, task.visible_tiles)
+        best = max_ukeire_discards(task.hand, task.visible_tiles)
+        return {
+            "discard_any": list(best),
+            "max_live_winning_copies": (
+                sum(discard_waits[best[0]].values()) if best else 0
+            ),
+        }
+    if task.goal == "max_wait_discard":
+        discard_waits = waits_by_discard(task.hand)
+        best = max_wait_discards(task.hand)
+        return {
+            "discard_any": list(best),
+            "max_wait_count": len(discard_waits[best[0]]) if best else 0,
+        }
     if task.goal == "winning_tiles":
-        return {"winning_tiles": list(winning_tiles(task.hand))}
+        answer: dict[str, Any] = {"winning_tiles": list(winning_tiles(task.hand))}
+        if task.visible_tiles:
+            answer["live_winning_copies"] = live_wait_counts(
+                task.hand,
+                task.visible_tiles,
+            )
+        return answer
     return {}
 
 
-def summarize_mahjong(results: list[MahjongInstanceResult]) -> dict[str, Any]:
+def summarize_mahjong(
+    results: list[MahjongInstanceResult],
+    *,
+    planned_total: int | None = None,
+    run_status: str = "completed",
+    error: str | None = None,
+) -> dict[str, Any]:
     total = len(results)
+    if planned_total is not None and planned_total < total:
+        raise ValueError("planned_total cannot be smaller than completed results")
     success_count = sum(1 for result in results if result.success)
     by_tag: dict[str, dict[str, int | float]] = {}
     for result in results:
@@ -194,6 +237,17 @@ def summarize_mahjong(results: list[MahjongInstanceResult]) -> dict[str, Any]:
             item["success"] = int(item["success"]) + int(result.success)
     for item in by_tag.values():
         item["success_rate"] = int(item["success"]) / int(item["total"])
+    by_task_type: dict[str, dict[str, int | float]] = {}
+    for result in results:
+        task_type = _summary_task_type(result.tags)
+        item = by_task_type.setdefault(
+            task_type,
+            {"total": 0, "success": 0, "success_rate": 0.0},
+        )
+        item["total"] = int(item["total"]) + 1
+        item["success"] = int(item["success"]) + int(result.success)
+    for item in by_task_type.values():
+        item["success_rate"] = int(item["success"]) / int(item["total"])
     visual_results = [
         result for result in results if result.expected_transcription is not None
     ]
@@ -202,11 +256,12 @@ def summarize_mahjong(results: list[MahjongInstanceResult]) -> dict[str, Any]:
         if visual_results
         else {}
     )
-    return {
+    summary: dict[str, Any] = {
         "total": total,
         "success": success_count,
         "success_rate": success_count / total if total else 0.0,
         "by_tag": by_tag,
+        "by_task_type": by_task_type,
         "by_input_mode": paired.get("by_input_mode", {}),
         "visual_gap": paired.get("visual_gap", {}),
         "hand_transcription_accuracy": _mean_optional(
@@ -230,30 +285,61 @@ def summarize_mahjong(results: list[MahjongInstanceResult]) -> dict[str, Any]:
         ),
         "metrics": summarize_metrics(results),
     }
+    if planned_total is not None or run_status != "completed" or error is not None:
+        planned = planned_total if planned_total is not None else total
+        summary.update(
+            {
+                "planned_total": planned,
+                "completed_total": total,
+                "remaining_total": planned - total,
+                "run_status": run_status,
+            }
+        )
+        if error is not None:
+            summary["error"] = error
+    return summary
 
 
 def write_mahjong_run(
     results: list[MahjongInstanceResult],
     output_dir: str | Path = "runs",
     run_name: str | None = None,
+    *,
+    planned_total: int | None = None,
+    run_status: str = "completed",
+    error: str | None = None,
 ) -> Path:
     root = Path(output_dir)
     name = run_name or f"mahjong-{strftime('%Y%m%d-%H%M%S')}"
     run_dir = root / name
-    run_dir.mkdir(parents=True, exist_ok=False)
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     with (run_dir / "predictions.jsonl").open("w", encoding="utf-8") as handle:
         for result in results:
             handle.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
 
-    summary = summarize_mahjong(results)
+    summary = summarize_mahjong(
+        results,
+        planned_total=planned_total,
+        run_status=run_status,
+        error=error,
+    )
     (run_dir / "results.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     (run_dir / "summary.txt").write_text(
-        f"total={summary['total']} success={summary['success']} "
+        (
+            f"run_status={summary['run_status']} "
+            f"planned={summary['planned_total']} "
+            f"completed={summary['completed_total']} "
+            f"remaining={summary['remaining_total']}\n"
+            if "run_status" in summary
+            else ""
+        )
+        + f"total={summary['total']} success={summary['success']} "
         f"success_rate={summary['success_rate']:.3f}\n"
+        + (f"error={error}\n" if error is not None else "")
         + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
     )
@@ -354,3 +440,29 @@ def _tile_sort_key(tile: str) -> int:
     from minibench.datasets.mahjong.api import tile_to_index
 
     return tile_to_index(tile)
+
+
+def _summary_task_type(tags: tuple[str, ...]) -> str:
+    difficulty = next(
+        (
+            tag.removeprefix("difficulty:")
+            for tag in tags
+            if tag in {"easy", "medium", "hard"}
+            or tag.startswith("difficulty:")
+        ),
+        "unspecified",
+    )
+    task_type = next(
+        (tag.removeprefix("task:") for tag in tags if tag.startswith("task:")),
+        next(
+            (tag.removeprefix("goal:") for tag in tags if tag.startswith("goal:")),
+            "unspecified",
+        ),
+    )
+    visible_count = next(
+        (tag.removeprefix("visible:") for tag in tags if tag.startswith("visible:")),
+        None,
+    )
+    if visible_count is not None:
+        return f"{task_type}/visible:{visible_count}"
+    return f"{difficulty}/{task_type}"

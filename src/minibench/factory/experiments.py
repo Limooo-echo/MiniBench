@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from time import strftime
 from typing import Any, Callable
 
 from minibench.core.agent import Agent
@@ -110,12 +111,35 @@ def _mahjong_solo_spec() -> TaskFamilySpec:
     from minibench.datasets.mahjong_solo.prompting import MAHJONG_SOLO_SYSTEM_PROMPT
 
     return TaskFamilySpec(
-        default_path=Path("data/mahjong_solo/tasks.jsonl"),
+        default_path=Path("data/mahjong_solo/tasks_win.jsonl"),
         load_tasks=load_mahjong_solo_tasks,
         evaluate_tasks=evaluate_mahjong_solo_tasks,
         summarize=summarize_mahjong_solo,
         write_run=write_mahjong_solo_run,
         system_prompt=MAHJONG_SOLO_SYSTEM_PROMPT,
+    )
+
+
+def _mahjong_rule_variants_spec() -> TaskFamilySpec:
+    from minibench.datasets.mahjong_rule_variants.dataset import (
+        load_mahjong_rule_variant_tasks,
+    )
+    from minibench.datasets.mahjong_rule_variants.evaluation import (
+        evaluate_mahjong_rule_variant_tasks,
+        summarize_mahjong_rule_variants,
+        write_mahjong_rule_variant_run,
+    )
+    from minibench.datasets.mahjong_rule_variants.prompting import (
+        MAHJONG_RULE_VARIANT_SYSTEM_PROMPT,
+    )
+
+    return TaskFamilySpec(
+        default_path=Path("data/mahjong_solo/tasks_win.jsonl"),
+        load_tasks=load_mahjong_rule_variant_tasks,
+        evaluate_tasks=evaluate_mahjong_rule_variant_tasks,
+        summarize=summarize_mahjong_rule_variants,
+        write_run=write_mahjong_rule_variant_run,
+        system_prompt=MAHJONG_RULE_VARIANT_SYSTEM_PROMPT,
     )
 
 
@@ -146,6 +170,7 @@ TASK_FAMILIES: dict[str, Callable[[], TaskFamilySpec]] = {
     "zebra": _zebra_spec,
     "mahjong": _mahjong_spec,
     "mahjong_solo": _mahjong_solo_spec,
+    "mahjong_rule_variants": _mahjong_rule_variants_spec,
     "mahjong_riichi": _mahjong_riichi_spec,
 }
 
@@ -160,14 +185,25 @@ def get_task_family_spec(family: str) -> TaskFamilySpec:
 
 def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
     task_config = config["task"]
-    spec = get_task_family_spec(str(task_config["family"]))
+    family = str(task_config["family"])
+    spec = get_task_family_spec(family)
 
     task_path = task_config.get("path") or spec.default_path
     tasks = spec.load_tasks(task_path)
     tasks = _select_tasks(tasks, task_config.get("task_ids") or [])
+    evaluation_config = dict(config.get("evaluation") or {})
+    if family == "mahjong_rule_variants":
+        tasks = _select_mahjong_rule_configuration(tasks, evaluation_config)
     limit = task_config.get("limit")
     if limit is not None:
-        tasks = tasks[: int(limit)]
+        if family == "mahjong_rule_variants":
+            source_ids = list(dict.fromkeys(task.source_task_id for task in tasks))
+            selected_source_ids = set(source_ids[: int(limit)])
+            tasks = [
+                task for task in tasks if task.source_task_id in selected_source_ids
+            ]
+        else:
+            tasks = tasks[: int(limit)]
 
     agent = make_agent_from_config(
         config["agent"],
@@ -175,10 +211,18 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
         system_prompt=spec.system_prompt,
     )
 
-    evaluation_config = dict(config.get("evaluation") or {})
-    results = _evaluate(spec, tasks, agent, task_config["family"], evaluation_config)
-
     run_config = config["run"]
+    if family in {"mahjong", "mahjong_solo", "mahjong_rule_variants"}:
+        return _run_checkpointed_mahjong_experiment(
+            spec,
+            tasks,
+            agent,
+            family,
+            evaluation_config,
+            run_config,
+        )
+
+    results = _evaluate(spec, tasks, agent, family, evaluation_config)
     run_dir = spec.write_run(
         results,
         run_config.get("output_dir", "runs"),
@@ -198,12 +242,44 @@ def _select_tasks(tasks: list[Any], task_ids: list[str]) -> list[Any]:
     return selected
 
 
+def _select_mahjong_rule_configuration(
+    tasks: list[Any],
+    evaluation_config: dict[str, Any],
+) -> list[Any]:
+    from minibench.datasets.mahjong_rule_variants.rules import (
+        active_rules_for_channel,
+        channel_for_rules,
+    )
+
+    channel = evaluation_config.get("rule_channel")
+    configured_rules = evaluation_config.get("rules")
+    if channel is not None and configured_rules is not None:
+        raise ValueError("configure either evaluation.rule_channel or evaluation.rules")
+    if configured_rules is not None:
+        if isinstance(configured_rules, str):
+            configured_rules = [
+                rule.strip() for rule in configured_rules.split(",") if rule.strip()
+            ]
+        if not isinstance(configured_rules, (list, tuple)):
+            raise ValueError("evaluation.rules must be a list or comma-separated string")
+        channel = channel_for_rules(tuple(str(rule) for rule in configured_rules))
+    if channel is None:
+        return tasks
+    channel = str(channel)
+    active_rules_for_channel(channel)
+    selected = [task for task in tasks if task.channel == channel]
+    if not selected:
+        raise ValueError(f"Mahjong rule configuration selected no tasks: {channel}")
+    return selected
+
+
 def _evaluate(
     spec: TaskFamilySpec,
     tasks: list[Any],
     agent: Agent,
     family: str,
     evaluation_config: dict[str, Any],
+    on_result: Callable[[Any], None] | None = None,
 ) -> list[Any]:
     if family == "xiangqi":
         return spec.evaluate_tasks(
@@ -283,7 +359,17 @@ def _evaluate(
             mahjong_ai_command=evaluation_config.get("mahjong_ai_command"),
             mahjong_ai_mode=evaluation_config.get("mahjong_ai_mode", "stdio"),
             mahjong_ai_timeout=evaluation_config.get("mahjong_ai_timeout", 30.0),
+            observation_mode=evaluation_config.get("observation_mode", "full-hand"),
             show_progress=bool(evaluation_config.get("show_progress", False)),
+            on_result=on_result,
+        )
+    if family == "mahjong_rule_variants":
+        return spec.evaluate_tasks(
+            tasks,
+            agent,
+            observation_mode=evaluation_config.get("observation_mode", "full-hand"),
+            show_progress=bool(evaluation_config.get("show_progress", False)),
+            on_result=on_result,
         )
     if family == "mahjong":
         input_modes = evaluation_config.get("input_modes")
@@ -293,5 +379,104 @@ def _evaluate(
             tasks,
             agent,
             input_modes=(tuple(input_modes) if input_modes is not None else None),
+            show_progress=bool(evaluation_config.get("show_progress", False)),
+            on_result=on_result,
         )
     return spec.evaluate_tasks(tasks, agent)
+
+
+def _run_checkpointed_mahjong_experiment(
+    spec: TaskFamilySpec,
+    tasks: list[Any],
+    agent: Agent,
+    family: str,
+    evaluation_config: dict[str, Any],
+    run_config: dict[str, Any],
+) -> tuple[Path, dict[str, Any]]:
+    prefix = {
+        "mahjong": "mahjong",
+        "mahjong_solo": "mahjong-solo",
+        "mahjong_rule_variants": "mahjong-rules",
+    }[family]
+    output_dir = run_config.get("output_dir", "runs")
+    run_name = run_config.get("run_name") or f"{prefix}-{strftime('%Y%m%d-%H%M%S')}"
+    planned_total = _planned_mahjong_results(family, tasks, evaluation_config)
+    completed_results: list[Any] = []
+
+    def checkpoint(payload: Any) -> None:
+        if family == "mahjong":
+            completed_results.append(payload)
+        else:
+            completed_results[:] = payload
+        spec.write_run(
+            completed_results,
+            output_dir,
+            run_name,
+            planned_total=planned_total,
+            run_status="running",
+        )
+
+    spec.write_run(
+        [],
+        output_dir,
+        run_name,
+        planned_total=planned_total,
+        run_status="running",
+    )
+    try:
+        results = _evaluate(
+            spec,
+            tasks,
+            agent,
+            family,
+            evaluation_config,
+            on_result=checkpoint,
+        )
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        run_dir = spec.write_run(
+            completed_results,
+            output_dir,
+            run_name,
+            planned_total=planned_total,
+            run_status="interrupted",
+            error=error,
+        )
+        raise RuntimeError(
+            f"{family} evaluation failed after "
+            f"{len(completed_results)}/{planned_total} results; partial results "
+            f"saved to {run_dir}: {exc}"
+        ) from exc
+
+    run_dir = spec.write_run(
+        results,
+        output_dir,
+        run_name,
+        planned_total=planned_total,
+        run_status="completed",
+    )
+    summary = spec.summarize(
+        results,
+        planned_total=planned_total,
+        run_status="completed",
+    )
+    return run_dir, summary
+
+
+def _planned_mahjong_results(
+    family: str,
+    tasks: list[Any],
+    evaluation_config: dict[str, Any],
+) -> int:
+    if family != "mahjong":
+        return len(tasks)
+    input_modes = evaluation_config.get("input_modes")
+    if isinstance(input_modes, str):
+        input_modes = (input_modes,)
+    if input_modes is None:
+        return len(tasks)
+    modes = tuple(input_modes)
+    return sum(
+        len(modes) if ("visual" in task.tags or task.image is not None) else 1
+        for task in tasks
+    )

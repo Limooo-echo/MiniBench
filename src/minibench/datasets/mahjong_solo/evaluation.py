@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
@@ -19,6 +20,7 @@ from minibench.core.metrics import (
 from minibench.datasets.mahjong.api import (
     calculate_shanten,
     index_to_tile,
+    is_winning_hand,
     normalize_tile,
     score_closed_hand,
     tile_to_index,
@@ -29,12 +31,19 @@ from minibench.datasets.mahjong_riichi.ai import (
     make_external_mahjong_ai,
 )
 from minibench.datasets.mahjong_solo.dataset import MahjongSoloTask
-from minibench.datasets.mahjong_solo.prompting import build_mahjong_solo_prompt
+from minibench.datasets.mahjong_solo.prompting import (
+    MAHJONG_SOLO_OBSERVATION_MODES,
+    build_mahjong_solo_prompt,
+)
+
+
+MAX_ACTION_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
 class MahjongSoloInstanceResult:
     task_id: str
+    observation_mode: str
     success: bool
     score: float
     move_average_score: float | None
@@ -43,6 +52,7 @@ class MahjongSoloInstanceResult:
     discards: list[str]
     raw_outputs: list[str]
     agent_actions: list[dict[str, Any]]
+    action_errors: list[dict[str, Any]]
     move_scores: list[dict[str, Any]]
     final_hand: list[str]
     win_score: dict[str, Any] | None
@@ -59,10 +69,17 @@ def evaluate_mahjong_solo_tasks(
     mahjong_ai_command: str | None = None,
     mahjong_ai_mode: str = "stdio",
     mahjong_ai_timeout: float = 30.0,
+    observation_mode: str = "full-hand",
     show_progress: bool = False,
+    on_result: Callable[[list[MahjongSoloInstanceResult]], None] | None = None,
 ) -> list[MahjongSoloInstanceResult]:
     if move_scorer not in {"none", "shanten", "akochan-choice"}:
         raise ValueError("move_scorer must be one of: none, shanten, akochan-choice")
+    if observation_mode not in MAHJONG_SOLO_OBSERVATION_MODES:
+        raise ValueError(
+            "observation_mode must be one of: "
+            + ", ".join(MAHJONG_SOLO_OBSERVATION_MODES)
+        )
     results: list[MahjongSoloInstanceResult] = []
     total = len(tasks)
     external_ai: ExternalMahjongAI | None = None
@@ -76,14 +93,16 @@ def evaluate_mahjong_solo_tasks(
         for index, task in enumerate(tasks, start=1):
             if show_progress:
                 print(f"[mahjong-solo] {index}/{total} {task.id}", flush=True)
-            results.append(
-                evaluate_mahjong_solo_task(
-                    task,
-                    agent,
-                    move_scorer=move_scorer,
-                    external_ai=external_ai,
-                )
+            result = evaluate_mahjong_solo_task(
+                task,
+                agent,
+                move_scorer=move_scorer,
+                external_ai=external_ai,
+                observation_mode=observation_mode,
             )
+            results.append(result)
+            if on_result is not None:
+                on_result(results)
     finally:
         if external_ai is not None:
             external_ai.close()
@@ -96,129 +115,166 @@ def evaluate_mahjong_solo_task(
     *,
     move_scorer: str = "shanten",
     external_ai: ExternalMahjongAI | None = None,
+    observation_mode: str = "full-hand",
 ) -> MahjongSoloInstanceResult:
+    if move_scorer not in {"none", "shanten", "akochan-choice"}:
+        raise ValueError("move_scorer must be one of: none, shanten, akochan-choice")
+    if observation_mode not in MAHJONG_SOLO_OBSERVATION_MODES:
+        raise ValueError(
+            "observation_mode must be one of: "
+            + ", ".join(MAHJONG_SOLO_OBSERVATION_MODES)
+        )
     metrics_start = start_task_metrics(agent)
     hand = list(task.initial_hand)
     draws: list[str] = []
     discards: list[str] = []
     raw_outputs: list[str] = []
     agent_actions: list[dict[str, Any]] = []
+    action_errors: list[dict[str, Any]] = []
     move_scores: list[dict[str, Any]] = []
+    prior_turns: list[tuple[str, str]] = []
     reasons: list[str] = []
     win_score: dict[str, Any] | None = None
     mjai_events = _initial_mjai_events(task)
-    ended_by_terminal_reason = False
 
     for draw_number, drawn_tile in enumerate(task.wall[: task.max_draws], start=1):
         hand.append(drawn_tile)
         draws.append(drawn_tile)
         mjai_events.append({"type": "tsumo", "actor": 0, "pai": drawn_tile})
-        current_win_score = _score_tsumo(task, hand, drawn_tile)
-        prompt = build_mahjong_solo_prompt(
-            task,
-            draw_number=draw_number,
-            drawn_tile=drawn_tile,
-            hand=hand,
-            discards=discards,
-            remaining_draws=task.max_draws - draw_number,
-            can_tsumo=current_win_score is not None,
-            winning_score=current_win_score,
-        )
-        raw_output = agent.generate(prompt, task)
-        raw_outputs.append(raw_output)
-        action = extract_mahjong_solo_action(raw_output)
-        if action is None:
-            reasons.append("no_json_action_extracted")
-            ended_by_terminal_reason = True
-            break
-        agent_actions.append(action)
+        current_is_win = is_winning_hand(hand)
+        current_win_score = _score_tsumo(task, hand, drawn_tile) if current_is_win else None
+        action_feedback: list[str] = []
+        turn_completed = False
+        last_error = "action_attempts_exhausted"
 
-        action_name = action.get("action")
-        if action_name == "tsumo":
-            if current_win_score is None:
-                reasons.append("illegal_tsumo")
-                ended_by_terminal_reason = True
-                break
-            win_score = current_win_score
-            reasons.append(f"agent_tsumo:{drawn_tile}")
-            return _make_result(
+        for attempt_number in range(1, MAX_ACTION_ATTEMPTS + 1):
+            prompt = build_mahjong_solo_prompt(
                 task,
-                success=True,
-                draws=draws,
+                draw_number=draw_number,
+                drawn_tile=drawn_tile,
+                hand=hand,
                 discards=discards,
-                raw_outputs=raw_outputs,
-                agent_actions=agent_actions,
-                move_scores=move_scores,
-                final_hand=hand,
-                win_score=win_score,
-                reasons=reasons,
-                metrics=finish_task_metrics(agent, metrics_start),
+                remaining_draws=task.max_draws - draw_number,
+                observation_mode=observation_mode,
+                prior_turns=tuple(prior_turns),
+                attempt_number=attempt_number,
+                max_attempts=MAX_ACTION_ATTEMPTS,
+                action_feedback=tuple(action_feedback),
             )
+            raw_output = agent.generate(prompt, task)
+            raw_outputs.append(raw_output)
+            action = extract_mahjong_solo_action(raw_output)
 
-        if action_name != "discard":
-            reasons.append(f"unsupported_action:{action_name}")
-            ended_by_terminal_reason = True
-            break
+            if action is None:
+                last_error = "no_json_action_extracted"
+            else:
+                agent_actions.append(action)
+                action_name = action.get("action")
+                if action_name == "tsumo":
+                    if current_is_win:
+                        win_score = current_win_score
+                        reasons.append(f"agent_tsumo:{drawn_tile}")
+                        return _make_result(
+                            task,
+                            observation_mode=observation_mode,
+                            success=True,
+                            draws=draws,
+                            discards=discards,
+                            raw_outputs=raw_outputs,
+                            agent_actions=agent_actions,
+                            action_errors=action_errors,
+                            move_scores=move_scores,
+                            final_hand=hand,
+                            win_score=win_score,
+                            reasons=reasons,
+                            metrics=finish_task_metrics(agent, metrics_start),
+                        )
+                    last_error = f"illegal_tsumo_at_draw_{draw_number}"
+                elif action_name != "discard":
+                    last_error = f"unsupported_action:{action_name}"
+                else:
+                    discard = action.get("tile") or action.get("discard")
+                    if not isinstance(discard, str):
+                        last_error = "missing_discard_tile"
+                    else:
+                        try:
+                            discard = normalize_tile(discard)
+                        except ValueError:
+                            last_error = "invalid_discard_tile"
+                        else:
+                            if discard not in hand:
+                                last_error = f"discard_not_in_hand:{discard}"
+                            else:
+                                if move_scorer == "shanten":
+                                    move_scores.append(
+                                        score_discard_move(hand, discard, discards)
+                                    )
+                                elif move_scorer == "akochan-choice":
+                                    if external_ai is None:
+                                        reasons.append(
+                                            "akochan_choice_scorer_not_configured"
+                                        )
+                                    else:
+                                        try:
+                                            move_scores.append(
+                                                score_discard_move_with_akochan_choice(
+                                                    task,
+                                                    hand=hand,
+                                                    discard=discard,
+                                                    discards=discards,
+                                                    draw_number=draw_number,
+                                                    drawn_tile=drawn_tile,
+                                                    mjai_events=mjai_events,
+                                                    external_ai=external_ai,
+                                                    remaining_draws=(
+                                                        task.max_draws - draw_number
+                                                    ),
+                                                )
+                                            )
+                                        except MahjongAIError as exc:
+                                            reasons.append(
+                                                "akochan_choice_error_at_draw_"
+                                                f"{draw_number}:{exc}"
+                                            )
+                                hand.remove(discard)
+                                discards.append(discard)
+                                prior_turns.append((drawn_tile, discard))
+                                mjai_events.append(
+                                    {
+                                        "type": "dahai",
+                                        "actor": 0,
+                                        "pai": discard,
+                                        "tsumogiri": discard == drawn_tile,
+                                    }
+                                )
+                                turn_completed = True
+                                break
 
-        discard = action.get("tile") or action.get("discard")
-        if not isinstance(discard, str):
-            reasons.append("missing_discard_tile")
-            ended_by_terminal_reason = True
-            break
-        try:
-            discard = normalize_tile(discard)
-        except ValueError:
-            reasons.append("invalid_discard_tile")
-            ended_by_terminal_reason = True
-            break
-        if discard not in hand:
-            reasons.append(f"discard_not_in_hand:{discard}")
-            ended_by_terminal_reason = True
-            break
+            feedback = _action_error_feedback(last_error)
+            action_errors.append(
+                {
+                    "draw_number": draw_number,
+                    "attempt": attempt_number,
+                    "error": last_error,
+                    "feedback": feedback,
+                }
+            )
+            action_feedback[:] = [feedback]
 
-        if move_scorer == "shanten":
-            move_scores.append(score_discard_move(hand, discard, discards))
-        elif move_scorer == "akochan-choice":
-            if external_ai is None:
-                reasons.append("akochan_choice_scorer_not_configured")
-                ended_by_terminal_reason = True
-                break
-            try:
-                move_scores.append(
-                    score_discard_move_with_akochan_choice(
-                        task,
-                        hand=hand,
-                        discard=discard,
-                        discards=discards,
-                        draw_number=draw_number,
-                        drawn_tile=drawn_tile,
-                        mjai_events=mjai_events,
-                        external_ai=external_ai,
-                        remaining_draws=task.max_draws - draw_number,
-                    )
-                )
-            except MahjongAIError as exc:
-                reasons.append(f"akochan_choice_error_at_draw_{draw_number}:{exc}")
-        hand.remove(discard)
-        discards.append(discard)
-        mjai_events.append(
-            {
-                "type": "dahai",
-                "actor": 0,
-                "pai": discard,
-                "tsumogiri": discard == drawn_tile,
-            }
-        )
-
-    if not ended_by_terminal_reason:
+        if not turn_completed:
+            reasons.append(last_error)
+            break
+    else:
         reasons.append("max_draws_reached")
     return _make_result(
         task,
+        observation_mode=observation_mode,
         success=False,
         draws=draws,
         discards=discards,
         raw_outputs=raw_outputs,
         agent_actions=agent_actions,
+        action_errors=action_errors,
         move_scores=move_scores,
         final_hand=hand,
         win_score=win_score,
@@ -261,7 +317,11 @@ def score_discard_move(
     chosen_shanten = int(chosen["after_shanten"])
     chosen_ukeire = int(chosen["ukeire"])
     shanten_loss = max(0, chosen_shanten - best_shanten)
-    ukeire_loss = max(0, best_ukeire - chosen_ukeire) if chosen_shanten == best_shanten else best_ukeire
+    ukeire_loss = (
+        max(0, best_ukeire - chosen_ukeire)
+        if chosen_shanten == best_shanten
+        else best_ukeire
+    )
     move_score = _move_score_from_metrics(
         chosen_shanten=chosen_shanten,
         best_shanten=best_shanten,
@@ -329,7 +389,7 @@ def extract_mahjong_solo_action(output: str) -> dict[str, Any] | None:
     action = payload.get("action")
     if not isinstance(action, str):
         return None
-    parsed: dict[str, Any] = {"action": action.lower()}
+    parsed: dict[str, Any] = {"action": action.strip().lower()}
     tile = payload.get("tile") or payload.get("discard")
     if isinstance(tile, str):
         try:
@@ -354,9 +414,24 @@ def _normalize_external_action(action: dict[str, object]) -> dict[str, Any]:
     return normalized
 
 
-def summarize_mahjong_solo(results: list[MahjongSoloInstanceResult]) -> dict[str, Any]:
+def summarize_mahjong_solo(
+    results: list[MahjongSoloInstanceResult],
+    *,
+    planned_total: int | None = None,
+    run_status: str = "completed",
+    error: str | None = None,
+) -> dict[str, Any]:
     total = len(results)
+    planned = total if planned_total is None else planned_total
+    if planned < total:
+        raise ValueError("planned_total cannot be smaller than completed results")
     success_count = sum(1 for result in results if result.success)
+    illegal_tsumo_total = sum(
+        1
+        for result in results
+        for action_error in result.action_errors
+        if str(action_error.get("error", "")).startswith("illegal_tsumo_at_draw_")
+    )
     all_move_scores = [
         float(move["move_score"])
         for result in results
@@ -371,32 +446,58 @@ def summarize_mahjong_solo(results: list[MahjongSoloInstanceResult]) -> dict[str
             item["success"] = int(item["success"]) + int(result.success)
     for item in by_tag.values():
         item["success_rate"] = int(item["success"]) / int(item["total"])
-    return {
+    summary = {
         "total": total,
+        "planned_total": planned,
+        "completed_total": total,
+        "remaining_total": planned - total,
+        "run_status": run_status,
+        "observation_mode": (
+            results[0].observation_mode
+            if results
+            and all(
+                result.observation_mode == results[0].observation_mode
+                for result in results
+            )
+            else "mixed"
+        ),
         "success": success_count,
         "success_rate": success_count / total if total else 0.0,
+        "illegal_tsumo_total": illegal_tsumo_total,
         "move_scored_total": sum(1 for result in results if result.move_scores),
         "per_move_average_score": mean(all_move_scores) if all_move_scores else None,
         "by_tag": by_tag,
         "metrics": summarize_metrics(results),
     }
+    if error is not None:
+        summary["error"] = error
+    return summary
 
 
 def write_mahjong_solo_run(
     results: list[MahjongSoloInstanceResult],
     output_dir: str | Path = "runs",
     run_name: str | None = None,
+    *,
+    planned_total: int | None = None,
+    run_status: str = "completed",
+    error: str | None = None,
 ) -> Path:
     root = Path(output_dir)
     name = run_name or f"mahjong-solo-{strftime('%Y%m%d-%H%M%S')}"
     run_dir = root / name
-    run_dir.mkdir(parents=True, exist_ok=False)
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     with (run_dir / "predictions.jsonl").open("w", encoding="utf-8") as handle:
         for result in results:
             handle.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
 
-    summary = summarize_mahjong_solo(results)
+    summary = summarize_mahjong_solo(
+        results,
+        planned_total=planned_total,
+        run_status=run_status,
+        error=error,
+    )
     (run_dir / "results.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
@@ -404,9 +505,14 @@ def write_mahjong_solo_run(
     score = summary["per_move_average_score"]
     score_text = f"{score:.3f}" if isinstance(score, float) else "n/a"
     (run_dir / "summary.txt").write_text(
+        f"run_status={summary['run_status']} "
+        f"planned={summary['planned_total']} "
+        f"completed={summary['completed_total']} "
+        f"remaining={summary['remaining_total']}\n"
         f"total={summary['total']} success={summary['success']} "
         f"success_rate={summary['success_rate']:.3f} "
         f"per_move_average_score={score_text}\n"
+        + (f"error={error}\n" if error is not None else "")
         + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
     )
@@ -416,11 +522,13 @@ def write_mahjong_solo_run(
 def _make_result(
     task: MahjongSoloTask,
     *,
+    observation_mode: str,
     success: bool,
     draws: list[str],
     discards: list[str],
     raw_outputs: list[str],
     agent_actions: list[dict[str, Any]],
+    action_errors: list[dict[str, Any]],
     move_scores: list[dict[str, Any]],
     final_hand: list[str],
     win_score: dict[str, Any] | None,
@@ -430,6 +538,7 @@ def _make_result(
     move_values = [float(item["move_score"]) for item in move_scores]
     return MahjongSoloInstanceResult(
         task_id=task.id,
+        observation_mode=observation_mode,
         success=success,
         score=1.0 if success else 0.0,
         move_average_score=mean(move_values) if move_values else None,
@@ -438,6 +547,7 @@ def _make_result(
         discards=list(discards),
         raw_outputs=list(raw_outputs),
         agent_actions=list(agent_actions),
+        action_errors=list(action_errors),
         move_scores=list(move_scores),
         final_hand=list(final_hand),
         win_score=win_score,
@@ -558,6 +668,26 @@ def _move_score_from_metrics(
     if best_ukeire <= 0:
         return 0.8
     return 0.7 + 0.3 * (chosen_ukeire / best_ukeire)
+
+
+def _action_error_feedback(error: str) -> str:
+    if error == "no_json_action_extracted":
+        return "The previous response was not a parseable action JSON object."
+    if error.startswith("illegal_tsumo_at_draw_"):
+        return (
+            "The previous tsumo declaration was illegal: the current 14 tiles "
+            "do not form a complete legal Riichi Mahjong winning hand."
+        )
+    if error.startswith("unsupported_action:"):
+        return "The previous action type is unsupported; use only tsumo or discard."
+    if error == "missing_discard_tile":
+        return "The previous discard action did not specify a tile."
+    if error == "invalid_discard_tile":
+        return "The previous discard used invalid tile notation."
+    if error.startswith("discard_not_in_hand:"):
+        tile = error.split(":", 1)[1]
+        return f"The previous discard was illegal because {tile} is not in the hand."
+    return "The previous action was illegal."
 
 
 def _parse_json_object(output: str) -> dict[str, Any] | None:

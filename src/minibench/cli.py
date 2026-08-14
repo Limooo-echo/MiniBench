@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from time import strftime
 from typing import Any
 
 from minibench.evaluate import run_config
@@ -47,6 +48,14 @@ def _select_tasks(tasks: list[Any], task_ids: list[str] | None) -> list[Any]:
     if missing:
         raise SystemExit(f"unknown task id(s): {', '.join(sorted(missing))}")
     return selected
+
+
+def _limit_mahjong_rule_sources(tasks: list[Any], limit: int | None) -> list[Any]:
+    if limit is None:
+        return tasks
+    source_ids = list(dict.fromkeys(task.source_task_id for task in tasks))
+    selected_source_ids = set(source_ids[:limit])
+    return [task for task in tasks if task.source_task_id in selected_source_ids]
 
 
 def _is_xiangqi_battle_task(task: Any, opponent_override: str | None) -> bool:
@@ -344,21 +353,117 @@ def _cmd_evaluate_mahjong(args: argparse.Namespace) -> int:
     from minibench.datasets.mahjong.prompting import MAHJONG_SYSTEM_PROMPT
 
     tasks = load_mahjong_tasks(args.mahjong_tasks)
+    if args.goal is not None:
+        tasks = [task for task in tasks if task.goal == args.goal]
     tasks = _select_tasks(tasks, args.task_id)
     if args.limit is not None:
         tasks = tasks[: args.limit]
-    try:
-        agent = _make_cli_agent(args, system_prompt=MAHJONG_SYSTEM_PROMPT)
-        input_modes = (
-            ("text", "image") if args.input_mode == "all" else (args.input_mode,)
+    input_modes = (
+        ("text", "image") if args.input_mode == "all" else (args.input_mode,)
+    )
+    planned_total = sum(
+        2
+        if args.input_mode == "all" and ("visual" in task.tags or task.image is not None)
+        else 1
+        for task in tasks
+    )
+    run_name = args.run_name or f"mahjong-{strftime('%Y%m%d-%H%M%S')}"
+    completed_results = []
+
+    def checkpoint(result):
+        completed_results.append(result)
+        write_mahjong_run(
+            completed_results,
+            args.output_dir,
+            run_name,
+            planned_total=planned_total,
+            run_status="running",
         )
-        results = evaluate_mahjong_tasks(tasks, agent, input_modes=input_modes)
-    except (KeyError, RuntimeError, ValueError) as exc:
-        raise SystemExit(f"mahjong evaluation failed: {exc}") from exc
-    run_dir = write_mahjong_run(results, args.output_dir, args.run_name)
-    summary = summarize_mahjong(results)
+
+    try:
+        write_mahjong_run(
+            [],
+            args.output_dir,
+            run_name,
+            planned_total=planned_total,
+            run_status="running",
+        )
+        agent = _make_cli_agent(args, system_prompt=MAHJONG_SYSTEM_PROMPT)
+        results = evaluate_mahjong_tasks(
+            tasks,
+            agent,
+            input_modes=input_modes,
+            show_progress=args.progress,
+            on_result=checkpoint,
+        )
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        run_dir = write_mahjong_run(
+            completed_results,
+            args.output_dir,
+            run_name,
+            planned_total=planned_total,
+            run_status="interrupted",
+            error=error,
+        )
+        raise SystemExit(
+            "mahjong evaluation failed after "
+            f"{len(completed_results)}/{planned_total} results; partial results "
+            f"saved to {run_dir}: {exc}"
+        ) from exc
+    run_dir = write_mahjong_run(
+        results,
+        args.output_dir,
+        run_name,
+        planned_total=planned_total,
+        run_status="completed",
+    )
+    summary = summarize_mahjong(
+        results,
+        planned_total=planned_total,
+        run_status="completed",
+    )
     print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
-    return 0 if summary["success"] == summary["total"] else 1
+    return 0 if summary["total"] > 0 and summary["success"] == summary["total"] else 1
+
+
+def _cmd_generate_mahjong_static(args: argparse.Namespace) -> int:
+    from minibench.datasets.mahjong.generation import generate_mahjong_static_tasks
+
+    try:
+        summary = generate_mahjong_static_tasks(
+            output=args.output,
+            count=args.count,
+            seed=args.seed,
+            prefix=args.prefix,
+            max_attempts=args.max_attempts,
+            overwrite=args.overwrite,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise SystemExit(f"mahjong static task generation failed: {exc}") from exc
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _cmd_generate_mahjong_visual(args: argparse.Namespace) -> int:
+    from minibench.datasets.mahjong.generation import generate_mahjong_visual_tasks
+
+    try:
+        summary = generate_mahjong_visual_tasks(
+            output=args.output,
+            render_dir=args.render_dir,
+            count_per_type=args.count_per_type,
+            visible_count=args.visible_count or (10, 20),
+            table_columns=args.table_columns,
+            seed=args.seed,
+            prefix=args.prefix,
+            max_attempts=args.max_attempts,
+            overwrite=args.overwrite,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise SystemExit(f"mahjong visual task generation failed: {exc}") from exc
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    return 0
 
 
 def _cmd_generate_mahjong_solo(args: argparse.Namespace) -> int:
@@ -372,6 +477,11 @@ def _cmd_generate_mahjong_solo(args: argparse.Namespace) -> int:
             prefix=args.prefix,
             max_draws=args.max_draws,
             require_oracle_win=args.require_oracle_win,
+            max_initial_shanten=args.max_initial_shanten,
+            min_initial_ukeire=args.min_initial_ukeire,
+            max_oracle_win_turn=args.max_oracle_win_turn,
+            greedy_simulations=args.greedy_simulations,
+            min_greedy_win_rate=args.min_greedy_win_rate,
             max_attempts=args.max_attempts,
             overwrite=args.overwrite,
         )
@@ -394,7 +504,22 @@ def _cmd_evaluate_mahjong_solo(args: argparse.Namespace) -> int:
     tasks = _select_tasks(tasks, args.task_id)
     if args.limit is not None:
         tasks = tasks[: args.limit]
+    run_name = args.run_name or f"mahjong-solo-{strftime('%Y%m%d-%H%M%S')}"
+    planned_total = len(tasks)
+    completed_results = []
+
+    def checkpoint(completed):
+        completed_results[:] = completed
+        write_mahjong_solo_run(
+            completed_results,
+            args.output_dir,
+            run_name,
+            planned_total=planned_total,
+            run_status="running",
+        )
+
     try:
+        checkpoint([])
         agent = _make_cli_agent(args, system_prompt=MAHJONG_SOLO_SYSTEM_PROMPT)
         results = evaluate_mahjong_solo_tasks(
             tasks,
@@ -403,12 +528,138 @@ def _cmd_evaluate_mahjong_solo(args: argparse.Namespace) -> int:
             mahjong_ai_command=args.mahjong_ai_command,
             mahjong_ai_mode=args.mahjong_ai_mode,
             mahjong_ai_timeout=args.mahjong_ai_timeout,
+            observation_mode=args.observation_mode,
             show_progress=args.progress,
+            on_result=checkpoint,
         )
-    except (KeyError, RuntimeError, ValueError) as exc:
-        raise SystemExit(f"mahjong solo evaluation failed: {exc}") from exc
-    run_dir = write_mahjong_solo_run(results, args.output_dir, args.run_name)
-    summary = summarize_mahjong_solo(results)
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        run_dir = write_mahjong_solo_run(
+            completed_results,
+            args.output_dir,
+            run_name,
+            planned_total=planned_total,
+            run_status="interrupted",
+            error=error,
+        )
+        raise SystemExit(
+            "mahjong solo evaluation failed after "
+            f"{len(completed_results)}/{planned_total} tasks; partial results "
+            f"saved to {run_dir}: {exc}"
+        ) from exc
+    run_dir = write_mahjong_solo_run(
+        results,
+        args.output_dir,
+        run_name,
+        planned_total=planned_total,
+        run_status="completed",
+    )
+    summary = summarize_mahjong_solo(
+        results,
+        planned_total=planned_total,
+        run_status="completed",
+    )
+    print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
+    return 0 if summary["success"] == summary["total"] else 1
+
+
+def _cmd_evaluate_mahjong_rules(args: argparse.Namespace) -> int:
+    from minibench.datasets.mahjong_rule_variants.dataset import (
+        load_mahjong_rule_variant_tasks,
+    )
+    from minibench.datasets.mahjong_rule_variants.evaluation import (
+        evaluate_mahjong_rule_variant_tasks,
+        summarize_mahjong_rule_variants,
+        write_mahjong_rule_variant_run,
+    )
+    from minibench.datasets.mahjong_rule_variants.prompting import (
+        system_prompt_for_rule_channel,
+    )
+    from minibench.datasets.mahjong_rule_variants.rules import channel_for_rules
+
+    tasks = load_mahjong_rule_variant_tasks(args.mahjong_rule_tasks)
+    if args.task_id:
+        wanted = set(args.task_id)
+        tasks = [
+            task
+            for task in tasks
+            if task.id in wanted or task.source_task_id in wanted
+        ]
+        found = {
+            requested
+            for requested in wanted
+            if any(
+                task.id == requested or task.source_task_id == requested
+                for task in tasks
+            )
+        }
+        missing = wanted - found
+        if missing:
+            raise SystemExit(f"unknown task id(s): {', '.join(sorted(missing))}")
+
+    selected_rule_channel = args.rule_channel
+    if args.rules:
+        selected_rule_channel = channel_for_rules(tuple(args.rules))
+    if selected_rule_channel:
+        tasks = [task for task in tasks if task.channel == selected_rule_channel]
+    tasks = _limit_mahjong_rule_sources(tasks, args.limit)
+    if not tasks:
+        raise SystemExit("mahjong rule evaluation selected no tasks")
+
+    run_name = args.run_name or f"mahjong-rules-{strftime('%Y%m%d-%H%M%S')}"
+    planned_total = len(tasks)
+    completed_results = []
+
+    def checkpoint(completed):
+        completed_results[:] = completed
+        write_mahjong_rule_variant_run(
+            completed_results,
+            args.output_dir,
+            run_name,
+            planned_total=planned_total,
+            run_status="running",
+        )
+
+    try:
+        checkpoint([])
+        agent = _make_cli_agent(
+            args,
+            system_prompt=system_prompt_for_rule_channel(selected_rule_channel),
+        )
+        results = evaluate_mahjong_rule_variant_tasks(
+            tasks,
+            agent,
+            observation_mode=args.observation_mode,
+            show_progress=args.progress,
+            on_result=checkpoint,
+        )
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        run_dir = write_mahjong_rule_variant_run(
+            completed_results,
+            args.output_dir,
+            run_name,
+            planned_total=planned_total,
+            run_status="interrupted",
+            error=error,
+        )
+        raise SystemExit(
+            "mahjong rule evaluation failed after "
+            f"{len(completed_results)}/{planned_total} tasks; partial results "
+            f"saved to {run_dir}: {exc}"
+        ) from exc
+    run_dir = write_mahjong_rule_variant_run(
+        results,
+        args.output_dir,
+        run_name,
+        planned_total=planned_total,
+        run_status="completed",
+    )
+    summary = summarize_mahjong_rule_variants(
+        results,
+        planned_total=planned_total,
+        run_status="completed",
+    )
     print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
     return 0 if summary["success"] == summary["total"] else 1
 
@@ -797,14 +1048,80 @@ def build_parser() -> argparse.ArgumentParser:
         default="openai-compatible",
     )
     evaluate_mahjong.add_argument(
+        "--goal",
+        choices=(
+            "tenpai_discard",
+            "winning_tiles",
+            "max_wait_discard",
+            "max_ukeire_discard",
+        ),
+        default=None,
+        help="Run only one Mahjong task goal.",
+    )
+    evaluate_mahjong.add_argument(
         "--input-mode",
         choices=("text", "image", "all"),
         default="image",
         help="Visual Mahjong input mode; non-visual legacy tasks remain text-only.",
     )
+    evaluate_mahjong.add_argument(
+        "--progress",
+        action="store_true",
+        help="Show Mahjong evaluation progress as each task starts.",
+    )
     _add_provider_args(evaluate_mahjong, max_tokens=256)
     _add_run_args(evaluate_mahjong)
     evaluate_mahjong.set_defaults(func=_cmd_evaluate_mahjong)
+
+    generate_mahjong_static = subparsers.add_parser(
+        "generate-mahjong-static",
+        help="Generate balanced text-only Mahjong wait and best-discard tasks.",
+    )
+    generate_mahjong_static.add_argument(
+        "--output",
+        type=Path,
+        default=Path("data/mahjong/tasks_generated.jsonl"),
+    )
+    generate_mahjong_static.add_argument(
+        "--count",
+        type=int,
+        default=60,
+        help=(
+            "Total number of tasks, balanced across easy/hard and "
+            "winning_tiles/max_wait_discard."
+        ),
+    )
+    generate_mahjong_static.add_argument("--seed", type=int, default=20260807)
+    generate_mahjong_static.add_argument("--prefix", default="mj-generated")
+    generate_mahjong_static.add_argument("--max-attempts", type=int, default=None)
+    generate_mahjong_static.add_argument("--overwrite", action="store_true")
+    generate_mahjong_static.set_defaults(func=_cmd_generate_mahjong_static)
+
+    generate_mahjong_visual = subparsers.add_parser(
+        "generate-mahjong-visual",
+        help="Generate visual waiting-tile and maximum-ukeire Mahjong tasks.",
+    )
+    generate_mahjong_visual.add_argument(
+        "--output",
+        type=Path,
+        default=Path("data/mahjong/visual_tasks.jsonl"),
+    )
+    generate_mahjong_visual.add_argument("--render-dir", type=Path, default=None)
+    generate_mahjong_visual.add_argument("--count-per-type", type=int, default=15)
+    generate_mahjong_visual.add_argument(
+        "--visible-count",
+        type=int,
+        action="append",
+        default=None,
+        metavar="COUNT",
+        help="Repeat for multiple public-table tile counts; defaults to 10 and 20.",
+    )
+    generate_mahjong_visual.add_argument("--table-columns", type=int, default=6)
+    generate_mahjong_visual.add_argument("--seed", type=int, default=20260803)
+    generate_mahjong_visual.add_argument("--prefix", default="mj-visual")
+    generate_mahjong_visual.add_argument("--max-attempts", type=int, default=None)
+    generate_mahjong_visual.add_argument("--overwrite", action="store_true")
+    generate_mahjong_visual.set_defaults(func=_cmd_generate_mahjong_visual)
 
     generate_mahjong_solo = subparsers.add_parser(
         "generate-mahjong-solo",
@@ -813,7 +1130,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate_mahjong_solo.add_argument(
         "--output",
         type=Path,
-        default=Path("data/mahjong_solo/tasks.jsonl"),
+        default=Path("data/mahjong_solo/tasks_win.jsonl"),
     )
     generate_mahjong_solo.add_argument("--count", type=int, default=50)
     generate_mahjong_solo.add_argument("--seed", type=int, default=20260702)
@@ -823,6 +1140,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-oracle-win",
         action="store_true",
         help="Keep only tasks that the local shanten/ukeire oracle can tsumo.",
+    )
+    generate_mahjong_solo.add_argument(
+        "--max-initial-shanten",
+        type=int,
+        default=None,
+        help="Keep tasks whose random initial hand is at or below this shanten.",
+    )
+    generate_mahjong_solo.add_argument(
+        "--min-initial-ukeire",
+        type=int,
+        default=0,
+        help="Keep tasks whose initial hand has at least this many effective tiles.",
+    )
+    generate_mahjong_solo.add_argument(
+        "--max-oracle-win-turn",
+        type=int,
+        default=None,
+        help="Keep tasks whose hidden local oracle wins by this draw number.",
+    )
+    generate_mahjong_solo.add_argument(
+        "--greedy-simulations",
+        type=int,
+        default=0,
+        help="Randomly resolve tied greedy discards this many times per candidate.",
+    )
+    generate_mahjong_solo.add_argument(
+        "--min-greedy-win-rate",
+        type=float,
+        default=0.0,
+        help="Minimum win rate required across tied-discard simulations.",
     )
     generate_mahjong_solo.add_argument("--max-attempts", type=int, default=None)
     generate_mahjong_solo.add_argument("--overwrite", action="store_true")
@@ -836,7 +1183,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--mahjong-solo-tasks",
         type=Path,
         default=None,
-        help="Path to Mahjong solo tasks JSONL. Defaults to data/mahjong_solo/tasks.jsonl.",
+        help=(
+            "Path to Mahjong solo tasks JSONL. Defaults to "
+            "data/mahjong_solo/tasks_win.jsonl."
+        ),
     )
     evaluate_mahjong_solo.add_argument(
         "--agent",
@@ -850,6 +1200,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Per-discard scoring mode. shanten uses local shanten/ukeire scoring; "
             "akochan-choice compares each discard with an external Akochan wrapper choice."
+        ),
+    )
+    evaluate_mahjong_solo.add_argument(
+        "--observation-mode",
+        choices=["full-hand", "history-only"],
+        default="full-hand",
+        help=(
+            "full-hand shows the current hand; history-only shows the initial "
+            "deal and completed draw-discard history."
         ),
     )
     evaluate_mahjong_solo.add_argument(
@@ -880,6 +1239,58 @@ def build_parser() -> argparse.ArgumentParser:
     _add_provider_args(evaluate_mahjong_solo, max_tokens=256)
     _add_run_args(evaluate_mahjong_solo)
     evaluate_mahjong_solo.set_defaults(func=_cmd_evaluate_mahjong_solo)
+
+    evaluate_mahjong_rules = subparsers.add_parser(
+        "evaluate-mahjong-rules",
+        help="Run standard and modified Mahjong rule channels.",
+    )
+    evaluate_mahjong_rules.add_argument(
+        "--mahjong-rule-tasks",
+        type=Path,
+        default=None,
+        help=(
+            "Path to base Mahjong solo tasks JSONL. Defaults to "
+            "data/mahjong_solo/tasks_win.jsonl."
+        ),
+    )
+    evaluate_mahjong_rules.add_argument(
+        "--agent",
+        choices=STATIC_GENERATIVE_AGENT_CHOICES,
+        default="openai-compatible",
+    )
+    evaluate_mahjong_rules.add_argument(
+        "--observation-mode",
+        choices=["full-hand", "history-only"],
+        default="full-hand",
+        help="Choose complete-hand or history-only observations.",
+    )
+    from minibench.datasets.mahjong_rule_variants.rules import (
+        MODIFIED_RULES,
+        RULE_CHANNELS,
+    )
+
+    rule_selection = evaluate_mahjong_rules.add_mutually_exclusive_group()
+    rule_selection.add_argument(
+        "--rule-channel",
+        choices=RULE_CHANNELS,
+        default=None,
+        help="Evaluate one canonical rule channel; omit to run all eight.",
+    )
+    rule_selection.add_argument(
+        "--rule",
+        dest="rules",
+        action="append",
+        choices=MODIFIED_RULES,
+        help="Repeat to select a two- or three-rule combination.",
+    )
+    evaluate_mahjong_rules.add_argument(
+        "--progress",
+        action="store_true",
+        help="Show Mahjong rule evaluation progress.",
+    )
+    _add_provider_args(evaluate_mahjong_rules, max_tokens=256)
+    _add_run_args(evaluate_mahjong_rules)
+    evaluate_mahjong_rules.set_defaults(func=_cmd_evaluate_mahjong_rules)
 
     evaluate_mahjong_riichi = subparsers.add_parser(
         "evaluate-mahjong-riichi",
