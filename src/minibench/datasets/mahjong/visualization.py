@@ -70,6 +70,20 @@ def _draw_centered_text(
     )
 
 
+def mahjong_text_labels(task: MahjongTask) -> dict[str, str]:
+    """Return the stable text contract used by the multimodal renderer."""
+    return {
+        "title": (
+            "Which tile completes the hand?"
+            if task.goal == "winning_tiles"
+            else "Which discard leaves the most live winning tiles?"
+        ),
+        "task_id": task.id,
+        "visible_tiles": "VISIBLE TILES",
+        "hand": "YOUR HAND",
+    }
+
+
 def render_mahjong_task_png(task: MahjongTask, output: str | Path) -> Path:
     """Render a task to a self-contained PNG suitable for vision APIs."""
     output_path = Path(output)
@@ -96,24 +110,20 @@ def render_mahjong_task_png(task: MahjongTask, output: str | Path) -> Path:
     canvas = Image.new("RGB", (width, height), "#174f3c")
     draw = ImageDraw.Draw(canvas)
     draw.rounded_rectangle((28, 24, width - 28, 82), radius=6, fill="#102f2d")
-    title = (
-        "Which tile completes the hand?"
-        if task.goal == "winning_tiles"
-        else "Which discard leaves the most live winning tiles?"
-    )
-    draw.text((52, 39), title, font=_font(24, bold=True), fill="#f7f1df")
+    labels = mahjong_text_labels(task)
+    draw.text((52, 39), labels["title"], font=_font(24, bold=True), fill="#f7f1df")
     task_font = _font(15)
-    task_bounds = draw.textbbox((0, 0), task.id, font=task_font)
+    task_bounds = draw.textbbox((0, 0), labels["task_id"], font=task_font)
     draw.text(
         (width - 52 - (task_bounds[2] - task_bounds[0]), 43),
-        task.id,
+        labels["task_id"],
         font=task_font,
         fill="#d5ddca",
     )
     _draw_centered_text(
         draw,
         (width / 2, 118),
-        "VISIBLE TILES",
+        labels["visible_tiles"],
         font=_font(16),
         fill="#d5ddca",
     )
@@ -139,7 +149,7 @@ def render_mahjong_task_png(task: MahjongTask, output: str | Path) -> Path:
     _draw_centered_text(
         draw,
         (width / 2, hand_y - 24),
-        "YOUR HAND",
+        labels["hand"],
         font=_font(16),
         fill="#f7f1df",
     )

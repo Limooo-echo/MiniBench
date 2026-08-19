@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import os
 import subprocess
 import sys
@@ -16,12 +18,36 @@ from minibench.datasets.mahjong.evaluation import (
 )
 from minibench.datasets.mahjong.generation import generate_mahjong_visual_tasks
 from minibench.datasets.mahjong.prompting import build_mahjong_prompt
-from minibench.datasets.mahjong.visualization import render_mahjong_task_png
+from minibench.datasets.mahjong.visualization import (
+    mahjong_text_labels,
+    render_mahjong_task_png,
+)
 from tests.image_regression import (
     assert_png_deterministic,
+    assert_text_regions_similar,
     assert_png_visually_equal,
     renderer_environment,
 )
+
+
+MAHJONG_TABLE_BACKGROUND = (0x17, 0x4F, 0x3C)
+MAHJONG_HEADER_BACKGROUND = (0x10, 0x2F, 0x2D)
+
+
+def _mahjong_text_regions(task):
+    table_rows = max(1, (len(task.visible_tiles) + task.table_columns - 1) // task.table_columns)
+    table_height = table_rows * (72 + 8) - 8
+    hand_y = 170 + table_height + 105
+    return (
+        ("title", (44, 34, 700, 74), MAHJONG_HEADER_BACKGROUND),
+        ("task-id", (790, 36, 1038, 72), MAHJONG_HEADER_BACKGROUND),
+        ("visible-tiles-label", (430, 102, 650, 134), MAHJONG_TABLE_BACKGROUND),
+        ("your-hand-label", (430, hand_y - 42, 650, hand_y - 6), MAHJONG_TABLE_BACKGROUND),
+    )
+
+
+def _mahjong_text_boxes(task):
+    return tuple(region for _, region, _ in _mahjong_text_regions(task))
 
 
 class OracleMahjongVisualAgent:
@@ -113,12 +139,60 @@ class MahjongMultimodalTests(unittest.TestCase):
                 first,
                 task.image_path,
                 artifact_name="mahjong-renderer",
+                ignored_regions=_mahjong_text_boxes(task),
             )
+            assert_text_regions_similar(
+                self,
+                first,
+                task.image_path,
+                regions=_mahjong_text_regions(task),
+                artifact_name="mahjong-renderer-text",
+            )
+
+    def test_renderer_detects_mutated_tile(self):
+        task = self.tasks[0]
+        replacement_tile = "1m" if task.hand[0] != "1m" else "9m"
+        mutated_task = replace(
+            task,
+            hand=(replacement_tile, *task.hand[1:]),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "mutated.png"
+            render_mahjong_task_png(mutated_task, output)
+            with patch.dict(os.environ, {"CI_ARTIFACT_DIR": ""}):
+                with self.assertRaises(AssertionError):
+                    assert_png_visually_equal(
+                        self,
+                        output,
+                        task.image_path,
+                        artifact_name="mahjong-mutated-tile",
+                        ignored_regions=_mahjong_text_boxes(task),
+                    )
 
     def test_renderer_environment_reports_bundled_fonts(self):
         environment = renderer_environment()
-        self.assertIn("NotoSansCJKsc-MiniBench-Regular.otf", environment["font_regular"])
-        self.assertIn("NotoSansCJKsc-MiniBench-Bold.otf", environment["font_bold"])
+        self.assertEqual(
+            environment["font_regular"],
+            "NotoSansCJKsc-MiniBench-Regular.otf "
+            "sha256=55b4f67b959bcdd092f810a2fee2d6e71a7e138d8ab059f491b800e933513f24",
+        )
+        self.assertEqual(
+            environment["font_bold"],
+            "NotoSansCJKsc-MiniBench-Bold.otf "
+            "sha256=ad0e7d6fbcadba0907804611c9ff7d53f34405a0292bca2f6c33c48e44bcf764",
+        )
+
+    def test_renderer_text_content_contract(self):
+        task = self.tasks[0]
+        self.assertEqual(
+            mahjong_text_labels(task),
+            {
+                "title": "Which discard leaves the most live winning tiles?",
+                "task_id": task.id,
+                "visible_tiles": "VISIBLE TILES",
+                "hand": "YOUR HAND",
+            },
+        )
 
     def test_small_visual_generation_is_reproducible(self):
         with tempfile.TemporaryDirectory() as first_dir, tempfile.TemporaryDirectory() as second_dir:

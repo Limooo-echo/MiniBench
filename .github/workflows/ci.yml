@@ -59,6 +59,7 @@ jobs:
         run: >-
           python -m unittest
           tests.test_mahjong_multimodal.MahjongMultimodalTests.test_renderer_reproduces_committed_image
+          tests.test_mahjong_multimodal.MahjongMultimodalTests.test_renderer_detects_mutated_tile
           tests.test_one_stroke_a4.OneStrokeA4DatasetTests.test_generator_is_deterministic
           tests.test_xiangqi_multimodal.XiangqiMultimodalTests.test_renderer_supports_bytes_and_legacy_base64
       - name: Upload renderer diagnostics
