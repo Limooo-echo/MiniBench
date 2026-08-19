@@ -17,7 +17,11 @@ from minibench.datasets.mahjong.evaluation import (
 from minibench.datasets.mahjong.generation import generate_mahjong_visual_tasks
 from minibench.datasets.mahjong.prompting import build_mahjong_prompt
 from minibench.datasets.mahjong.visualization import render_mahjong_task_png
-from tests.image_regression import assert_png_deterministic, assert_png_visually_equal
+from tests.image_regression import (
+    assert_png_deterministic,
+    assert_png_visually_equal,
+    renderer_environment,
+)
 
 
 class OracleMahjongVisualAgent:
@@ -110,6 +114,11 @@ class MahjongMultimodalTests(unittest.TestCase):
                 task.image_path,
                 artifact_name="mahjong-renderer",
             )
+
+    def test_renderer_environment_reports_bundled_fonts(self):
+        environment = renderer_environment()
+        self.assertIn("NotoSansCJKsc-MiniBench-Regular.otf", environment["font_regular"])
+        self.assertIn("NotoSansCJKsc-MiniBench-Bold.otf", environment["font_bold"])
 
     def test_small_visual_generation_is_reproducible(self):
         with tempfile.TemporaryDirectory() as first_dir, tempfile.TemporaryDirectory() as second_dir:

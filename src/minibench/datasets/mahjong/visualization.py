@@ -7,10 +7,11 @@ import shutil
 
 from PIL import Image, ImageDraw, ImageFont
 
+from minibench.assets.fonts import pillow_font
 from minibench.datasets.mahjong.dataset import MahjongTask
 
 
-MAHJONG_RENDERER_VERSION = "visual-v2"
+MAHJONG_RENDERER_VERSION = "visual-v3"
 
 
 TILE_ASSET_NAMES = {
@@ -36,17 +37,7 @@ def tile_png_assets_path() -> Path:
 
 
 def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    names = (
-        ("DejaVuSans-Bold.ttf", "Arial Bold.ttf")
-        if bold
-        else ("DejaVuSans.ttf", "Arial.ttf")
-    )
-    for name in names:
-        try:
-            return ImageFont.truetype(name, size=size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
+    return pillow_font(size, bold=bold)
 
 
 @lru_cache(maxsize=34)

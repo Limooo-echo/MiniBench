@@ -74,10 +74,10 @@ def assert_png_visually_equal(
             for bucket, count in enumerate(histogram)
         )
         rms = math.sqrt(squared_error / channel_samples) if channel_samples else 0.0
+        raw_difference = difference.tobytes()
         changed_pixels = sum(
-            1
-            for pixel in difference.getdata()
-            if max(pixel) > channel_delta
+            max(raw_difference[index : index + 3]) > channel_delta
+            for index in range(0, len(raw_difference), 3)
         )
         pixel_count = actual_rgb.width * actual_rgb.height
         changed_fraction = changed_pixels / pixel_count if pixel_count else 0.0
@@ -120,8 +120,9 @@ def renderer_environment() -> dict[str, str]:
         from minibench.assets.fonts import font_path
 
         for weight in ("regular", "bold"):
-            path = font_path(weight)
-            versions[f"font_{weight}"] = f"{path.name} sha256={sha256(path.read_bytes()).hexdigest()}"
+            path = font_path(bold=weight == "bold")
+            digest = sha256(path.read_bytes()).hexdigest()
+            versions[f"font_{weight}"] = f"{path.name} sha256={digest}"
     except Exception as exc:  # pragma: no cover - diagnostic only
         versions["fonts"] = f"unavailable: {exc}"
     return versions
