@@ -6,6 +6,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 import re
+from time import strftime
 from typing import Any, Callable, Sequence
 
 import matplotlib
@@ -14,6 +15,7 @@ matplotlib.use("Agg")
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 
+from minibench.assets.fonts import matplotlib_font
 from minibench.core.agent import Agent
 from minibench.core.metrics import (
     finish_task_metrics,
@@ -40,21 +42,35 @@ PIECE_AB = {
     )
 }
 FILES = "abcdefghi"
-M2_INPUT_MODES = ("text", "img_cn", "img_ab")
+XIANGQI_MULTIMODAL_INPUT_MODES = (
+    "text",
+    "chinese-piece-image",
+    "latin-piece-image",
+)
+XIANGQI_RENDERER_VERSION = 2
+
+
+def _piece_base(piece: int) -> int:
+    value = abs(piece)
+    for base, upper in ((1, 1), (2, 3), (4, 5), (6, 7), (8, 9), (10, 11), (12, 16)):
+        if base <= value <= upper:
+            return base if piece > 0 else -base
+    raise ValueError(f"unknown Xiangqi piece id: {piece}")
 
 def board_to_compact(board: Sequence[Sequence[int]]) -> str:
     return "\n".join(
-        "".join(PIECE_AB.get(value, ".") if value else "." for value in row)
+        "".join(PIECE_AB[_piece_base(value)] if value else "." for value in row)
         for row in board
     )
 
 
-@matplotlib.rc_context(
-    {"font.sans-serif": ["Microsoft YaHei", "SimHei", "DejaVu Sans"], "axes.unicode_minus": False}
-)
 def render_board_png(board: Sequence[Sequence[int]], mode: str) -> bytes:
-    if mode not in {"img_cn", "img_ab"}:
-        raise ValueError("Xiangqi image mode must be img_cn or img_ab")
+    if mode not in {"chinese-piece-image", "latin-piece-image"}:
+        raise ValueError(
+            "Xiangqi image mode must be chinese-piece-image or latin-piece-image"
+        )
+    regular_font = matplotlib_font()
+    bold_font = matplotlib_font(bold=True)
     figure, axis = plt.subplots(figsize=(7, 8.5))
     axis.set_xlim(-1.4, 9.4)
     axis.set_ylim(-1.2, 10.6)
@@ -68,22 +84,24 @@ def render_board_png(board: Sequence[Sequence[int]], mode: str) -> bytes:
     for points in (((3, 0), (5, 2)), ((5, 0), (3, 2)), ((3, 7), (5, 9)), ((5, 7), (3, 9))):
         axis.plot(*zip(*points), color="black", zorder=1)
     for row in range(10):
-        axis.text(-0.7, row, str(9 - row), ha="center", va="center", fontsize=12, fontweight="bold")
+        axis.text(-0.7, row, str(9 - row), ha="center", va="center", fontsize=12,
+                  fontproperties=bold_font)
     for column in range(9):
-        axis.text(column, 9.7, FILES[column], ha="center", va="center", fontsize=12, fontweight="bold")
+        axis.text(column, 9.7, FILES[column], ha="center", va="center", fontsize=12,
+                  fontproperties=bold_font)
 
     for row_index, row in enumerate(board):
         for column_index, piece in enumerate(row):
             if not piece:
                 continue
             red = piece > 0
-            if mode == "img_ab":
+            if mode == "latin-piece-image":
                 face, text_color = ("#D32F2F" if red else "#1E1E1E"), "white"
-                text = PIECE_AB[piece]
+                text = PIECE_AB[_piece_base(piece)]
                 edge_color = "#666666"
             else:
                 face, text_color = "#FFF8E7", ("#D32F2F" if red else "#1E1E1E")
-                text, edge_color = PIECE_CN[piece], text_color
+                text, edge_color = PIECE_CN[_piece_base(piece)], text_color
             axis.add_patch(
                 patches.Circle(
                     (column_index, row_index), 0.46, facecolor=face,
@@ -92,15 +110,16 @@ def render_board_png(board: Sequence[Sequence[int]], mode: str) -> bytes:
             )
             axis.text(
                 column_index, row_index, text, color=text_color, ha="center",
-                va="center", fontsize=18, zorder=4, fontweight="bold",
+                va="center", fontsize=18, zorder=4, fontproperties=bold_font,
             )
     legend = (
         "RED = red side, BLACK = black side\nK=general A=advisor B=elephant "
         "N=horse R=rook C=cannon P=pawn"
-        if mode == "img_ab"
+        if mode == "latin-piece-image"
         else "红方：帅仕相马车炮兵  |  黑方：将士象馬車砲卒"
     )
-    axis.text(4.0, 10.25, legend, ha="center", va="center", fontsize=9.5)
+    axis.text(4.0, 10.25, legend, ha="center", va="center", fontsize=9.5,
+              fontproperties=regular_font)
     buffer = BytesIO()
     figure.savefig(buffer, format="png", dpi=200)
     plt.close(figure)
@@ -113,26 +132,28 @@ def render_board(board: Sequence[Sequence[int]], mode: str) -> str:
     return base64.b64encode(render_board_png(board, mode)).decode("ascii")
 
 
-def evaluate_m2_tasks(
+def evaluate_xiangqi_multimodal_tasks(
     tasks: Sequence[dict[str, Any]],
     agent: Agent,
     *,
-    modes: Sequence[str] = M2_INPUT_MODES,
+    modes: Sequence[str] = XIANGQI_MULTIMODAL_INPUT_MODES,
     opponent_depth: int = 4,
     optimal_depth: int = 3,
     max_steps: int = 20,
     step_dir: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> list[dict[str, Any]]:
-    unknown = set(modes) - set(M2_INPUT_MODES)
+    unknown = set(modes) - set(XIANGQI_MULTIMODAL_INPUT_MODES)
     if unknown:
-        raise ValueError(f"unknown M2 modes: {', '.join(sorted(unknown))}")
+        raise ValueError(
+            f"unknown Xiangqi multimodal modes: {', '.join(sorted(unknown))}"
+        )
     step_root = Path(step_dir) if step_dir is not None else None
     results: list[dict[str, Any]] = []
     for task in tasks:
         for mode in modes:
             metrics_start = start_task_metrics(agent)
-            steps, success, reasons = _run_m2_game(
+            steps, success, reasons = _run_multimodal_game(
                 task,
                 agent,
                 mode,
@@ -167,7 +188,9 @@ def evaluate_m2_tasks(
     return results
 
 
-def summarize_m2(results: Sequence[dict[str, Any]]) -> dict[str, Any]:
+def summarize_xiangqi_multimodal(
+    results: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
     by_mode: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
     for result in results:
         by_mode[result["mode"]].append(result)
@@ -188,7 +211,37 @@ def summarize_m2(results: Sequence[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _run_m2_game(
+def write_xiangqi_multimodal_run(
+    results: Sequence[dict[str, Any]],
+    output_dir: str | Path = "runs",
+    run_name: str | None = None,
+) -> Path:
+    root = Path(output_dir)
+    name = run_name or f"xiangqi-multimodal-{strftime('%Y%m%d-%H%M%S')}"
+    run_dir = root / name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with (run_dir / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+        for result in results:
+            handle.write(json.dumps(result, ensure_ascii=False) + "\n")
+    summary = summarize_xiangqi_multimodal(results)
+    (run_dir / "results.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    lines = [
+        "Xiangqi Multimodal Evaluation",
+        f"Total results: {summary['total']}",
+        f"Visual gap: {summary['visual_gap']}",
+    ]
+    for mode, values in summary["by_input_mode"].items():
+        lines.append(
+            f"{mode}: success={values['success_rate']:.1%} "
+            f"score={values['mean_score']:.3f}"
+        )
+    (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return run_dir
+
+
+def _run_multimodal_game(
     task: dict[str, Any],
     agent: Agent,
     mode: str,
@@ -217,7 +270,9 @@ def _run_m2_game(
                 reasons.append("agent_has_no_moves")
             break
         if side == 1:
-            prompt = _build_m2_prompt(legal_moves, board, mode, "\n".join(history))
+            prompt = _build_multimodal_prompt(
+                legal_moves, board, mode, "\n".join(history)
+            )
             if mode == "text":
                 raw = agent.generate(prompt, task)
             else:
@@ -226,7 +281,9 @@ def _run_m2_game(
                     (task_step_dir / f"{mode}_step{step_index:02d}.png").write_bytes(png)
                 generate_multimodal = getattr(agent, "generate_multimodal", None)
                 if not callable(generate_multimodal):
-                    raise ValueError("M2 image modes require generate_multimodal()")
+                    raise ValueError(
+                        "Xiangqi image modes require generate_multimodal()"
+                    )
                 raw = generate_multimodal(
                     prompt,
                     task,
@@ -273,7 +330,7 @@ def _run_m2_game(
     return steps, success, reasons
 
 
-def _build_m2_prompt(
+def _build_multimodal_prompt(
     legal_moves: Sequence[Move],
     board: VariantBoard,
     mode: str,
@@ -308,7 +365,7 @@ def _build_m2_prompt(
 
 def _format_move(move: Move, board: VariantBoard) -> str:
     piece = board.board[move.fr][move.fc]
-    return f"{PIECE_NAME.get(abs(piece), '?')} {move.to_uci()}"
+    return f"{PIECE_NAME.get(abs(_piece_base(piece)), '?')} {move.to_uci()}"
 
 
 def _extract_index(raw: str) -> int | None:

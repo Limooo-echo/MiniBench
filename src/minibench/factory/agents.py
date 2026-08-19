@@ -137,7 +137,7 @@ def make_agent_from_config(
         base_url=provider_config.get("base_url"),
         api_key_env=provider_config.get("api_key_env"),
         temperature=float(provider_config.get("temperature", 0.0)),
-        max_tokens=int(provider_config.get("max_tokens", 64)),
+        max_tokens=int(agent_config.get("max_tokens", provider_config.get("max_tokens", 64))),
         timeout=int(provider_config.get("timeout", 60)),
         json_mode=bool(provider_config.get("json_mode", False)),
         extra_body=provider_config.get("extra_body"),

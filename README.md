@@ -2,61 +2,52 @@
 
 [English](#english) | [中文](#中文)
 
-## 象棋四任务评测 (Xiangqi Benchmark)
+## 象棋 schema v2
 
-MiniBench 包含 4 个中国象棋残局评测任务：
+MiniBench 0.2.0 提供四个名称明确、各 250 题的象棋任务。正式数据只保存
+FEN；10×9 矩阵仅在运行时解码。详细字段、坐标、UCI 和评分说明见
+[`docs/xiangqi-data-card.md`](docs/xiangqi-data-card.md)。
 
-| 任务 | 评测内容 | 题库 | 打分 |
-|---|---|---|---|
-| **D3** | 一步杀（静态单步，Pikafish oracle） | `data/d3/d3_250.jsonl` | correctness70% + quality20% + legality10% |
-| **C2** | 规则变体对弈（马不蹩脚/车禁中心/兵可后退） | `data/c2/c2_250.jsonl` | 0.3合法 + 0.4每步最优 + 0.3success |
-| **H2** | 历史多步杀（full / agent_only 记忆模式） | `data/h2/h2_250.jsonl` | correctness/quality/legality（多步累计） |
-| **M2** | 多模态（文字 / 汉字图 / 符号图，每步当前棋局） | `data/m2/m2_250.jsonl` | 0.3合法 + 0.4每步最优 + 0.3success |
-
-### 环境变量（API Key）
+| 任务名 | 数据 | 主要评测内容 |
+|---|---|---|
+| `xiangqi-mate-in-one` | `data/xiangqi/mate_in_one/tasks.jsonl` | 一步杀、合法性、最优走法和局面质量 |
+| `xiangqi-rule-variants` | `data/xiangqi/rule_variants/tasks.jsonl` | 标准规则与三个可读规则组 |
+| `xiangqi-history` | `data/xiangqi/history/tasks.jsonl` | `full-state` / `move-history-only` |
+| `xiangqi-multimodal` | `data/xiangqi/multimodal/tasks.jsonl` | 文字、中文棋子图、拉丁棋子图 |
 
 ```bash
-# qwen 系列 (d3/c2/h2/m2 默认模型 qwen3.8-max, 阿里云百炼)
-export DASHSCOPE_API_KEY=sk-your-key
-# 可选: 覆盖默认 provider/model (如 deepseek)
-export MINIBENCH_PROVIDER=deepseek
-export MINIBENCH_MODEL=deepseek-v4-flash
+pip install -e .
 export DEEPSEEK_API_KEY=sk-your-key
+
+minibench run-config config/experiments/xiangqi_history.yaml
+minibench run-task xiangqi-history --sample-seed 42 --sample-count 10 \
+  --history-mode full-state
+minibench run-suite --tasks xiangqi-mate-in-one,xiangqi-rule-variants
 ```
 
-### 一键运行
+YAML 提供全部非敏感默认值，显式 CLI 参数覆盖 YAML；环境变量只用于 API
+key 或私有 endpoint。每次 run 都写出 `predictions.jsonl`、`results.json`、
+`summary.txt`、解析后配置、数据 SHA256、schema/renderer/依赖版本。
+
+查看人类可读棋盘或构建离线题库：
 
 ```bash
-# 安装依赖
-pip install -e .            # 或 pip install gym-xiangqi mahjong PyYAML matplotlib networkx
-
-# 全量: 4 任务 × 9 agent
-./run.sh
-
-# 指定任务 + 抽样 (每次测试前自动抽题)
-./run.sh --tasks d3,c2,h2 --sample 42
-
-# 单任务单 agent
-./run.sh --task d3 --agent cot --sample 42
-./run.sh --task h2 --agent openai-compatible --sample 42 --mode full
-
-# 等价命令 (直接调 python 入口)
-python scripts/run_all.py --tasks d3,c2,h2 --agents openai-compatible --sample 42
-python scripts/run_task.py --task d3 --agent openai-compatible --sample 42
+minibench inspect-xiangqi --task xiangqi-history \
+  --id xiangqi-history-0001 --format terminal
+minibench inspect-xiangqi --task xiangqi-multimodal \
+  --id xiangqi-multimodal-0001 --format png --output output/board.png
+minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 ```
 
-### 抽题 / 验证 / 清理
+0.1.x 文件必须显式迁移；旧任务缩写不再是运行别名：
 
 ```bash
-python -m scripts.common.sample --task d3 --seed 42    # 按规则抽题 (d3按难度/c2按比例)
-python -m scripts.common.verify data/d3/d3_250.jsonl   # 题集验证 (Pikafish 推演)
-bash scripts/clean_before_test.sh                       # 每次测试前清理上次结果/抽样
+minibench migrate-xiangqi-v2 --input old-run --output migrated-run --dry-run
+minibench migrate-xiangqi-v2 --input old-run --output migrated-run
 ```
 
-### 结果与测试
-
-- 结果输出到 `runs/`（按时间归档），M2 步图在 `vis_outputs/`
-- 单元测试: `python -m unittest discover -s tests`
+映射表位于 `data/xiangqi/migration_v1_to_v2.json`。迁移不会改写
+`raw_output` 或模型自由文本，也不会覆盖既有输出。
 
 [English](#english) | [中文](#中文)
 
@@ -124,8 +115,10 @@ src/minibench/datasets/
 | Zebra formal evaluation (15 per difficulty) | `data/zebra/eval.jsonl` | YAML config or `--zebra-tasks` |
 | Zebra temporary-rule evaluation | `data/zebra/rule_codebook_eval.jsonl` | `zebra_rule_codebook.yaml` |
 | Zebra history evaluation | `data/zebra/history_eval.jsonl` | `zebra_history.yaml` |
-| Simple Xiangqi | `data/xiangqi/tasks.jsonl` | `evaluate-xiangqi` |
-| Hard Xiangqi with Pikafish | `data/xiangqi/hard_tasks.jsonl` | `evaluate-xiangqi` |
+| Xiangqi mate-in-one | `data/xiangqi/mate_in_one/tasks.jsonl` | `run-task xiangqi-mate-in-one` |
+| Xiangqi rule variants | `data/xiangqi/rule_variants/tasks.jsonl` | `run-task xiangqi-rule-variants` |
+| Xiangqi history | `data/xiangqi/history/tasks.jsonl` | `run-task xiangqi-history` |
+| Xiangqi multimodal | `data/xiangqi/multimodal/tasks.jsonl` | `run-task xiangqi-multimodal` |
 | One-stroke smoke set | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
 | One-stroke A1 direct (10 per difficulty) | `data/one_stroke/a1_direct.jsonl` | `one_stroke_a1.yaml` |
 | One-stroke A2 temporary rules (10 per difficulty) | `data/one_stroke/a2_rule_condition.jsonl` | `one_stroke_a2.yaml` |
@@ -217,30 +210,17 @@ JSONL until each changed solution has been manually or solver verified.
 Xiangqi:
 
 ```bash
-python -m minibench.cli evaluate-xiangqi \
-  --xiangqi-tasks data/xiangqi/tasks.jsonl \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 256 \
-  --timeout 120
+python -m minibench.cli run-task xiangqi-mate-in-one \
+  --agent openai-compatible --provider deepseek --sample-count 10
 ```
 
-Hard Xiangqi tasks can use Pikafish as the opponent:
+History evaluation can use Pikafish as the opponent and oracle:
 
 ```bash
 export PIKAFISH_PATH=/path/to/Pikafish/src/pikafish
 
-python -m minibench.cli evaluate-xiangqi \
-  --xiangqi-tasks data/xiangqi/hard_tasks.jsonl \
-  --agent openai-compatible \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 256 \
-  --pikafish-depth 8 \
-  --timeout 120
+python -m minibench.cli run-task xiangqi-history \
+  --history-mode move-history-only --pikafish-depth 8 --sample-count 10
 ```
 
 MiniBench 2.0 A1 direct one-stroke puzzles (no Euler-theorem hint):
@@ -582,14 +562,6 @@ regenerated without task-specific HTTP code.
 python scripts/generate_mahjong_visual_tasks.py --overwrite
 ```
 
-Xiangqi M2 remains available through `python scripts/run_task.py --task m2` with
-`text`, `img_cn`, and `img_ab`. Its renderer/evaluator now lives in the Xiangqi
-dataset package and `scripts/m2` is a compatibility wrapper. The legacy
-`M2_API_KEY`, `M2_BASE_URL`, `M2_MODEL`, `M2_THINKING`, and `M2_OPP_DEPTH`
-variables still work; common `MINIBENCH_PROVIDER`/`MINIBENCH_MODEL` settings may
-also be used. Step images, legality/optimality/success fields, and the original
-0.3/0.4/0.3 score are preserved.
-
 ### Xiangqi Evaluation Commands
 
 Run generated simple Xiangqi one-move capture-general tasks:
@@ -693,8 +665,10 @@ src/minibench/
 | 任务家族 | 数据文件 | 命令 |
 | --- | --- | --- |
 | Zebra 逻辑网格 | `data/zebra/tasks.jsonl` | `evaluate-zebra` |
-| 简单象棋 | `data/xiangqi/tasks.jsonl` | `evaluate-xiangqi` |
-| Pikafish 困难象棋 | `data/xiangqi/hard_tasks.jsonl` | `evaluate-xiangqi` |
+| 象棋一步杀 | `data/xiangqi/mate_in_one/tasks.jsonl` | `run-task xiangqi-mate-in-one` |
+| 象棋规则变体 | `data/xiangqi/rule_variants/tasks.jsonl` | `run-task xiangqi-rule-variants` |
+| 象棋历史 | `data/xiangqi/history/tasks.jsonl` | `run-task xiangqi-history` |
+| 象棋多模态 | `data/xiangqi/multimodal/tasks.jsonl` | `run-task xiangqi-multimodal` |
 | 一笔画 | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
 | 静态麻将牌型 | `data/mahjong/tasks.jsonl` | `evaluate-mahjong` |
 | 四人 Riichi Mahjong | `data/mahjong_riichi/tasks.jsonl` | `evaluate-mahjong-riichi` |

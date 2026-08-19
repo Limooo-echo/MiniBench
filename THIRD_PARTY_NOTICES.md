@@ -15,3 +15,12 @@ multi-turn provider support.
 
 The Zebra smoke records come from the `grid_mode/test` split of
 [WildEval/ZebraLogic](https://huggingface.co/datasets/WildEval/ZebraLogic).
+
+## Noto Sans CJK SC
+
+MiniBench includes glyph-subset builds of Noto Sans CJK SC Regular and Bold for
+portable Xiangqi rendering. The original fonts are published by the Noto CJK
+project under the SIL Open Font License 1.1. A copy is included at
+`licenses/NotoSansCJK-OFL-1.1.txt`; source URLs, checksums, subset coverage, and
+generated-file checksums are recorded in
+`src/minibench/assets/fonts/PROVENANCE.md`.

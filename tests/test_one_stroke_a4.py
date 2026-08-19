@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import Counter
-import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -14,6 +13,7 @@ from minibench.datasets.one_stroke.evaluation import (
 )
 from minibench.datasets.one_stroke.prompting import build_one_stroke_prompt
 from scripts.build_one_stroke_a4 import build_a4_dataset
+from tests.image_regression import assert_png_deterministic, assert_png_visually_equal
 
 
 class OracleA4Agent:
@@ -104,23 +104,39 @@ class OneStrokeA4DatasetTests(unittest.TestCase):
         self.assertIn(f"Required start vertex: {expected_start}", prompt)
 
     def test_generator_is_deterministic(self):
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "a4_multimodal.jsonl"
+        with tempfile.TemporaryDirectory() as first_directory, tempfile.TemporaryDirectory() as second_directory:
+            output = Path(first_directory) / "a4_multimodal.jsonl"
+            second_output = Path(second_directory) / "a4_multimodal.jsonl"
             build_a4_dataset(
                 "data/one_stroke/a1_direct.jsonl",
                 output,
+                overwrite=True,
+            )
+            build_a4_dataset(
+                "data/one_stroke/a1_direct.jsonl",
+                second_output,
                 overwrite=True,
             )
             self.assertEqual(
                 output.read_text(encoding="utf-8"),
                 Path("data/one_stroke/a4_multimodal.jsonl").read_text(encoding="utf-8"),
             )
+            self.assertEqual(
+                output.read_text(encoding="utf-8"),
+                second_output.read_text(encoding="utf-8"),
+            )
             for variant in ("clear", "challenge"):
                 generated = output.parent / "a4_images" / variant / "a4-hard-03.png"
+                second_generated = (
+                    second_output.parent / "a4_images" / variant / "a4-hard-03.png"
+                )
                 committed = Path("data/one_stroke/a4_images") / variant / "a4-hard-03.png"
-                self.assertEqual(
-                    hashlib.sha256(generated.read_bytes()).digest(),
-                    hashlib.sha256(committed.read_bytes()).digest(),
+                assert_png_deterministic(self, generated, second_generated)
+                assert_png_visually_equal(
+                    self,
+                    generated,
+                    committed,
+                    artifact_name=f"one-stroke-{variant}",
                 )
 
 

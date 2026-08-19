@@ -1,0 +1,27 @@
+task:
+  family: xiangqi-history
+  path: data/xiangqi/history/tasks.jsonl
+  sampling:
+    enabled: false
+    seed: 42
+    count: 10
+    strategy: random
+
+agent:
+  name: openai-compatible
+  max_tokens: 512
+
+provider:
+  name: deepseek
+  model: deepseek-v4-flash
+  api_key_env: DEEPSEEK_API_KEY
+
+evaluation:
+  history_mode: full-state
+  pikafish_depth: 8
+  pikafish_timeout: 60.0
+  max_plies: 20
+
+run:
+  output_dir: runs
+  run_name: null

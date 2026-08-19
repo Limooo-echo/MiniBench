@@ -4,6 +4,9 @@ import matplotlib.patches as patches
 import json
 import os
 
+from minibench.assets.fonts import matplotlib_font
+from minibench.datasets.xiangqi.schema import fen_to_board
+
 # 棋子 ID 映射，与 gym_xiangqi 的 piece ID 编码保持一致：
 # 1=帅/将  2-3=仕/士  4-5=相/象  6-7=马  8-9=车  10-11=炮  12-16=兵/卒
 # （负值为黑方）
@@ -19,11 +22,13 @@ PIECE_MAP = {
     16: "兵", -16: "卒",
 }
 
-plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei', 'SimHei', 'Arial Unicode MS']
-
 def draw_xiangqi_board(task_data, save_path):
     board_matrix = task_data.get("board", [])
+    if not board_matrix and task_data.get("fen"):
+        board_matrix, _ = fen_to_board(task_data["fen"])
     if not board_matrix: return
+    regular_font = matplotlib_font()
+    bold_font = matplotlib_font(bold=True)
 
     fig, ax = plt.subplots(figsize=(5.5, 6.5))
     ax.set_xlim(-0.5, 8.5)
@@ -47,10 +52,11 @@ def draw_xiangqi_board(task_data, save_path):
                 text = PIECE_MAP.get(piece_val, str(piece_val))
                 circle = patches.Circle((col_idx, row_idx), 0.42, facecolor='#FFF8E7', edgecolor=color, linewidth=2, zorder=3)
                 ax.add_patch(circle)
-                ax.text(col_idx, row_idx, text, color=color, ha='center', va='center', fontsize=15, zorder=4, fontweight='bold')
+                ax.text(col_idx, row_idx, text, color=color, ha='center', va='center',
+                        fontsize=15, zorder=4, fontproperties=bold_font)
 
     ax.axis('off')
-    plt.title(f"Xiangqi Task: {task_data.get('id')}")
+    plt.title(f"Xiangqi Task: {task_data.get('id')}", fontproperties=regular_font)
     
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.tight_layout()

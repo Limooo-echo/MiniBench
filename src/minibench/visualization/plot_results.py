@@ -2,10 +2,9 @@
 import os
 import json
 import matplotlib.pyplot as plt
+from minibench.assets.fonts import configure_matplotlib
 
-# 设置字体，防止中文和负号乱码
-plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei', 'SimHei', 'Arial Unicode MS', 'DejaVu Sans']
-plt.rcParams['axes.unicode_minus'] = False
+configure_matplotlib()
 
 # ==========================================
 # 🎯 核心配置：全量 Agent 名称映射字典
@@ -122,7 +121,7 @@ def plot_accuracy_comparison(runs_dir, save_path):
     print(f"\n✅ 结果对比图已成功生成并保存至: {save_path}")
 
 def plot_task_results(runs_dir, save_path):
-    """4 任务 (D3/C2/H2/M2) 结果对比图: 扫描 runs 下结果目录, 解析 summary.txt / m2 jsonl.
+    """Compare the four named Xiangqi families from standard run artifacts.
 
     指标: success 率 (将杀/获胜) + 平均 score.
     """
@@ -133,11 +132,16 @@ def plot_task_results(runs_dir, save_path):
         print(f"找不到结果目录: {runs_dir}")
         return
 
-    task_prefix = {"d3": "d3_", "c2": "c2_", "h2": "h2_", "m2": "m2_"}
+    task_prefix = {
+        "xiangqi-mate-in-one": "xiangqi-mate-in-one-",
+        "xiangqi-rule-variants": "xiangqi-rule-variants-",
+        "xiangqi-history": "xiangqi-history-",
+        "xiangqi-multimodal": "xiangqi-multimodal-",
+    }
     task_success = {k: [] for k in task_prefix}
     task_score = {k: [] for k in task_prefix}
 
-    # summary.txt (d3/c2/h2)
+    # Standard human-readable summaries.
     for summary in glob.glob(os.path.join(runs_dir, "**", "summary.txt"), recursive=True):
         d = os.path.basename(os.path.dirname(summary))
         task = next((t for t, p in task_prefix.items() if d.startswith(p)), None)
@@ -151,8 +155,8 @@ def plot_task_results(runs_dir, save_path):
         if m_succ:
             task_success[task].append(float(m_succ.group(1)) / 100.0)
 
-    # m2 jsonl (success + score)
-    for j in glob.glob(os.path.join(runs_dir, "**", "m2_*.jsonl"), recursive=True):
+    # Standard predictions artifacts for multimodal runs.
+    for j in glob.glob(os.path.join(runs_dir, "xiangqi-multimodal-*", "predictions.jsonl")):
         succ, scores = 0.0, []
         n = 0
         for line in open(j, encoding="utf-8"):
@@ -161,10 +165,10 @@ def plot_task_results(runs_dir, save_path):
             succ += 1.0 if r.get("success") else 0.0
             scores.append(r.get("score", 0))
         if n:
-            task_success["m2"].append(succ / n)
-            task_score["m2"].append(sum(scores) / n)
+            task_success["xiangqi-multimodal"].append(succ / n)
+            task_score["xiangqi-multimodal"].append(sum(scores) / n)
 
-    names = [t.upper() for t in task_prefix]
+    names = [t.removeprefix("xiangqi-") for t in task_prefix]
     succ_avg = [sum(v) / len(v) if v else 0 for v in task_success.values()]
     score_avg = [sum(v) / len(v) if v else 0 for v in task_score.values()]
 

@@ -4,19 +4,62 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      CI_ARTIFACT_DIR: .ci-artifacts
+      PYTHONPATH: src
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          python-version: "3.10"
+          python-version: "3.10.20"
       - name: Install package
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .
+          python -m pip install -c constraints/ci-py310.txt -e .
       - name: Run tests
-        run: |
-          PYTHONPATH=src python -m unittest discover -s tests
+        run: python -m unittest discover -s tests
+      - name: Upload renderer diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: renderer-diagnostics
+          path: .ci-artifacts
+          if-no-files-found: ignore
 
+  image-portability:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CI_ARTIFACT_DIR: .ci-artifacts
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.10.20"
+      - name: Install locked image stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints/ci-py310.txt -e .
+      - name: Run portable image tests
+        run: >-
+          python -m unittest
+          tests.test_mahjong_multimodal.MahjongMultimodalTests.test_renderer_reproduces_committed_image
+          tests.test_one_stroke_a4.OneStrokeA4DatasetTests.test_generator_is_deterministic
+          tests.test_xiangqi_multimodal.XiangqiMultimodalTests.test_renderer_supports_bytes_and_legacy_base64
+      - name: Upload renderer diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: renderer-diagnostics-${{ matrix.os }}
+          path: .ci-artifacts
+          if-no-files-found: ignore

@@ -16,13 +16,43 @@ class XiangqiTask:
     max_steps: int
     goal: str
     tags: tuple[str, ...]
+    schema_version: int | None = None
+    family: str | None = None
+    fen: str | None = None
+    agent_color: str | None = None
+    difficulty: str = "unspecified"
+    oracle: dict[str, Any] | None = None
 
 
 def default_xiangqi_tasks_path() -> Path:
-    return Path(__file__).resolve().parents[4] / "data" / "xiangqi" / "tasks.jsonl"
+    return (
+        Path(__file__).resolve().parents[4]
+        / "data/xiangqi/mate_in_one/tasks.jsonl"
+    )
 
 
 def xiangqi_task_from_dict(raw: dict[str, Any]) -> XiangqiTask:
+    if raw.get("schema_version") == 2:
+        from minibench.datasets.xiangqi.schema import runtime_dict, validate_record
+
+        v2 = validate_record(raw)
+        runtime = runtime_dict(v2)
+        return XiangqiTask(
+            id=v2["id"],
+            board=runtime["board"],
+            side_to_move=runtime["side_to_move"],
+            agent_side=runtime["agent_side"],
+            opponent="none",
+            max_steps=v2["max_plies"],
+            goal="agent_win",
+            tags=tuple(v2["tags"]),
+            schema_version=2,
+            family=v2["family"],
+            fen=v2["fen"],
+            agent_color=v2["agent_color"],
+            difficulty=v2["difficulty"],
+            oracle=dict(v2["oracle"]),
+        )
     task_id = raw.get("id")
     if not isinstance(task_id, str) or not task_id:
         raise ValueError("xiangqi task id must be a non-empty string")
@@ -79,6 +109,10 @@ def xiangqi_task_from_dict(raw: dict[str, Any]) -> XiangqiTask:
         goal=goal,
         tags=tuple(tags),
     )
+
+
+def xiangqi_task_from_v2_record(raw: dict[str, Any]) -> XiangqiTask:
+    return xiangqi_task_from_dict(raw)
 
 
 def load_xiangqi_tasks(path: str | Path | None = None) -> list[XiangqiTask]:

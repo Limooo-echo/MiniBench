@@ -1,0 +1,25 @@
+task:
+  family: xiangqi-rule-variants
+  path: data/xiangqi/rule_variants/tasks.jsonl
+  sampling:
+    enabled: false
+    seed: 42
+    count: 10
+    strategy: proportional
+
+agent:
+  name: openai-compatible
+  max_tokens: 512
+
+provider:
+  name: deepseek
+  model: deepseek-v4-flash
+  api_key_env: DEEPSEEK_API_KEY
+
+evaluation:
+  search_depth: 3
+  max_plies: 12
+
+run:
+  output_dir: runs
+  run_name: null

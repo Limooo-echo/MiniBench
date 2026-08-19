@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+from importlib.metadata import PackageNotFoundError, version
+import json
 from pathlib import Path
 from time import strftime
 from typing import Any, Callable
+
+import yaml
 
 from minibench.core.agent import Agent
 from minibench.factory.agents import make_agent_from_config
@@ -25,22 +30,98 @@ class TaskFamilySpec:
     system_prompt: str | None = None
 
 
-def _xiangqi_spec() -> TaskFamilySpec:
-    from minibench.datasets.xiangqi.dataset import load_xiangqi_tasks
-    from minibench.datasets.xiangqi.evaluation import (
-        evaluate_xiangqi_tasks,
-        summarize_xiangqi,
-        write_xiangqi_run,
+def _load_xiangqi_task_objects(path: str | Path | None, family: str) -> list[Any]:
+    from minibench.datasets.xiangqi.dataset import xiangqi_task_from_v2_record
+    from minibench.datasets.xiangqi.schema import FAMILY_PATHS, load_records
+
+    source = Path(path) if path is not None else FAMILY_PATHS[family]
+    return [
+        xiangqi_task_from_v2_record(record)
+        for record in load_records(source, expected_family=family)
+    ]
+
+
+def _load_xiangqi_runtime_dicts(path: str | Path | None, family: str) -> list[Any]:
+    from minibench.datasets.xiangqi.schema import FAMILY_PATHS, load_records, runtime_dict
+
+    source = Path(path) if path is not None else FAMILY_PATHS[family]
+    return [
+        runtime_dict(record)
+        for record in load_records(source, expected_family=family)
+    ]
+
+
+def _xiangqi_mate_in_one_spec() -> TaskFamilySpec:
+    from minibench.datasets.xiangqi.mate_in_one import (
+        MATE_IN_ONE_SYSTEM_PROMPT,
+        evaluate_mate_in_one_tasks,
+        summarize_mate_in_one,
+        write_mate_in_one_run,
+    )
+
+    family = "xiangqi-mate-in-one"
+    return TaskFamilySpec(
+        default_path=Path("data/xiangqi/mate_in_one/tasks.jsonl"),
+        load_tasks=lambda path: _load_xiangqi_task_objects(path, family),
+        evaluate_tasks=evaluate_mate_in_one_tasks,
+        summarize=summarize_mate_in_one,
+        write_run=write_mate_in_one_run,
+        system_prompt=MATE_IN_ONE_SYSTEM_PROMPT,
+    )
+
+
+def _xiangqi_rule_variants_spec() -> TaskFamilySpec:
+    from minibench.datasets.xiangqi.rule_variants import (
+        SYSTEM_PROMPT,
+        evaluate_rule_variant_tasks,
+        summarize_rule_variants,
+        write_rule_variants_run,
+    )
+
+    family = "xiangqi-rule-variants"
+    return TaskFamilySpec(
+        default_path=Path("data/xiangqi/rule_variants/tasks.jsonl"),
+        load_tasks=lambda path: _load_xiangqi_runtime_dicts(path, family),
+        evaluate_tasks=evaluate_rule_variant_tasks,
+        summarize=summarize_rule_variants,
+        write_run=write_rule_variants_run,
+        system_prompt=SYSTEM_PROMPT,
+    )
+
+
+def _xiangqi_history_spec() -> TaskFamilySpec:
+    from minibench.datasets.xiangqi.history import (
+        evaluate_history_tasks,
+        summarize_history,
+        write_history_run,
     )
     from minibench.datasets.xiangqi.prompting import XIANGQI_SYSTEM_PROMPT
 
+    family = "xiangqi-history"
     return TaskFamilySpec(
-        default_path=Path("data/xiangqi/tasks.jsonl"),
-        load_tasks=load_xiangqi_tasks,
-        evaluate_tasks=evaluate_xiangqi_tasks,
-        summarize=summarize_xiangqi,
-        write_run=write_xiangqi_run,
+        default_path=Path("data/xiangqi/history/tasks.jsonl"),
+        load_tasks=lambda path: _load_xiangqi_task_objects(path, family),
+        evaluate_tasks=evaluate_history_tasks,
+        summarize=summarize_history,
+        write_run=write_history_run,
         system_prompt=XIANGQI_SYSTEM_PROMPT,
+    )
+
+
+def _xiangqi_multimodal_spec() -> TaskFamilySpec:
+    from minibench.datasets.xiangqi.multimodal import (
+        evaluate_xiangqi_multimodal_tasks,
+        summarize_xiangqi_multimodal,
+        write_xiangqi_multimodal_run,
+    )
+
+    family = "xiangqi-multimodal"
+    return TaskFamilySpec(
+        default_path=Path("data/xiangqi/multimodal/tasks.jsonl"),
+        load_tasks=lambda path: _load_xiangqi_runtime_dicts(path, family),
+        evaluate_tasks=evaluate_xiangqi_multimodal_tasks,
+        summarize=summarize_xiangqi_multimodal,
+        write_run=write_xiangqi_multimodal_run,
     )
 
 
@@ -165,7 +246,10 @@ def _mahjong_riichi_spec() -> TaskFamilySpec:
 
 
 TASK_FAMILIES: dict[str, Callable[[], TaskFamilySpec]] = {
-    "xiangqi": _xiangqi_spec,
+    "xiangqi-mate-in-one": _xiangqi_mate_in_one_spec,
+    "xiangqi-rule-variants": _xiangqi_rule_variants_spec,
+    "xiangqi-history": _xiangqi_history_spec,
+    "xiangqi-multimodal": _xiangqi_multimodal_spec,
     "one_stroke": _one_stroke_spec,
     "zebra": _zebra_spec,
     "mahjong": _mahjong_spec,
@@ -191,6 +275,14 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
     task_path = task_config.get("path") or spec.default_path
     tasks = spec.load_tasks(task_path)
     tasks = _select_tasks(tasks, task_config.get("task_ids") or [])
+    sampling = task_config.get("sampling") or {}
+    if sampling.get("enabled"):
+        tasks = _sample_xiangqi_tasks(
+            tasks,
+            family=family,
+            count=int(sampling["count"]),
+            seed=int(sampling["seed"]),
+        )
     evaluation_config = dict(config.get("evaluation") or {})
     if family == "mahjong_rule_variants":
         tasks = _select_mahjong_rule_configuration(tasks, evaluation_config)
@@ -228,7 +320,93 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
         run_config.get("output_dir", "runs"),
         run_config.get("run_name"),
     )
+    if family.startswith("xiangqi-"):
+        _write_xiangqi_run_metadata(
+            run_dir,
+            config=config,
+            data_path=Path(task_path),
+            family=family,
+        )
     return run_dir, spec.summarize(results)
+
+
+def _sample_xiangqi_tasks(
+    tasks: list[Any], *, family: str, count: int, seed: int
+) -> list[Any]:
+    if not family.startswith("xiangqi-"):
+        return tasks[:count]
+    from minibench.datasets.xiangqi.schema import sample_records
+
+    indexed: dict[str, Any] = {}
+    records: list[dict[str, Any]] = []
+    for task in tasks:
+        if isinstance(task, dict):
+            record = {key: value for key, value in task.items() if key != "board"}
+        else:
+            record = {
+                "schema_version": task.schema_version,
+                "id": task.id,
+                "family": task.family,
+                "fen": task.fen,
+                "agent_color": task.agent_color,
+                "goal": "checkmate",
+                "max_plies": task.max_steps,
+                "difficulty": task.difficulty,
+                "piece_count": sum(value != 0 for row in task.board for value in row),
+                "oracle": task.oracle,
+                "tags": list(task.tags),
+            }
+        indexed[record["id"]] = task
+        records.append(record)
+    selected = sample_records(records, count=count, seed=seed)
+    return [indexed[record["id"]] for record in selected]
+
+
+def _write_xiangqi_run_metadata(
+    run_dir: Path,
+    *,
+    config: dict[str, Any],
+    data_path: Path,
+    family: str,
+) -> None:
+    from minibench.datasets.xiangqi.multimodal import XIANGQI_RENDERER_VERSION
+    from minibench.datasets.xiangqi.schema import SCHEMA_VERSION
+
+    data_bytes = data_path.read_bytes()
+    dependencies: dict[str, str] = {}
+    for distribution in (
+        "Pillow", "matplotlib", "networkx", "numpy", "PyYAML",
+        "gym-xiangqi", "mahjong", "datasets",
+    ):
+        try:
+            dependencies[distribution] = version(distribution)
+        except PackageNotFoundError:
+            dependencies[distribution] = "not-installed"
+    metadata = {
+        "family": family,
+        "schema_version": SCHEMA_VERSION,
+        "renderer_version": XIANGQI_RENDERER_VERSION,
+        "data_file": data_path.as_posix(),
+        "data_sha256": hashlib.sha256(data_bytes).hexdigest(),
+        "dependencies": dependencies,
+    }
+    (run_dir / "resolved_config.yaml").write_text(
+        yaml.safe_dump(_plain_config(config), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    (run_dir / "run_metadata.json").write_text(
+        json.dumps(metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def _plain_config(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _plain_config(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_config(item) for item in value]
+    return value
 
 
 def _select_tasks(tasks: list[Any], task_ids: list[str]) -> list[Any]:
@@ -281,16 +459,45 @@ def _evaluate(
     evaluation_config: dict[str, Any],
     on_result: Callable[[Any], None] | None = None,
 ) -> list[Any]:
-    if family == "xiangqi":
+    if family == "xiangqi-mate-in-one":
         return spec.evaluate_tasks(
             tasks,
             agent,
-            opponent=evaluation_config.get("opponent"),
             pikafish_path=evaluation_config.get("pikafish_path"),
-            pikafish_eval_file=evaluation_config.get("pikafish_eval_file"),
             pikafish_depth=evaluation_config.get("pikafish_depth", 8),
-            pikafish_movetime_ms=evaluation_config.get("pikafish_movetime_ms"),
-            pikafish_timeout=evaluation_config.get("pikafish_timeout", 30.0),
+            pikafish_timeout=evaluation_config.get("pikafish_timeout", 60.0),
+        )
+    if family == "xiangqi-rule-variants":
+        return spec.evaluate_tasks(
+            tasks,
+            agent,
+            max_steps=int(evaluation_config.get("max_plies", 12)),
+            search_depth=int(evaluation_config.get("search_depth", 3)),
+        )
+    if family == "xiangqi-history":
+        return spec.evaluate_tasks(
+            tasks,
+            agent,
+            history_mode=evaluation_config.get("history_mode", "full-state"),
+            pikafish_path=evaluation_config.get("pikafish_path"),
+            pikafish_depth=int(evaluation_config.get("pikafish_depth", 8)),
+            pikafish_timeout=float(evaluation_config.get("pikafish_timeout", 60.0)),
+        )
+    if family == "xiangqi-multimodal":
+        modes = evaluation_config.get(
+            "input_modes",
+            ("text", "chinese-piece-image", "latin-piece-image"),
+        )
+        if isinstance(modes, str):
+            modes = tuple(part.strip() for part in modes.split(",") if part.strip())
+        return spec.evaluate_tasks(
+            tasks,
+            agent,
+            modes=tuple(modes),
+            opponent_depth=int(evaluation_config.get("opponent_depth", 4)),
+            optimal_depth=int(evaluation_config.get("optimal_depth", 3)),
+            max_steps=int(evaluation_config.get("max_plies", 20)),
+            step_dir=evaluation_config.get("step_dir"),
         )
     if family == "one_stroke":
         memory_modes = evaluation_config.get(

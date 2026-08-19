@@ -19,7 +19,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from minibench.datasets.one_stroke.dataset import OneStrokeTask
 
 
-ONE_STROKE_RENDERER_VERSION = "a4-v1"
+ONE_STROKE_RENDERER_VERSION = "a4-v2"
 ONE_STROKE_RENDER_SEED = 20260813
 
 

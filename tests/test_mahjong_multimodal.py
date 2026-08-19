@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -18,6 +17,7 @@ from minibench.datasets.mahjong.evaluation import (
 from minibench.datasets.mahjong.generation import generate_mahjong_visual_tasks
 from minibench.datasets.mahjong.prompting import build_mahjong_prompt
 from minibench.datasets.mahjong.visualization import render_mahjong_task_png
+from tests.image_regression import assert_png_deterministic, assert_png_visually_equal
 
 
 class OracleMahjongVisualAgent:
@@ -99,11 +99,16 @@ class MahjongMultimodalTests(unittest.TestCase):
     def test_renderer_reproduces_committed_image(self):
         task = self.tasks[0]
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "task.png"
-            render_mahjong_task_png(task, output)
-            self.assertEqual(
-                hashlib.sha256(output.read_bytes()).digest(),
-                hashlib.sha256(task.image_path.read_bytes()).digest(),
+            first = Path(directory) / "first.png"
+            second = Path(directory) / "second.png"
+            render_mahjong_task_png(task, first)
+            render_mahjong_task_png(task, second)
+            assert_png_deterministic(self, first, second)
+            assert_png_visually_equal(
+                self,
+                first,
+                task.image_path,
+                artifact_name="mahjong-renderer",
             )
 
     def test_small_visual_generation_is_reproducible(self):

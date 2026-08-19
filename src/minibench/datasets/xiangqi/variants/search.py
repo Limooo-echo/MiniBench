@@ -1,4 +1,4 @@
-"""C2 变体规则: 局面评分与浅层搜索.
+"""Position scoring and shallow search for Xiangqi rule variants.
 
 评分 = 子力价值 (身份替换保留原价值) + 将杀 + 局部胜负条件.
 深度 1-3 层 minimax 求最优动作.

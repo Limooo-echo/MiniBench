@@ -20,6 +20,8 @@ data/*/sample_*.jsonl
 .coverage
 htmlcov/
 coverage.xml
+.ci-artifacts/
+output/xiangqi-gallery.html
 .ipynb_checkpoints/
 *.log
 *.tmp

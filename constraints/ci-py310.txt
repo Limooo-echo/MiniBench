@@ -1,0 +1,11 @@
+# Direct dependency lock for the Python 3.10 GitHub Actions environment.
+# Keep project metadata broadly installable; use this file only for CI and
+# renderer-baseline regeneration.
+datasets==5.0.1
+gym-xiangqi==0.5.0
+mahjong==2.0.0
+matplotlib==3.10.9
+networkx==3.4.2
+numpy==1.26.4
+Pillow==12.3.0
+PyYAML==6.0.3

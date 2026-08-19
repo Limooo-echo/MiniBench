@@ -336,20 +336,15 @@ class XiangqiPikafishTests(unittest.TestCase):
 
         self.assertEqual(task.goal, "agent_survive")
 
-    def test_d3_dataset_has_three_difficulties(self):
-        tasks = load_xiangqi_tasks(Path("data/d3/d3_250.jsonl"))
-        difficulties = {
-            tag.split(":")[1]
-            for task in tasks
-            for tag in task.tags
-            if tag.startswith("difficulty:")
-        }
+    def test_mate_in_one_dataset_has_three_difficulties(self):
+        tasks = load_xiangqi_tasks(Path("data/xiangqi/mate_in_one/tasks.jsonl"))
+        difficulties = {task.difficulty for task in tasks}
 
         self.assertEqual(len(tasks), 250)
         self.assertEqual(difficulties, {"easy", "medium", "hard"})
         for difficulty in difficulties:
             self.assertEqual(
-                sum(f"difficulty:{difficulty}" in task.tags for task in tasks),
+                sum(task.difficulty == difficulty for task in tasks),
                 80 if difficulty == "easy" else 85,
             )
 

@@ -1,4 +1,4 @@
-"""C2 临时变体规则: 规则定义模块.
+"""Xiangqi temporary-rule definitions.
 
 四类临时规则 (每道题抽取 1-2 条):
   1. MOVE_MOD    走法变化    : {piece, mod}

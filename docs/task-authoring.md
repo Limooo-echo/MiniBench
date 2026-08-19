@@ -4,7 +4,7 @@ MiniBench currently has several task families:
 
 - Zebra logic-grid smoke tasks in `data/zebra/tasks.jsonl` and the formal
   evaluation set in `data/zebra/eval.jsonl`.
-- Xiangqi environment tasks in `data/xiangqi_tasks.jsonl` and `data/xiangqi_hard_tasks.jsonl`.
+- Xiangqi schema-v2 tasks under `data/xiangqi/<family>/tasks.jsonl`.
 - One-stroke graph puzzles in `data/one_stroke_tasks.jsonl`.
 - Riichi Mahjong tile-shape tasks in `data/mahjong_tasks.jsonl`.
 - Local Riichi Mahjong v1 table tasks in `data/mahjong_riichi_tasks.jsonl`.
@@ -56,37 +56,19 @@ evaluated until their new unique solutions are independently verified.
 
 ## Xiangqi Tasks
 
-Xiangqi tasks describe a `gym-xiangqi` board plus the side and goal to evaluate.
-Simple tasks usually have no opponent and expect the agent to find a one-step
-winning action. Hard tasks can set `opponent` to `pikafish`.
+Formal Xiangqi records use schema version 2 and persist only FEN, never a second
+10×9 matrix. Use one of the four registered family names and an ID with the
+same prefix.
 
 ```json
-{"id":"xq-capture-general-011","board":[[0,0,0,0,-1,0,0,0,0],[0,0,0,0,0,0,0,0,0]],"side_to_move":"ally","agent_side":"ally","goal":"capture_enemy_general","opponent":"none","max_steps":1,"tags":["xiangqi","endgame","difficulty:easy"]}
+{"schema_version":2,"id":"xiangqi-history-0001","family":"xiangqi-history","fen":"5k3/9/9/2R6/9/6C2/1c7/9/3K5/9 w - - 0 1","agent_color":"red","goal":"checkmate","max_plies":20,"difficulty":"long","piece_count":5,"oracle":{"best_move_uci":"d1e1","mate_in_plies":4,"evaluation_cp":null},"tags":[]}
 ```
 
-The real board must contain 10 rows and 9 columns. Use existing Xiangqi files as
-templates because piece ids are inherited from `gym-xiangqi`.
-
-Important fields:
-
-- `side_to_move`: `ally` or `enemy`.
-- `agent_side`: side controlled by the tested agent.
-- `goal`: currently `capture_enemy_general`, `agent_win`, or `agent_survive`.
-- `opponent`: `none` or `pikafish`.
-- `max_steps`: maximum environment steps before the task is failed.
-
-Hard Pikafish tasks should use category tags:
-
-- `category:tactical-win`: the agent side has a forced tactical win.
-- `category:advantage-play`: the agent side starts clearly ahead and should not
-  throw the position.
-- `category:survival-defense`: the agent side starts worse and should survive
-  the move horizon.
-
-`agent_win` succeeds when the agent captures the opposing general, or when the
-agent's last move leaves Pikafish with `bestmove (none)`. `agent_survive`
-succeeds when the agent reaches `max_steps` without illegal moves or an opponent
-win; an agent win also succeeds.
+`fen` active color must equal `agent_color`; both generals must exist; tags must
+be sorted unique non-empty strings. Rule-variant records additionally require
+`scenario_id`, `ruleset`, and the normalized structured `rules` list. See
+[`xiangqi-data-card.md`](xiangqi-data-card.md) for the complete contract and
+human-readable examples.
 
 ## One-Stroke Tasks
 

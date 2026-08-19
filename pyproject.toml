@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mini-agent-bench"
-version = "0.1.0"
+version = "0.2.0"
 description = "A tiny, reproducible starter benchmark for agent-style answer extraction and scoring."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,6 +13,7 @@ dependencies = [
     "datasets>=2.20",
     "gym-xiangqi",
     "mahjong>=2.0.0",
+    "numpy>=1.26,<2",
     "PyYAML>=6.0",
     "matplotlib>=3.7.0",
     "networkx>=3.0",
@@ -25,7 +26,14 @@ minibench = "minibench.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools]
+license-files = ["LICENSE", "licenses/*.txt"]
+
 [tool.setuptools.package-data]
+"minibench" = [
+    "assets/fonts/*.otf",
+    "assets/fonts/PROVENANCE.md",
+]
 "minibench.datasets.mahjong" = [
     "assets/*.md",
     "assets/tiles/*.svg",

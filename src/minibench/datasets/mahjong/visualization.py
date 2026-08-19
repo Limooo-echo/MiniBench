@@ -10,6 +10,9 @@ from PIL import Image, ImageDraw, ImageFont
 from minibench.datasets.mahjong.dataset import MahjongTask
 
 
+MAHJONG_RENDERER_VERSION = "visual-v2"
+
+
 TILE_ASSET_NAMES = {
     **{f"{number}m": f"Man{number}.svg" for number in range(1, 10)},
     **{f"{number}p": f"Pin{number}.svg" for number in range(1, 10)},

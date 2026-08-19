@@ -50,6 +50,26 @@ def validate_experiment_config(
     if limit is not None and (not isinstance(limit, int) or limit < 1):
         raise ValueError(f"{source}: task.limit must be a positive integer or null")
 
+    sampling = task.get("sampling")
+    if sampling is not None:
+        if not isinstance(sampling, dict):
+            raise ValueError(f"{source}: task.sampling must be a mapping")
+        sampling.setdefault("enabled", False)
+        sampling.setdefault("seed", 42)
+        sampling.setdefault("count", 10)
+        sampling.setdefault("strategy", "random")
+        if not isinstance(sampling["enabled"], bool):
+            raise ValueError(f"{source}: task.sampling.enabled must be boolean")
+        if not isinstance(sampling["seed"], int):
+            raise ValueError(f"{source}: task.sampling.seed must be an integer")
+        if not isinstance(sampling["count"], int) or sampling["count"] < 1:
+            raise ValueError(f"{source}: task.sampling.count must be positive")
+        if sampling["strategy"] not in {"random", "stratified", "proportional"}:
+            raise ValueError(
+                f"{source}: task.sampling.strategy must be random, stratified, "
+                "or proportional"
+            )
+
     agent = raw["agent"]
     agent_name = agent.get("name")
     if agent_name not in AGENT_NAMES:

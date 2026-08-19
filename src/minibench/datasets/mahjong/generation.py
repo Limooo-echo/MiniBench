@@ -21,7 +21,10 @@ from minibench.datasets.mahjong.api import (
     winning_tiles,
 )
 from minibench.datasets.mahjong.dataset import MahjongTask, task_to_record
-from minibench.datasets.mahjong.visualization import render_mahjong_gallery
+from minibench.datasets.mahjong.visualization import (
+    MAHJONG_RENDERER_VERSION,
+    render_mahjong_gallery,
+)
 
 
 ALL_TILES = tuple(index_to_tile(index) for index in range(34))
@@ -464,6 +467,7 @@ def _task_record(task: MahjongTask) -> dict[str, object]:
         "visible_tiles": list(task.visible_tiles),
         "table_columns": task.table_columns,
         "image": task.image,
+        "renderer_version": MAHJONG_RENDERER_VERSION,
     }
 
 

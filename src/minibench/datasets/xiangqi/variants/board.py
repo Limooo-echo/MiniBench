@@ -1,4 +1,4 @@
-"""C2 变体棋盘与走法生成器.
+"""Xiangqi variant board and legal-move generator.
 
 纯 Python 10x9 棋盘, 支持标准规则与 4 类临时变体规则.
 规则为空列表时即为标准象棋 (用于对照过滤).

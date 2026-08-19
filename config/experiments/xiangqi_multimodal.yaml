@@ -1,0 +1,30 @@
+task:
+  family: xiangqi-multimodal
+  path: data/xiangqi/multimodal/tasks.jsonl
+  sampling:
+    enabled: false
+    seed: 42
+    count: 10
+    strategy: random
+
+agent:
+  name: openai-compatible
+  max_tokens: 512
+
+provider:
+  name: deepseek
+  model: deepseek-v4-flash
+  api_key_env: DEEPSEEK_API_KEY
+
+evaluation:
+  input_modes:
+    - text
+    - chinese-piece-image
+    - latin-piece-image
+  opponent_depth: 4
+  optimal_depth: 3
+  max_plies: 20
+
+run:
+  output_dir: runs
+  run_name: null
