@@ -30,17 +30,17 @@ PROVIDERS = {
     "qwen": ProviderConfig(
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key_env="DASHSCOPE_API_KEY",
-        default_model="qwen3.6-plus",
+        default_model="qwen3.8-max",
     ),
     "qwen-intl": ProviderConfig(
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         api_key_env="DASHSCOPE_API_KEY",
-        default_model="qwen3.6-plus",
+        default_model="qwen3.8-max",
     ),
     "qwen-us": ProviderConfig(
         base_url="https://dashscope-us.aliyuncs.com/compatible-mode/v1",
         api_key_env="DASHSCOPE_API_KEY",
-        default_model="qwen3.6-plus",
+        default_model="qwen3.8-max",
     ),
     "siliconflow": ProviderConfig(
         base_url="https://api.siliconflow.cn/v1",

@@ -12,9 +12,13 @@ agent:
   max_tokens: 512
 
 provider:
-  name: deepseek
-  model: deepseek-v4-flash
-  api_key_env: DEEPSEEK_API_KEY
+  name: qwen
+  model: qwen3.8-max
+  api_key_env: DASHSCOPE_API_KEY
+  json_mode: true
+  timeout: 120
+  extra_body:
+    enable_thinking: false
 
 evaluation:
   input_modes:

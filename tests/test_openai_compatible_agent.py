@@ -40,7 +40,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
             api_key_env=None,
         )
 
-        self.assertEqual(model, "qwen3.6-plus")
+        self.assertEqual(model, "qwen3.8-max")
         self.assertEqual(base_url, "https://dashscope.aliyuncs.com/compatible-mode/v1")
         self.assertEqual(api_key_env, "DASHSCOPE_API_KEY")
 

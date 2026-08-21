@@ -6,11 +6,30 @@ import unittest
 import yaml
 
 from minibench.evaluate import run_config
-from minibench.factory.config import validate_experiment_config
+from minibench.factory.config import load_experiment_config, validate_experiment_config
 from minibench.factory.experiments import get_task_family_spec
 
 
 class EvaluateConfigTests(unittest.TestCase):
+    def test_visual_configs_use_qwen_3_8_max(self):
+        visual_configs = (
+            "mahjong_multimodal.yaml",
+            "mahjong_multimodal_ablation.yaml",
+            "one_stroke_a4.yaml",
+            "one_stroke_a4_ablation.yaml",
+            "xiangqi_multimodal.yaml",
+        )
+
+        for filename in visual_configs:
+            with self.subTest(filename=filename):
+                config = load_experiment_config(Path("config/experiments") / filename)
+                self.assertEqual(config["provider"]["name"], "qwen")
+                self.assertEqual(config["provider"]["model"], "qwen3.8-max")
+                self.assertEqual(
+                    config["provider"]["extra_body"],
+                    {"enable_thinking": False},
+                )
+
     def test_run_config_writes_run_artifacts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "runs"

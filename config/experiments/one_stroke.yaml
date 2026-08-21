@@ -13,10 +13,13 @@ agent:
 
 provider:
   name: deepseek
-  model: deepseek-chat
+  model: deepseek-v4-flash
   json_mode: true
   max_tokens: 512
   timeout: 120
+  extra_body:
+    thinking:
+      type: disabled
 
 evaluation:
   # Formal MiniBench 2.0 A1 setting: no Euler-theorem hint.

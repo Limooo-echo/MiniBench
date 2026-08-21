@@ -1,694 +1,611 @@
-# MiniBench
+# MiniBench 0.2.0
 
-[English](#english) | [中文](#中文)
+MiniBench 是一个用统一 YAML、统一 agent/provider 接口和统一结果格式评测推理模型的小型基准。当前包含 Zebra 逻辑题、象棋、一笔画、麻将与四人立直麻将。
 
-## 象棋 schema v2
+本 README 以 **WSL 2 + Ubuntu 22.04 + Python 3.10** 为标准环境。进入 Ubuntu 后，下面所有安装、配置、运行和排错命令都在 WSL 终端执行。
 
-MiniBench 0.2.0 提供四个名称明确、各 250 题的象棋任务。正式数据只保存
-FEN；10×9 矩阵仅在运行时解码。详细字段、坐标、UCI 和评分说明见
-[`docs/xiangqi-data-card.md`](docs/xiangqi-data-card.md)。
+> 先记住两条：文本任务默认使用 DeepSeek V4；带图片的任务必须使用支持视觉输入的模型，仓库默认使用 Qwen。不要用 DeepSeek 跑 `image`、`challenge_image`、`chinese-piece-image` 或 `latin-piece-image`。
 
-| 任务名 | 数据 | 主要评测内容 |
-|---|---|---|
-| `xiangqi-mate-in-one` | `data/xiangqi/mate_in_one/tasks.jsonl` | 一步杀、合法性、最优走法和局面质量 |
-| `xiangqi-rule-variants` | `data/xiangqi/rule_variants/tasks.jsonl` | 标准规则与三个可读规则组 |
-| `xiangqi-history` | `data/xiangqi/history/tasks.jsonl` | `full-state` / `move-history-only` |
-| `xiangqi-multimodal` | `data/xiangqi/multimodal/tasks.jsonl` | 文字、中文棋子图、拉丁棋子图 |
+## 1. 在 WSL Ubuntu 中安装
+
+如果 WSL 尚未安装，先在 Windows 管理员 PowerShell 中执行一次 `wsl --install -d Ubuntu-22.04` 并重启。之后打开 Ubuntu，确认仓库的 Windows 路径映射正确：
 
 ```bash
-pip install -e .
-export DEEPSEEK_API_KEY=sk-your-key
-
-minibench run-config config/experiments/xiangqi_history.yaml
-minibench run-task xiangqi-history --sample-seed 42 --sample-count 10 \
-  --history-mode full-state
-minibench run-suite --tasks xiangqi-mate-in-one,xiangqi-rule-variants
+cd /mnt/d/AAALimoWork/CS/Seminar/MiniBench
+pwd
 ```
 
-YAML 提供全部非敏感默认值，显式 CLI 参数覆盖 YAML；环境变量只用于 API
-key 或私有 endpoint。每次 run 都写出 `predictions.jsonl`、`results.json`、
-`summary.txt`、解析后配置、数据 SHA256、schema/renderer/依赖版本。
-
-查看人类可读棋盘或构建离线题库：
+安装 Python 和编译工具：
 
 ```bash
-minibench inspect-xiangqi --task xiangqi-history \
-  --id xiangqi-history-0001 --format terminal
-minibench inspect-xiangqi --task xiangqi-multimodal \
-  --id xiangqi-multimodal-0001 --format png --output output/board.png
+sudo apt update
+sudo apt install -y python3.10 python3.10-venv python3-pip build-essential git curl
+
+python3.10 -m venv ~/.venvs/minibench
+source ~/.venvs/minibench/bin/activate
+
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -c constraints/ci-py310.txt -e .
+```
+
+验证安装：
+
+```bash
+minibench --help
+python -m unittest discover -s tests
+```
+
+以后每次重新打开 WSL，只需：
+
+```bash
+cd /mnt/d/AAALimoWork/CS/Seminar/MiniBench
+source ~/.venvs/minibench/bin/activate
+```
+
+`constraints/ci-py310.txt` 固定了 CI 使用的图片与数据依赖。用它安装最容易复现 GitHub Actions；项目本身仍在 `pyproject.toml` 中保留较宽的用户依赖范围。
+
+## 2. 配置外部 API
+
+MiniBench 通过 OpenAI-compatible `POST /chat/completions` 接口调用模型。API key 只从环境变量读取，不要写入 YAML、README 或 Git。
+
+### 2.1 DeepSeek V4 Flash：文本任务
+
+DeepSeek 官方公共 API 的模型 ID 是 `deepseek-v4-flash`，Base URL 是 `https://api.deepseek.com`。先在当前 WSL 会话中设置 key：
+
+```bash
+read -rsp "DeepSeek API key: " DEEPSEEK_API_KEY
+echo
+export DEEPSEEK_API_KEY
+```
+
+用一个很小的请求检查 key、余额和网络：
+
+```bash
+curl -sS https://api.deepseek.com/chat/completions \
+  -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-v4-flash",
+    "messages": [{"role": "user", "content": "Return OK."}],
+    "thinking": {"type": "disabled"},
+    "max_tokens": 16,
+    "stream": false
+  }'
+```
+
+DeepSeek YAML 的 provider 写法：
+
+```yaml
+provider:
+  name: deepseek
+  model: deepseek-v4-flash
+  api_key_env: DEEPSEEK_API_KEY
+  json_mode: true
+  max_tokens: 1024
+  timeout: 120
+  extra_body:
+    thinking:
+      type: disabled
+```
+
+`thinking.type: disabled` 表示只使用 MiniBench 选择的 agent 推理架构，避免再叠加 provider 原生思考。若要专门测试 DeepSeek 原生 thinking，可改成 `enabled`，同时应重新评估超时、token 上限和实验可比性。
+
+DeepSeek 官方资料：[V4 发布说明](https://api-docs.deepseek.com/news/news260424/)、[Chat Completions 参数](https://api-docs.deepseek.com/api/create-chat-completion)。
+
+### 2.2 Qwen/DashScope：多模态任务
+
+获取 Model Studio API key 后，在 WSL 中设置：
+
+```bash
+read -rsp "DashScope API key: " DASHSCOPE_API_KEY
+echo
+export DASHSCOPE_API_KEY
+```
+
+API key 与 endpoint 必须属于同一区域。仓库提供三个别名：
+
+| YAML `provider.name` | 区域 | 项目默认模型 | Base URL |
+| --- | --- | --- | --- |
+| `qwen` | 中国北京 | `qwen3.8-max` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `qwen-intl` | 新加坡 | `qwen3.8-max` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+| `qwen-us` | 美国弗吉尼亚 | `qwen3.8-max` | `https://dashscope-us.aliyuncs.com/compatible-mode/v1` |
+
+先用北京 endpoint 做文本预检；其他区域替换 URL 即可：
+
+```bash
+curl -sS https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions \
+  -H "Authorization: Bearer $DASHSCOPE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3.8-max",
+    "messages": [{"role": "user", "content": "Return OK."}],
+    "enable_thinking": false,
+    "max_tokens": 16,
+    "stream": false
+  }'
+```
+
+MiniBench 的正式视觉 YAML 统一使用 `qwen3.8-max`。这是项目锁定的视觉基准模型 ID；运行前必须在 Model Studio 控制台确认该 ID 已向你的账号和区域开放。若尚未开放，请把本地副本的 `provider.model` 改成控制台显示的视觉模型精确 ID，不要凭简称猜模型名。
+
+Qwen 视觉 YAML 的标准写法：
+
+```yaml
+provider:
+  name: qwen
+  model: qwen3.8-max
+  api_key_env: DASHSCOPE_API_KEY
+  json_mode: true
+  max_tokens: 1024
+  timeout: 120
+  extra_body:
+    enable_thinking: false
+```
+
+MiniBench 会把本地图片编码成 OpenAI-compatible `image_url` 数据 URL；不需要把题图上传到公网。相关官方资料：[获取 API key](https://www.alibabacloud.com/help/en/model-studio/get-api-key)、[区域 Base URL](https://www.alibabacloud.com/help/en/model-studio/base-url)、[视觉模型列表](https://www.alibabacloud.com/help/en/model-studio/vision-model)。
+
+### 2.3 其他 OpenAI-compatible API
+
+先设置自定义 key：
+
+```bash
+read -rsp "External API key: " MY_MODEL_API_KEY
+echo
+export MY_MODEL_API_KEY
+```
+
+复制一份配置到 Git 已忽略的 `tmp/`，不要直接污染正式实验配置：
+
+```bash
+mkdir -p tmp/configs
+cp config/experiments/zebra.yaml tmp/configs/zebra-external.yaml
+nano tmp/configs/zebra-external.yaml
+```
+
+把 provider 改成：
+
+```yaml
+provider:
+  name: generic
+  model: exact-model-id-from-provider
+  base_url: https://example.com/v1
+  api_key_env: MY_MODEL_API_KEY
+  json_mode: true
+  max_tokens: 4096
+  timeout: 120
+```
+
+然后运行：
+
+```bash
+minibench run-config tmp/configs/zebra-external.yaml
+```
+
+`generic` 必须同时提供 `model`、`base_url` 和 `api_key_env`。如果 `base_url` 不以 `/chat/completions` 结尾，MiniBench 会自动补上。程序不会自动读取 `.env`；必须在当前 WSL shell 中 `export`。
+
+## 3. YAML 如何工作
+
+每份正式配置都包含五部分：
+
+```yaml
+task:        # family、数据路径、limit/task_ids 或象棋 sampling
+agent:       # agent 架构及其推理参数
+provider:    # API、模型、key 环境变量、超时、JSON 模式
+evaluation:  # 任务特有的模式和评测参数
+run:         # 输出目录与 run_name
+```
+
+运行任何 YAML 的统一命令是：
+
+```bash
+minibench run-config config/experiments/<name>.yaml
+```
+
+也可以使用薄封装：
+
+```bash
+./run.sh config/experiments/<name>.yaml
+```
+
+`run-config` 完全以 YAML 为准，不接受额外覆盖参数。要改 provider、agent 或只跑一题，请复制到 `tmp/configs/` 后修改。显式 CLI 覆盖只适用于象棋的 `run-task`/`run-suite`。
+
+第一次连接收费 API 时，建议把本地副本中的 `task.limit` 改为 `1`。象棋则使用 `--sample-count 1`，无需改文件。
+
+## 4. 每份任务 YAML 的调用方式
+
+### 4.1 Zebra
+
+| 配置 | 内容 |
+| --- | --- |
+| `zebra.yaml` | 正式逻辑网格推理，默认 CoT + DeepSeek V4 |
+| `zebra_rule_codebook.yaml` | 临时规则/代码本变体 |
+| `zebra_history.yaml` | 多轮历史记忆协议 |
+
+```bash
+minibench run-config config/experiments/zebra.yaml
+minibench run-config config/experiments/zebra_rule_codebook.yaml
+minibench run-config config/experiments/zebra_history.yaml
+```
+
+`zebra_history.yaml` 必须保持 `agent.name: openai-compatible`，因为该评测调用真实的多轮 `generate_messages()` 接口。
+
+### 4.2 象棋 schema v2
+
+| 配置 | 公开 family | 内容 |
+| --- | --- | --- |
+| `xiangqi_mate_in_one.yaml` | `xiangqi-mate-in-one` | 一步杀 |
+| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 标准规则与三个规则变体 |
+| `xiangqi_history.yaml` | `xiangqi-history` | `full-state` / `move-history-only` |
+| `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 文本、中文棋子图、拉丁棋子图；默认 Qwen |
+
+直接运行 YAML：
+
+```bash
+minibench run-config config/experiments/xiangqi_mate_in_one.yaml
+minibench run-config config/experiments/xiangqi_rule_variants.yaml
+minibench run-config config/experiments/xiangqi_history.yaml
+minibench run-config config/experiments/xiangqi_multimodal.yaml
+```
+
+象棋还提供可覆盖 YAML 的便捷入口：
+
+```bash
+minibench run-task xiangqi-mate-in-one \
+  --agent cot \
+  --provider deepseek \
+  --model deepseek-v4-flash \
+  --sample-seed 42 \
+  --sample-count 10
+
+minibench run-task xiangqi-history \
+  --history-mode full-state \
+  --sample-count 10 \
+  --pikafish-depth 8
+
+minibench run-suite \
+  --tasks xiangqi-mate-in-one,xiangqi-rule-variants \
+  --sample-count 10
+```
+
+`run-task`/`run-suite` 可覆盖 agent、provider、model、key 变量、抽样和常用评测参数，但不提供 `--base-url`。自定义 endpoint 请复制 YAML，设置 `provider.base_url`，再用 `run-config`。
+
+一步杀和历史任务需要 Pikafish。全部操作仍在 WSL 中：
+
+```bash
+mkdir -p ~/opt
+git clone https://github.com/official-pikafish/Pikafish.git ~/opt/Pikafish
+cd ~/opt/Pikafish/src
+make -j"$(nproc)" profile-build
+
+export PIKAFISH_PATH="$HOME/opt/Pikafish/src/pikafish"
+test -x "$PIKAFISH_PATH"
+
+cd /mnt/d/AAALimoWork/CS/Seminar/MiniBench
+```
+
+Pikafish 官方编译说明也建议在 `src` 下执行 `make -j profile-build`：[官方 README](https://github.com/official-pikafish/Pikafish#compiling-pikafish)。
+
+人工检查数据不需要调用模型：
+
+```bash
+minibench inspect-xiangqi \
+  --task xiangqi-history \
+  --id xiangqi-history-0001 \
+  --format terminal
+
+minibench inspect-xiangqi \
+  --task xiangqi-multimodal \
+  --id xiangqi-multimodal-0001 \
+  --format png \
+  --output output/xiangqi-example.png
+
 minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 ```
 
-0.1.x 文件必须显式迁移；旧任务缩写不再是运行别名：
+字段、FEN、坐标、UCI 和评分定义见 [`docs/xiangqi-data-card.md`](docs/xiangqi-data-card.md)。
+
+### 4.3 一笔画
+
+| 配置 | 内容 |
+| --- | --- |
+| `one_stroke_a1.yaml` | A1 直接求解，无欧拉定理提示 |
+| `one_stroke.yaml` | 与正式 A1 相同的兼容入口；通常不必与 A1 重复运行 |
+| `one_stroke_a2.yaml` | A2 临时规则条件 |
+| `one_stroke_a2_ablation.yaml` | A2 full/standard/drop/conflicting 消融 |
+| `one_stroke_a3_history.yaml` | A3 增量状态与仅历史对照 |
+| `one_stroke_a4.yaml` | A4 挑战图片，默认 Qwen |
+| `one_stroke_a4_ablation.yaml` | A4 text/clear image/challenge image 配对消融 |
+| `one_stroke_euler_theorem.yaml` | 旧 smoke 数据的欧拉定理提示消融 |
+| `one_stroke_generated.yaml` | 生成数据，baseline prompt |
+| `one_stroke_generated_euler_theorem.yaml` | 生成数据，Euler prompt |
 
 ```bash
-minibench migrate-xiangqi-v2 --input old-run --output migrated-run --dry-run
-minibench migrate-xiangqi-v2 --input old-run --output migrated-run
+minibench run-config config/experiments/one_stroke_a1.yaml
+minibench run-config config/experiments/one_stroke.yaml
+minibench run-config config/experiments/one_stroke_a2.yaml
+minibench run-config config/experiments/one_stroke_a2_ablation.yaml
+minibench run-config config/experiments/one_stroke_a3_history.yaml
+minibench run-config config/experiments/one_stroke_a4.yaml
+minibench run-config config/experiments/one_stroke_a4_ablation.yaml
+minibench run-config config/experiments/one_stroke_euler_theorem.yaml
+minibench run-config config/experiments/one_stroke_generated.yaml
+minibench run-config config/experiments/one_stroke_generated_euler_theorem.yaml
 ```
 
-映射表位于 `data/xiangqi/migration_v1_to_v2.json`。迁移不会改写
-`raw_output` 或模型自由文本，也不会覆盖既有输出。
+`one_stroke_a3_history.yaml` 与 Zebra history 一样要求 `openai-compatible`，不能直接换成当前的 CoT/ToT 包装器。
 
-[English](#english) | [中文](#中文)
+### 4.4 麻将
 
-## English
-
-MiniBench is a small, reproducible benchmark for comparing LLM and
-agent-style reasoning behavior. It supports multiple task families, including
-Zebra logic grids, Xiangqi, one-stroke graph puzzles, static Mahjong tile-shape
-tasks, and local four-player Riichi Mahjong tasks.
-
-The codebase is organized so task families, agents, providers, and experiment
-configuration stay separate. Adding a new task family should mostly mean adding
-a new package under `src/minibench/datasets/`, a data directory under `data/`,
-and one registry entry in `src/minibench/factory/experiments.py`.
-
-### Quick Start
+| 配置 | 内容 |
+| --- | --- |
+| `mahjong.yaml` | 静态牌型文本推理 |
+| `mahjong_rule_variants.yaml` | 全手牌规则适应，默认扩展全部规则通道 |
+| `mahjong_riichi.yaml` | 本地四人立直麻将；默认其余座位使用 shanten bot |
+| `mahjong_multimodal.yaml` | 牌面图片输入，默认 Qwen |
+| `mahjong_multimodal_ablation.yaml` | 同题 text/image 配对消融，默认 Qwen |
 
 ```bash
-export PYTHONPATH=src
-python -m unittest discover -s tests
+minibench run-config config/experiments/mahjong.yaml
+minibench run-config config/experiments/mahjong_rule_variants.yaml
+minibench run-config config/experiments/mahjong_riichi.yaml
+minibench run-config config/experiments/mahjong_multimodal.yaml
+minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
 ```
 
-Run the three-task Zebra smoke set with an OpenAI-compatible provider:
+麻将视觉图片来自仓库内牌面素材与确定性 Pillow 渲染器。更换 Qwen provider/agent 不会改变牌局数据、答案或评分逻辑。
+
+## 5. 如何切换 agent 架构
+
+agent 架构和 provider 是两个独立维度：`agent.name` 决定一次题目如何组织模型调用，`provider` 决定这些调用发给哪个模型服务。
+
+| `agent.name` | 单次静态题的大致模型调用数 | 用途 |
+| --- | ---: | --- |
+| `openai-compatible` | 1 | 最小基线；支持真实多轮 messages |
+| `direct` | 1 | 强制直接输出最终 JSON |
+| `cot` | 2 | 先推理，再整理最终 JSON |
+| `self-consistency` | `samples + 1` | 多条推理路径后评选 |
+| `tot` | `samples + 1` | 多候选 thought branches 后评选 |
+| `plan-then-solve` | 3 | 计划、求解、最终格式化 |
+| `critic-refine` | 3 | 草稿、批评、修订 |
+
+动态棋局/牌局会在每个 agent 行动回合重复上述过程；多模态推理包装器还会在各阶段重复发送图片，因此调用量和图片 token 成本会明显增加。
+
+复制一份 YAML 后修改 agent：
 
 ```bash
-python -m minibench.cli evaluate-zebra --provider deepseek
+mkdir -p tmp/configs
+cp config/experiments/mahjong.yaml tmp/configs/mahjong-cot.yaml
+nano tmp/configs/mahjong-cot.yaml
 ```
 
-Run an experiment from YAML:
+例如 CoT：
+
+```yaml
+agent:
+  name: cot
+  samples: 1
+  reasoning_temperature: 0.0
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+  max_tokens: 512
+```
+
+例如 self-consistency：
+
+```yaml
+agent:
+  name: self-consistency
+  samples: 5
+  reasoning_temperature: 0.7
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+  max_tokens: 512
+```
+
+运行修改后的配置：
 
 ```bash
-./run.sh config/experiments/zebra.yaml
+minibench run-config tmp/configs/mahjong-cot.yaml
 ```
 
-### Source Layout
+选择建议：
 
-```text
-src/minibench/
-  cli.py                 # command-line entrypoint
-  evaluate.py            # YAML/config-driven evaluation runner
-  core/                  # shared protocols, prompts, results, run helpers
-  agents/                # agent reasoning strategies
-  factory/               # agent/provider/config/experiment assembly
-  datasets/              # task-family loaders, prompts, evaluators, engines
-```
+- 先用 `openai-compatible` 做一题连通性 smoke test。
+- 再用 `direct` 或 `cot` 建基线。
+- 只有在预算允许时再用 `self-consistency`、`tot`、`plan-then-solve`、`critic-refine`。
+- `zebra_history.yaml` 和 `one_stroke_a3_history.yaml` 当前必须使用 `openai-compatible`。
+- 象棋 history 可以切换 agent，但会在多步对局中产生很多模型调用。
 
-Task-family packages live only under `src/minibench/datasets/`:
+## 6. 多模态：DeepSeek 文本 + Qwen 图片的正确跑法
 
-```text
-src/minibench/datasets/
-  zebra/
-  xiangqi/
-    engines/
-  one_stroke/
-  mahjong/
-  mahjong_solo/
-  mahjong_riichi/
-```
+### 6.1 推荐的主实验
 
-### Data Layout
-
-| Task family | Data file | Command |
-| --- | --- | --- |
-| Zebra smoke set | `data/zebra/tasks.jsonl` | `evaluate-zebra` |
-| Zebra formal evaluation (15 per difficulty) | `data/zebra/eval.jsonl` | YAML config or `--zebra-tasks` |
-| Zebra temporary-rule evaluation | `data/zebra/rule_codebook_eval.jsonl` | `zebra_rule_codebook.yaml` |
-| Zebra history evaluation | `data/zebra/history_eval.jsonl` | `zebra_history.yaml` |
-| Xiangqi mate-in-one | `data/xiangqi/mate_in_one/tasks.jsonl` | `run-task xiangqi-mate-in-one` |
-| Xiangqi rule variants | `data/xiangqi/rule_variants/tasks.jsonl` | `run-task xiangqi-rule-variants` |
-| Xiangqi history | `data/xiangqi/history/tasks.jsonl` | `run-task xiangqi-history` |
-| Xiangqi multimodal | `data/xiangqi/multimodal/tasks.jsonl` | `run-task xiangqi-multimodal` |
-| One-stroke smoke set | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
-| One-stroke A1 direct (10 per difficulty) | `data/one_stroke/a1_direct.jsonl` | `one_stroke_a1.yaml` |
-| One-stroke A2 temporary rules (10 per difficulty) | `data/one_stroke/a2_rule_condition.jsonl` | `one_stroke_a2.yaml` |
-| One-stroke A3 history (10 per difficulty) | `data/one_stroke/a3_history.jsonl` | `one_stroke_a3_history.yaml` |
-| One-stroke A4 paired multimodal (10 per difficulty) | `data/one_stroke/a4_multimodal.jsonl` | `one_stroke_a4.yaml` |
-| Mahjong 1: text static reasoning | `data/mahjong/tasks.jsonl` | `generate-mahjong-static` / `evaluate-mahjong` |
-| Mahjong 2: full-hand rule adaptation | `data/mahjong_solo/tasks_win.jsonl` | `evaluate-mahjong-rules` |
-| Mahjong 3: history-only memory comparison | `data/mahjong_solo/tasks_win.jsonl` | `evaluate-mahjong-rules` |
-| Mahjong 4: visual tile reasoning (60 paired states) | `data/mahjong/visual_tasks.jsonl` | `generate-mahjong-visual` / `mahjong_multimodal.yaml` |
-| Single-player Mahjong compatibility runner | `data/mahjong_solo/tasks_win.jsonl` | `evaluate-mahjong-solo` |
-| Four-player Riichi Mahjong v1 | `data/mahjong_riichi/tasks.jsonl` | `evaluate-mahjong-riichi` |
-
-### Agent Architectures
-
-Available agent names:
-
-- `openai-compatible`: direct OpenAI-compatible chat completion baseline.
-- `direct`: asks the model to answer directly with the required JSON.
-- `cot`: reason first, then finalize to JSON.
-- `self-consistency`: sample several reasoning paths and ask a judge to select.
-- `tot`: generate candidate reasoning paths, then judge.
-- `plan-then-solve`: plan first, solve from the plan, then finalize.
-- `critic-refine`: draft, critique, then refine.
-
-Reasoning architectures share these options:
+五份正式视觉配置已经使用 Qwen：
 
 ```bash
---samples 3
---reasoning-temperature 0.7
---final-temperature 0.0
---max-reasoning-tokens 512
+export DASHSCOPE_API_KEY
+
+minibench run-config config/experiments/xiangqi_multimodal.yaml
+minibench run-config config/experiments/one_stroke_a4.yaml
+minibench run-config config/experiments/one_stroke_a4_ablation.yaml
+minibench run-config config/experiments/mahjong_multimodal.yaml
+minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
 ```
 
-### Provider Examples
+其中：
 
-DeepSeek:
+- 象棋运行 `text`、`chinese-piece-image`、`latin-piece-image`。
+- 一笔画 A4 正式运行 `challenge_image`，消融运行 `text`、`clear_image`、`challenge_image`。
+- 麻将正式运行 `image`，消融运行 `text`、`image`。
+
+配对消融应让同一个 Qwen 模型同时跑文本和图片，才能把差异主要归因于输入模态，而不是模型能力差异。
+
+### 6.2 另跑 DeepSeek 文本基线
+
+如果还要记录 DeepSeek 文本成绩，不要让 DeepSeek 接收图片。以象棋为例：
 
 ```bash
-export DEEPSEEK_API_KEY="your_key_here"
-python -m minibench.cli evaluate-zebra --agent cot --provider deepseek
+mkdir -p tmp/configs
+cp config/experiments/xiangqi_multimodal.yaml \
+  tmp/configs/xiangqi-multimodal-text-deepseek.yaml
+nano tmp/configs/xiangqi-multimodal-text-deepseek.yaml
 ```
 
-Qwen/DashScope:
+把 provider 和输入模式改为：
 
-```bash
-export DASHSCOPE_API_KEY="your_key_here"
-python -m minibench.cli evaluate-zebra --agent self-consistency --provider qwen
+```yaml
+provider:
+  name: deepseek
+  model: deepseek-v4-flash
+  api_key_env: DEEPSEEK_API_KEY
+  json_mode: true
+  timeout: 120
+  extra_body:
+    thinking:
+      type: disabled
+
+evaluation:
+  input_modes:
+    - text
+  opponent_depth: 4
+  optimal_depth: 3
+  max_plies: 20
 ```
 
-Custom OpenAI-compatible endpoint:
+然后运行：
 
 ```bash
-export MY_MODEL_API_KEY="your_key_here"
-python -m minibench.cli evaluate-zebra \
-  --agent critic-refine \
-  --provider generic \
-  --model my-model \
-  --base-url https://example.com/v1 \
-  --api-key-env MY_MODEL_API_KEY
+export DEEPSEEK_API_KEY
+minibench run-config tmp/configs/xiangqi-multimodal-text-deepseek.yaml
 ```
 
-### Task Commands
+这份 DeepSeek 结果是“额外的跨模型文本基线”，不能替代 Qwen 自身 text/image 的配对视觉差值。
 
-Zebra direct reasoning:
+### 6.3 给多模态任务换 agent
+
+所有当前推理架构都实现了图片转发。例如把象棋多模态改成 Qwen + CoT：
 
 ```bash
-python -m minibench.cli evaluate-zebra \
-  --zebra-tasks data/zebra/eval.jsonl \
-  --agent openai-compatible \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 4096 \
-  --timeout 120
+cp config/experiments/xiangqi_multimodal.yaml \
+  tmp/configs/xiangqi-multimodal-qwen-cot.yaml
+nano tmp/configs/xiangqi-multimodal-qwen-cot.yaml
 ```
 
-The built-in smoke set contains one easy, medium, and hard record from
-`WildEval/ZebraLogic`. The formal direct-reasoning set contains 15 records per
-difficulty and is used by `config/experiments/zebra.yaml`. `rule_context` is
-already wired into prompts. Records
-with `capability: history_memory` run both real-chat protocols by default:
-`incremental_state` and `deferred_reasoning`. The provider-level message API is
-task-agnostic and can also be reused by Xiangqi and Mahjong history evaluators.
+只修改 agent 段：
 
-The same 45 source ids are reused for the temporary-codebook and history
-variants. Counterfactual-rule candidates are kept in a separate unscoreable
-JSONL until each changed solution has been manually or solver verified.
-
-Xiangqi:
-
-```bash
-python -m minibench.cli run-task xiangqi-mate-in-one \
-  --agent openai-compatible --provider deepseek --sample-count 10
+```yaml
+agent:
+  name: cot
+  samples: 1
+  reasoning_temperature: 0.0
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+  max_tokens: 512
 ```
 
-History evaluation can use Pikafish as the opponent and oracle:
+先用一题验证：
 
 ```bash
-export PIKAFISH_PATH=/path/to/Pikafish/src/pikafish
-
-python -m minibench.cli run-task xiangqi-history \
-  --history-mode move-history-only --pikafish-depth 8 --sample-count 10
-```
-
-MiniBench 2.0 A1 direct one-stroke puzzles (no Euler-theorem hint):
-
-```bash
-python -m minibench.cli evaluate-one-stroke \
-  --one-stroke-tasks data/one_stroke/a1_direct.jsonl \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 512 \
-  --timeout 120
-```
-
-### Mahjong 2.0 capabilities
-
-The Mahjong benchmark has four authoritative panels. All three text/gameplay
-panels use binary success, and every Mahjong evaluator checkpoints completed
-results so an interrupted provider call does not erase earlier predictions.
-
-#### 1. Text static reasoning
-
-The formal 60-task set is balanced across easy/hard and
-`winning_tiles`/`max_wait_discard`. The latter maximizes distinct structural
-wait types; it is separate from the visual task's live-copy
-`max_ukeire_discard` goal.
-
-```bash
-python -m minibench.cli generate-mahjong-static \
-  --output data/mahjong/tasks_generated.jsonl \
-  --count 60 \
-  --seed 20260807 \
-  --overwrite
-```
-
-```bash
-python -m minibench.cli evaluate-mahjong \
-  --mahjong-tasks data/mahjong/tasks.jsonl \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 512 \
-  --timeout 120
-```
-
-#### 2. Full-hand rule adaptation
-
-The 15 shared source tasks expand to eight channels: standard, the three
-single-rule channels, all three rule pairs, and the three-rule combination.
-`--limit` counts source tasks before channel expansion. Use `--rule-channel`
-for a canonical channel, or repeat `--rule` to select a combination.
-
-```bash
-python -m minibench.cli evaluate-mahjong-rules \
-  --mahjong-rule-tasks data/mahjong_solo/tasks_win.jsonl \
-  --observation-mode full-hand \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --reasoning-temperature 0 \
-  --final-temperature 0 \
-  --progress \
-  --timeout 120
-```
-
-#### 3. History-only memory comparison
-
-Run the same standard-rule source tasks in both modes. `history-only` provides
-the initial 13 tiles, current draw, completed draw/discard history, cumulative
-discards, and remaining draws, while hiding the reconstructed current hand.
-
-```bash
-python -m minibench.cli evaluate-mahjong-rules \
-  --mahjong-rule-tasks data/mahjong_solo/tasks_win.jsonl \
-  --rule-channel standard \
-  --observation-mode history-only \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --reasoning-temperature 0 \
-  --final-temperature 0 \
-  --progress \
-  --timeout 120
-```
-
-For the controlled comparison, repeat the command with
-`--observation-mode full-hand`; task IDs, walls, retry behavior, and evaluation
-logic remain identical.
-
-#### 4. Visual tile reasoning
-
-The existing 60 visual tasks and paired text/image scoring remain unchanged.
-
-```bash
-python -m minibench.cli evaluate-mahjong \
-  --mahjong-tasks data/mahjong/visual_tasks.jsonl \
-  --input-mode all \
+minibench run-task xiangqi-multimodal \
   --agent cot \
   --provider qwen \
   --model qwen3.8-max \
-  --json-mode \
-  --progress \
-  --timeout 120
+  --sample-count 1 \
+  --input-modes chinese-piece-image
 ```
 
-All four evaluation commands also accept `--predictions PATH`; this selects the
-deterministic prediction-file agent and allows offline smoke runs without a
-provider credential. Dynamic rule/history prediction records may contain a
-`raw_outputs` list with one action JSON string per model call.
+该 CLI 命令继承正式 YAML 中的 `DASHSCOPE_API_KEY` 和其他评测设置；完整自定义仍建议运行刚复制的 YAML。
 
-#### Compatibility diagnostics
+## 7. 结果、复现与离线运行
 
-The standalone solo runner uses the same feature-standard local winning-shape
-success check and supports both observation modes. Its optional shanten and
-Akochan scorers are diagnostic only and do not determine binary success:
+每次评测在 `runs/` 下创建独立目录，核心文件为：
+
+- `predictions.jsonl`：原始输出与逐题结果。
+- `results.json`：汇总指标。
+- `summary.txt`：人类可读摘要。
+- 象棋 v2 额外保存 `resolved_config.yaml` 与 `run_metadata.json`，记录数据哈希、schema、renderer 和依赖版本。
+
+在 WSL 中查看最近产生的文件：
 
 ```bash
-python -m minibench.cli evaluate-mahjong-solo \
-  --mahjong-solo-tasks data/mahjong_solo/tasks_win.jsonl \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 512 \
-  --move-scorer shanten \
-  --observation-mode full-hand \
-  --progress \
-  --timeout 120
+find runs -maxdepth 2 -type f -printf '%TY-%Tm-%Td %TH:%TM  %p\n' \
+  | sort -r \
+  | head -30
 ```
 
-`score` is 1 only when the agent wins by tsumo within the draw limit.
-`per_move_average_score` is the average discard-quality score over all scored
-discards.
+如果已有离线预测文件，可在本地 YAML 的 agent 段设置：
 
-To score each discard by agreement with Akochan's recommended action:
+```yaml
+agent:
+  name: openai-compatible
+  predictions: path/to/predictions.jsonl
+```
+
+存在 `predictions` 时会使用确定性的 prediction-file agent，不访问 API。
+
+旧象棋 0.1.x 数据或 run 目录必须显式迁移：
 
 ```bash
-export AKOCHAN_HOME=/path/to/akochan
-export AKOCHAN_CONDA_PREFIX="$CONDA_PREFIX"
+minibench migrate-xiangqi-v2 \
+  --input old-run \
+  --output migrated-run \
+  --dry-run
 
-python -m minibench.cli evaluate-mahjong-solo \
-  --mahjong-solo-tasks data/mahjong_solo/tasks_win.jsonl \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 512 \
-  --move-scorer akochan-choice \
-  --mahjong-ai-command "python examples/akochan_wrapper.py" \
-  --mahjong-ai-mode stdio \
-  --mahjong-ai-timeout 60 \
-  --progress \
-  --timeout 120
+minibench migrate-xiangqi-v2 \
+  --input old-run \
+  --output migrated-run
 ```
 
-`akochan-choice` is a policy-agreement score: each discard gets 1.0 when it
-matches the discard selected by the external Akochan wrapper and 0.0 otherwise.
-The local shanten score is still recorded as `shanten_move_score` for context.
+迁移映射位于 `data/xiangqi/migration_v1_to_v2.json`；工具不会改写 `raw_output` 或模型自由文本。
 
-Four-player Riichi Mahjong:
+## 8. 常见错误
+
+### `Missing API key`
+
+key 没有导出到当前 WSL shell：
 
 ```bash
-python -m minibench.cli evaluate-mahjong-riichi \
-  --mahjong-riichi-tasks data/mahjong_riichi/tasks.jsonl \
-  --agent openai-compatible \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 512 \
-  --timeout 120
+export DEEPSEEK_API_KEY
+export DASHSCOPE_API_KEY
+env | grep -E 'DEEPSEEK_API_KEY|DASHSCOPE_API_KEY' | sed 's/=.*/=<set>/'
 ```
 
-By default, seats 1/2/3 use the local shanten baseline bot. To connect external
-Mahjong AIs, use `--riichi-opponent external` and provide a wrapper command.
+### Qwen 返回 HTTP 401
 
-### Task Generators
+通常是 API key 与 endpoint 区域不一致。北京、新加坡、美国的 key 不能混用；核对 `provider.name`/`base_url` 和创建 key 的区域。
 
-Generate one-stroke graph puzzles:
+### 图片任务返回“不支持 image”或 HTTP 400
+
+检查三点：provider 是否为 Qwen、模型是否支持视觉输入、`evaluation.input_modes` 是否意外把图片发给了 DeepSeek。
+
+### 模型输出为空、超时或 JSON 被截断
+
+先使用 `openai-compatible`、关闭 provider 原生 thinking，并提高 `provider.timeout` 与 `agent.max_tokens`/`provider.max_tokens`。不要一开始就运行多样本 agent 或完整多模态消融。
+
+### `Pikafish executable was not found`
 
 ```bash
-python scripts/generate_one_stroke_tasks.py \
-  --output data/one_stroke/tasks_generated.jsonl \
-  --count 200 \
-  --min-vertices 4 \
-  --max-vertices 8 \
-  --seed 20260702 \
-  --overwrite
+export PIKAFISH_PATH="$HOME/opt/Pikafish/src/pikafish"
+ls -l "$PIKAFISH_PATH"
 ```
 
-Generate simple Xiangqi one-move capture-general tasks. The generator keeps only
-positions with exactly one winning legal move:
+### WSL 中找不到仓库
 
-```bash
-python -m minibench.cli generate-xiangqi-capture \
-  --count 200 \
-  --output data/xiangqi/tasks_generated.jsonl \
-  --piece-types rook,cannon,horse,soldier \
-  --difficulties easy,medium,hard \
-  --seed 20260702 \
-  --overwrite \
-  --progress-interval 100
-```
-
-Convert CCPD endgame FEN records into Pikafish-opponent Xiangqi battle tasks.
-This conversion is format-only by default and does not call Pikafish:
-
-```bash
-python -m minibench.cli generate-ccpd-endgames \
-  --ccpd-root /path/to/Chinese-Chess-Practical-Dataset \
-  --output data/xiangqi/ccpd_endgames.jsonl \
-  --overwrite \
-  --progress-interval 25
-```
-
-Add `--engine-label` only when you want Pikafish static-score labels during
-generation; this is slower.
-
-Generate single-player Mahjong draw-discard tasks:
-
-```bash
-python -m minibench.cli generate-mahjong-solo \
-  --output data/mahjong_solo/tasks_generated.jsonl \
-  --count 15 \
-  --max-draws 50 \
-  --require-oracle-win \
-  --max-initial-shanten 2 \
-  --min-initial-ukeire 12 \
-  --max-oracle-win-turn 18 \
-  --greedy-simulations 10 \
-  --min-greedy-win-rate 0.8 \
-  --max-attempts 20000 \
-  --seed 20260702 \
-  --overwrite
-```
-
-These deterministic fairness filters create the same feature-standard shape of
-15 playable source tasks used by the rule and memory panels.
-
-### One-Stroke Prompt Variants
-
-Run one-stroke puzzles without the Euler theorem hint:
-
-```bash
-python -m minibench.cli evaluate-one-stroke \
-  --one-stroke-tasks data/one_stroke/tasks.jsonl \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 512 \
-  --prompt-variant baseline \
-  --progress \
-  --timeout 120
-```
-
-Run one-stroke puzzles with the Euler theorem hint:
-
-```bash
-python -m minibench.cli evaluate-one-stroke \
-  --one-stroke-tasks data/one_stroke/tasks.jsonl \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 512 \
-  --prompt-variant euler_theorem \
-  --progress \
-  --timeout 120
-```
-
-The formal A1, A2, and A3 configurations are available as YAML experiments. A3 runs
-every task once with explicit incremental state and once with raw step history
-only, so 30 tasks produce 60 results:
-
-```bash
-./run.sh config/experiments/one_stroke.yaml
-./run.sh config/experiments/one_stroke_a1.yaml
-./run.sh config/experiments/one_stroke_a2.yaml
-./run.sh config/experiments/one_stroke_a2_ablation.yaml
-./run.sh config/experiments/one_stroke_a3_history.yaml
-./run.sh config/experiments/one_stroke_a4.yaml
-./run.sh config/experiments/one_stroke_a4_ablation.yaml
-```
-
-A4 is derived one-to-one from A1 without changing the A1 file. Its official run
-uses `challenge_image`; the ablation expands every source task to `text`,
-`clear_image`, and `challenge_image` (90 results). All modes return the same
-schema, including the model's graph transcription:
-
-```json
-{"recognized_vertices":["A","B"],"recognized_edges":[["A","B"]],"solvable":true,"path":["A","B"]}
-```
-
-The primary A4 score validates `path`/the no-solution declaration against hidden
-A1 truth. Transcription is reported separately with vertex and undirected-edge
-multiset precision/recall/F1, exact rates, `joint_success`, and
-`state_parse_error_rate`. Paired summaries report `by_input_mode`, Visual Gap
-(`text` accuracy minus image accuracy), and a deterministic paired-bootstrap
-95% confidence interval. Rebuild all A4 records and PNGs with:
-
-```bash
-python scripts/build_one_stroke_a4.py --overwrite
-```
-
-The common multimodal interface accepts path- or bytes-backed `ImageAttachment`
-objects and forwards one or more images through all reasoning architectures.
-Text-only calls keep their original chat payload.
-
-A2 path answers contain both vertex and edge-ID sequences so parallel edges and
-edge-specific rules remain unambiguous:
-
-```json
-{"path":["A","B","C"],"edge_path":["e01","e02"]}
-```
-
-The formal A2 run uses the complete temporary-rule set. The ablation config runs
-`full`, `standard`, `drop_key_rule`, and `conflicting_rule`; the last mode removes
-the designated key rule and replaces it with a verified logical reverse. Every
-mode is scored against its own recomputed constrained-path oracle. The reported
-`rule_ignore_rate` is the fraction of ordinary valid Euler paths that violate at
-least one displayed temporary rule; malformed or ordinary-invalid paths are not
-included in its denominator.
-
-The earlier `one_stroke_euler_theorem.yaml` is retained only as a legacy prompt
-ablation for the smoke set; it is not part of the MiniBench 2.0 A1 protocol.
-
-Mahjong visual evaluation keeps `hand` and `visible_tiles` as hidden scoring
-truth. Image prompts do not repeat their tile codes; answers additionally
-transcribe both regions. Use `mahjong_multimodal.yaml` for images and
-`mahjong_multimodal_ablation.yaml` for paired text/image diagnostics. The tile
-assets and Pillow renderer are package data, so the committed images can be
-regenerated without task-specific HTTP code.
-
-```bash
-python scripts/generate_mahjong_visual_tasks.py --overwrite
-```
-
-### Xiangqi Evaluation Commands
-
-Run generated simple Xiangqi one-move capture-general tasks:
-
-```bash
-python -m minibench.cli evaluate-xiangqi \
-  --xiangqi-tasks data/xiangqi/tasks_generated.jsonl \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 256 \
-  --progress \
-  --timeout 120
-```
-
-Run CCPD endgame battle tasks against Pikafish:
-
-```bash
-python -m minibench.cli evaluate-xiangqi \
-  --xiangqi-tasks data/xiangqi/ccpd_endgames.jsonl \
-  --agent openai-compatible \
-  --provider deepseek \
-  --model deepseek-chat \
-  --json-mode \
-  --max-tokens 256 \
-  --pikafish-path /path/to/Pikafish/src/pikafish \
-  --pikafish-eval-file /path/to/Pikafish/src/pikafish.nnue \
-  --pikafish-depth 8 \
-  --progress \
-  --timeout 120
-```
-
-To score every agent move with Pikafish, add:
-
-```bash
---score-agent-moves --score-depth 4
-```
-
-### Adding A New Task Family
-
-For a new family such as `sudoku`, add:
+Windows 的 `D:\AAALimoWork\CS\Seminar\MiniBench` 在 WSL 中是：
 
 ```text
-src/minibench/datasets/sudoku/
-  __init__.py
-  dataset.py
-  prompting.py
-  evaluation.py
-
-data/sudoku/tasks.jsonl
-config/experiments/sudoku.yaml
+/mnt/d/AAALimoWork/CS/Seminar/MiniBench
 ```
 
-Then register it in `src/minibench/factory/experiments.py` by adding a
-`TaskFamilySpec` factory to `TASK_FAMILIES`.
-
-### Output
-
-Each evaluation writes a run directory under `runs/`:
-
-- `predictions.jsonl`: raw outputs and per-instance results.
-- `results.json`: aggregate metrics.
-- `summary.txt`: short human-readable summary.
-
-## 中文
-
-MiniBench 是一个小型、可复现的 LLM/agent 推理评测项目。当前支持多种任务家族：
-Zebra 逻辑网格、象棋、一笔画、静态麻将牌型，以及本地四人 Riichi Mahjong。
-
-代码结构的原则是：任务、agent、provider、实验配置彼此分离。新增任务时，主要只需要
-新增一个 `src/minibench/datasets/<family>/` 包、一份 `data/<family>/tasks.jsonl`
-数据文件，以及在 `src/minibench/factory/experiments.py` 里注册一次。
-
-### 快速开始
-
-```bash
-export PYTHONPATH=src
-python -m unittest discover -s tests
-python -m minibench.cli evaluate-zebra --provider deepseek
-./run.sh config/experiments/zebra.yaml
-```
-
-### 目录结构
+## 9. 项目结构
 
 ```text
-src/minibench/
-  cli.py                 # 命令行入口
-  evaluate.py            # YAML 配置驱动的评测入口
-  core/                  # 公共协议、prompt、结果和 run 辅助逻辑
-  agents/                # agent 推理策略
-  factory/               # agent/provider/config/experiment 装配
-  datasets/              # 各任务家族的读取、prompt、评测和引擎
+config/experiments/       # 可执行 YAML，是非敏感实验配置的唯一来源
+data/                     # JSONL 任务数据
+src/minibench/agents/     # agent 推理架构
+src/minibench/factory/    # config、agent、provider、experiment 装配
+src/minibench/datasets/   # 各任务加载、prompt、评测、渲染与引擎
+tests/                    # 单元、数据、CLI 与图片回归测试
+runs/                     # 运行输出，Git 忽略
 ```
 
-任务家族统一放在 `src/minibench/datasets/` 下，不再使用
-`src/minibench/mahjong.py` 或 `src/minibench/xiangqi.py` 这类顶层转发文件。
-
-### 数据文件
-
-| 任务家族 | 数据文件 | 命令 |
-| --- | --- | --- |
-| Zebra 逻辑网格 | `data/zebra/tasks.jsonl` | `evaluate-zebra` |
-| 象棋一步杀 | `data/xiangqi/mate_in_one/tasks.jsonl` | `run-task xiangqi-mate-in-one` |
-| 象棋规则变体 | `data/xiangqi/rule_variants/tasks.jsonl` | `run-task xiangqi-rule-variants` |
-| 象棋历史 | `data/xiangqi/history/tasks.jsonl` | `run-task xiangqi-history` |
-| 象棋多模态 | `data/xiangqi/multimodal/tasks.jsonl` | `run-task xiangqi-multimodal` |
-| 一笔画 | `data/one_stroke/tasks.jsonl` | `evaluate-one-stroke` |
-| 静态麻将牌型 | `data/mahjong/tasks.jsonl` | `evaluate-mahjong` |
-| 四人 Riichi Mahjong | `data/mahjong_riichi/tasks.jsonl` | `evaluate-mahjong-riichi` |
-
-内置 Zebra smoke 集从 `WildEval/ZebraLogic` 选取 easy、medium、hard 各一题。
-provider 的真实多轮消息接口不绑定 Zebra，后续象棋和麻将的历史记忆评测也可直接复用。
-
-### 新增任务
-
-例如新增 `sudoku`：
-
-```text
-src/minibench/datasets/sudoku/
-  __init__.py
-  dataset.py
-  prompting.py
-  evaluation.py
-
-data/sudoku/tasks.jsonl
-config/experiments/sudoku.yaml
-```
-
-然后在 `src/minibench/factory/experiments.py` 的 `TASK_FAMILIES` 中注册即可。
+版本破坏性变更见 [`CHANGELOG.md`](CHANGELOG.md)，任务编写规范见 [`docs/task-authoring.md`](docs/task-authoring.md)。
