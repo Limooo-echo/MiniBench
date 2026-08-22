@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from minibench.datasets.xiangqi.migration import migrate_xiangqi_v2
 from minibench.datasets.xiangqi.presentation import build_gallery, inspect_record
+from minibench.datasets.xiangqi.rule_variants import evaluate_rule_variant_task
 from minibench.datasets.xiangqi.schema import (
     FAMILY_PATHS,
     RULESETS,
@@ -17,6 +18,7 @@ from minibench.datasets.xiangqi.schema import (
     board_to_fen,
     fen_to_board,
     load_records,
+    runtime_dict,
     sample_records,
 )
 from minibench.factory.config import load_experiment_config
@@ -65,6 +67,38 @@ class XiangqiV2DataTests(unittest.TestCase):
         self.assertEqual(len(mapping["task_ids"]), 1000)
         self.assertEqual(len(set(mapping["task_ids"].values())), 1000)
         self.assertEqual(len(mapping["scenario_ids"]), 70)
+
+    @patch("minibench.datasets.xiangqi.rule_variants.score_moves", return_value=[])
+    def test_rule_variant_candidates_include_standard_only_moves(self, _score_moves):
+        record = next(
+            item
+            for item in self.by_family["xiangqi-rule-variants"]
+            if item["id"] == "xiangqi-rule-variants-0131"
+        )
+        task = runtime_dict(record)
+
+        class StandardOnlyMoveAgent:
+            def generate(self, prompt, _task):
+                line = next(
+                    candidate
+                    for candidate in prompt.splitlines()
+                    if "b5d5" in candidate
+                )
+                return json.dumps({"action": int(line.split(":", 1)[0])})
+
+        result = evaluate_rule_variant_task(
+            task,
+            StandardOnlyMoveAgent(),
+            max_steps=1,
+        )
+        self.assertEqual(result.steps[0]["uci"], "b5d5")
+        self.assertIn("variant_violation", result.reasons)
+
+    def test_history_has_no_full_state_cp_advantage_prompt(self):
+        source = Path("src/minibench/datasets/xiangqi/history.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("WINNING STATUS", source)
 
     def test_v1_to_v2_semantic_digest_is_preserved(self):
         mapping = json.loads(

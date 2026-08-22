@@ -208,7 +208,8 @@ def evaluate_rule_variant_task(
         if side_to_move == agent_side:
             # ---- Agent 走 ----
             # 并集列表: 标准合法 ∪ 变体合法 (模型可能选到变体非法走法)
-            std_legal = current.legal_moves(agent_side) if rules else variant_legal
+            standard_board = VariantBoard(current.board, [])
+            std_legal = standard_board.legal_moves(agent_side)
             union = list({mv: None for mv in std_legal + variant_legal}.keys())
             # 实时最优判定 (当前局面下 agent 方的最优着法)
             scored = score_moves(current, agent_side, search_depth, agent_side)

@@ -360,7 +360,9 @@ def _build_multimodal_prompt(
 当前合法着法列表:
 {action_lines}
 
-【严格要求】只输出一个阿拉伯数字（你选择的编号），禁止输出任何其他文字、标点、解释或格式。例如：3"""
+【严格要求】只输出一个 JSON 对象，格式为 {{"action": <你选择的编号>}}。
+例如，只有当你选择第 3 项时，才输出 {{"action": 3}}。
+禁止输出 Markdown 代码块、解释或其他文字。"""
 
 
 def _format_move(move: Move, board: VariantBoard) -> str:

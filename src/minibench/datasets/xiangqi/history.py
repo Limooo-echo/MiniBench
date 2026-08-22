@@ -224,30 +224,11 @@ def evaluate_history_tasks(
 
                 if is_agent_turn:
                     # === Agent's turn ===
-                    # 无将军标注: 仅保留基础提示词, 测试真实推理能力
-                    # 方案 C: 状态感知收官提示 (无走法信息, 不算作弊)
-                    caution = ""
-                    if (
-                        cp_before is not None and cp_before >= 500
-                        and history_mode == "full-state"
-                    ):
-                        caution = (
-                            "\nWINNING STATUS: the evaluator says you are clearly "
-                            "winning (score +%.0f centipawns).\n"
-                            "You are NOT trying to win material anymore - you must "
-                            "DELIVER CHECKMATE NOW.\n"
-                            "From this point on, EVERY move you play MUST be a check, "
-                            "or a move that directly restricts the enemy general and "
-                            "tightens the mating net.\n"
-                            "Quiet moves (king shuffles, captures that do not give "
-                            "check, pointless trades) are FORBIDDEN - playing one "
-                            "wastes the win." % cp_before
-                        )
                     if history_mode == "full-state":
                         prompt = build_xiangqi_prompt(task, env, [
                             f"step {j+1}: {s['actor']} {s['uci']}"
                             for j, s in enumerate(steps)
-                        ], caution=caution)
+                        ])
                     else:
                         prompt = _build_move_history_prompt(
                             task, initial_board_text,

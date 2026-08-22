@@ -9,12 +9,15 @@ from unittest.mock import patch
 import warnings
 
 from minibench.datasets.xiangqi.multimodal import (
+    _build_multimodal_prompt,
+    _extract_index,
     board_to_compact,
     evaluate_xiangqi_multimodal_tasks,
     render_board,
     render_board_png,
     summarize_xiangqi_multimodal,
 )
+from minibench.datasets.xiangqi.variants.board import VariantBoard
 
 
 class FirstMoveAgent:
@@ -24,12 +27,12 @@ class FirstMoveAgent:
 
     def generate(self, prompt, task):
         self.text_calls += 1
-        return "1"
+        return json.dumps({"action": 1})
 
     def generate_multimodal(self, prompt, task, *, images):
         self.image_calls += 1
         self.last_images = images
-        return "1"
+        return json.dumps({"action": 1})
 
 
 def sample_multimodal_task():
@@ -51,6 +54,16 @@ def sample_multimodal_task():
 
 
 class XiangqiMultimodalTests(unittest.TestCase):
+    def test_prompt_requires_json_action_object(self):
+        board = VariantBoard(sample_multimodal_task()["board"], [])
+        prompt = _build_multimodal_prompt(
+            board.legal_moves(1), board, "text", ""
+        )
+        self.assertIn('{"action": <', prompt)
+        self.assertIn('{"action": 3}', prompt)
+        self.assertNotIn("只输出一个阿拉伯数字", prompt)
+        self.assertEqual(_extract_index('{"action": 3}'), 3)
+
     def test_renderer_supports_bytes_and_legacy_base64(self):
         board = sample_multimodal_task()["board"]
         for mode in ("chinese-piece-image", "latin-piece-image"):

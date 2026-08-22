@@ -8,8 +8,8 @@ task:
     strategy: stratified
 
 agent:
-  name: openai-compatible
-  max_tokens: 512
+  name: cot
+  max_tokens: 1024
 
 provider:
   name: deepseek
@@ -23,4 +23,4 @@ evaluation:
 
 run:
   output_dir: runs
-  run_name: null
+  run_name: xiangqi_mate_in_one_cot
