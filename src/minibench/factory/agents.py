@@ -44,6 +44,9 @@ def _make_openai_client(
     json_mode: bool,
     extra_body: dict[str, object] | None,
     system_prompt: str | None,
+    max_retries: int,
+    retry_initial_backoff_seconds: float,
+    retry_max_backoff_seconds: float,
 ) -> OpenAICompatibleAgent:
     resolved_model, resolved_base_url, resolved_api_key_env = resolve_provider(
         provider,
@@ -61,6 +64,9 @@ def _make_openai_client(
         json_mode=json_mode,
         extra_body=extra_body,
         default_system_prompt=system_prompt,
+        max_retries=max_retries,
+        retry_initial_backoff_seconds=retry_initial_backoff_seconds,
+        retry_max_backoff_seconds=retry_max_backoff_seconds,
     )
 
 
@@ -82,6 +88,9 @@ def make_agent(
     reasoning_temperature: float = 0.7,
     final_temperature: float = 0.0,
     max_reasoning_tokens: int = 512,
+    max_retries: int = 0,
+    retry_initial_backoff_seconds: float = 1.0,
+    retry_max_backoff_seconds: float = 30.0,
 ) -> Agent:
     if predictions:
         return PredictionFileAgent(predictions)
@@ -97,6 +106,9 @@ def make_agent(
             json_mode=json_mode,
             extra_body=extra_body,
             system_prompt=system_prompt,
+            max_retries=max_retries,
+            retry_initial_backoff_seconds=retry_initial_backoff_seconds,
+            retry_max_backoff_seconds=retry_max_backoff_seconds,
         )
     if name in REASONING_AGENTS:
         client = _make_openai_client(
@@ -110,6 +122,9 @@ def make_agent(
             json_mode=json_mode,
             extra_body=extra_body,
             system_prompt=system_prompt,
+            max_retries=max_retries,
+            retry_initial_backoff_seconds=retry_initial_backoff_seconds,
+            retry_max_backoff_seconds=retry_max_backoff_seconds,
         )
         config = ReasoningConfig(
             samples=samples,
@@ -146,4 +161,11 @@ def make_agent_from_config(
         reasoning_temperature=float(agent_config.get("reasoning_temperature", 0.7)),
         final_temperature=float(agent_config.get("final_temperature", 0.0)),
         max_reasoning_tokens=int(agent_config.get("max_reasoning_tokens", 512)),
+        max_retries=int(provider_config.get("max_retries", 0)),
+        retry_initial_backoff_seconds=float(
+            provider_config.get("retry_initial_backoff_seconds", 1.0)
+        ),
+        retry_max_backoff_seconds=float(
+            provider_config.get("retry_max_backoff_seconds", 30.0)
+        ),
     )

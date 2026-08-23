@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -79,9 +80,59 @@ def validate_experiment_config(
     provider = raw["provider"]
     if "name" not in provider:
         provider["name"] = "generic"
+    max_retries = provider.get("max_retries")
+    if max_retries is not None and (
+        isinstance(max_retries, bool)
+        or not isinstance(max_retries, int)
+        or max_retries < 0
+    ):
+        raise ValueError(f"{source}: provider.max_retries must be a non-negative integer")
+    for field in (
+        "retry_initial_backoff_seconds",
+        "retry_max_backoff_seconds",
+    ):
+        value = provider.get(field)
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(float(value))
+            or value < 0
+        ):
+            raise ValueError(f"{source}: provider.{field} must be a non-negative number")
+    initial_backoff = provider.get("retry_initial_backoff_seconds")
+    maximum_backoff = provider.get("retry_max_backoff_seconds")
+    effective_initial_backoff = (
+        1.0 if initial_backoff is None else float(initial_backoff)
+    )
+    effective_maximum_backoff = (
+        30.0 if maximum_backoff is None else float(maximum_backoff)
+    )
+    if effective_maximum_backoff < effective_initial_backoff:
+        raise ValueError(
+            f"{source}: provider.retry_max_backoff_seconds must be greater than "
+            "or equal to provider.retry_initial_backoff_seconds"
+        )
 
     run = raw["run"]
     if "output_dir" not in run:
         run["output_dir"] = "runs"
+    on_existing = run.setdefault("on_existing", "error")
+    if on_existing not in {"error", "resume"}:
+        raise ValueError(f"{source}: run.on_existing must be error or resume")
+    run_name = run.get("run_name")
+    if run_name is not None and (
+        not isinstance(run_name, str) or not run_name.strip()
+    ):
+        raise ValueError(f"{source}: run.run_name must be a non-empty string or null")
+    if isinstance(run_name, str) and (
+        run_name in {".", ".."}
+        or Path(run_name).is_absolute()
+        or Path(run_name).name != run_name
+        or "/" in run_name
+        or "\\" in run_name
+    ):
+        raise ValueError(f"{source}: run.run_name must be a single directory name")
+    if on_existing == "resume" and run_name is None:
+        raise ValueError(f"{source}: run.run_name is required when run.on_existing=resume")
 
     return raw

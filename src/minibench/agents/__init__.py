@@ -3,7 +3,9 @@ from minibench.core.agent import (
     ChatClient,
     ChatMessage,
     MessageAgent,
+    MessagePhase,
     MultimodalAgent,
+    PhaseAwareMessageAgent,
     ReasoningConfig,
 )
 from minibench.core.multimodal import ImageAttachment
@@ -23,7 +25,9 @@ __all__ = [
     "CriticRefineAgent",
     "DirectAgent",
     "MessageAgent",
+    "MessagePhase",
     "MultimodalAgent",
+    "PhaseAwareMessageAgent",
     "PlanThenSolveAgent",
     "PredictionFileAgent",
     "ReasoningConfig",

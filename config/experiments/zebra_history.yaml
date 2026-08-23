@@ -13,6 +13,9 @@ provider:
   max_tokens: 4096
   timeout: 120
   json_mode: true
+  max_retries: 3
+  retry_initial_backoff_seconds: 1.0
+  retry_max_backoff_seconds: 30.0
 
 evaluation:
   memory_modes:
@@ -25,4 +28,5 @@ evaluation:
 
 run:
   output_dir: runs
-  run_name: null
+  run_name: zebra-history-deepseek
+  on_existing: resume

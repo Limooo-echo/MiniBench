@@ -309,6 +309,87 @@ class EvaluateConfigTests(unittest.TestCase):
                 }
             )
 
+    def test_run_on_existing_defaults_to_error(self):
+        config = validate_experiment_config(
+            {
+                "task": {"family": "zebra"},
+                "agent": {"name": "openai-compatible"},
+                "provider": {"name": "generic"},
+                "run": {"output_dir": "runs"},
+            }
+        )
+
+        self.assertEqual(config["run"]["on_existing"], "error")
+
+    def test_resume_requires_safe_explicit_run_name(self):
+        base = {
+            "task": {"family": "zebra"},
+            "agent": {"name": "openai-compatible"},
+            "provider": {"name": "generic"},
+        }
+        with self.assertRaisesRegex(ValueError, "run.run_name is required"):
+            validate_experiment_config(
+                {**base, "run": {"on_existing": "resume"}}
+            )
+        for run_name in ("../escape", "nested/run", "nested\\run", ".", ".."):
+            with self.subTest(run_name=run_name):
+                with self.assertRaisesRegex(ValueError, "single directory name"):
+                    validate_experiment_config(
+                        {
+                            **base,
+                            "run": {
+                                "on_existing": "resume",
+                                "run_name": run_name,
+                            },
+                        }
+                    )
+
+    def test_provider_retry_fields_are_validated(self):
+        base = {
+            "task": {"family": "zebra"},
+            "agent": {"name": "openai-compatible"},
+            "run": {"output_dir": "runs"},
+        }
+        valid = validate_experiment_config(
+            {
+                **base,
+                "provider": {
+                    "name": "generic",
+                    "max_retries": 3,
+                    "retry_initial_backoff_seconds": 1.0,
+                    "retry_max_backoff_seconds": 30.0,
+                },
+            }
+        )
+        self.assertEqual(valid["provider"]["max_retries"], 3)
+
+        invalid_providers = (
+            {"name": "generic", "max_retries": True},
+            {"name": "generic", "max_retries": -1},
+            {"name": "generic", "retry_initial_backoff_seconds": -0.1},
+            {"name": "generic", "retry_max_backoff_seconds": float("inf")},
+            {"name": "generic", "retry_max_backoff_seconds": 0},
+            {"name": "generic", "retry_initial_backoff_seconds": 31},
+            {
+                "name": "generic",
+                "retry_initial_backoff_seconds": 2.0,
+                "retry_max_backoff_seconds": 1.0,
+            },
+        )
+        for provider in invalid_providers:
+            with self.subTest(provider=provider):
+                with self.assertRaises(ValueError):
+                    validate_experiment_config({**base, "provider": provider})
+
+    def test_zebra_history_config_enables_bounded_retry_and_resume(self):
+        config = load_experiment_config("config/experiments/zebra_history.yaml")
+
+        self.assertEqual(config["provider"]["max_retries"], 3)
+        self.assertEqual(config["provider"]["retry_initial_backoff_seconds"], 1.0)
+        self.assertEqual(config["provider"]["retry_max_backoff_seconds"], 30.0)
+        self.assertEqual(config["run"]["run_name"], "zebra-history-deepseek")
+        self.assertEqual(config["run"]["on_existing"], "resume")
+
     def test_missing_section_reports_clear_error(self):
         with self.assertRaisesRegex(ValueError, "missing required section: provider"):
             validate_experiment_config(

@@ -11,8 +11,11 @@ from minibench.datasets.zebra.dataset import (
 from minibench.datasets.zebra.evaluation import (
     evaluate_zebra_tasks,
     extract_last_complete_json,
+    plan_zebra_work_items,
     score_zebra_output,
     summarize_zebra,
+    zebra_result_key,
+    zebra_work_key,
 )
 from minibench.datasets.zebra.prompting import build_zebra_prompt
 
@@ -73,6 +76,38 @@ class RecordingMessageAgent:
             return '{"candidate_state":"kept","eliminated":"none"}'
         turn = sum(message["role"] == "user" for message in messages)
         return json.dumps({"acknowledged": turn})
+
+
+class PhaseAwareRecordingAgent:
+    def __init__(self):
+        self.calls = []
+        self.legacy_calls = 0
+
+    def generate_messages_for_phase(
+        self,
+        messages,
+        task,
+        *,
+        phase,
+        temperature=None,
+        max_tokens=None,
+        json_mode=None,
+    ):
+        self.calls.append(
+            {
+                "phase": phase,
+                "messages": [dict(message) for message in messages],
+                "max_tokens": max_tokens,
+                "json_mode": json_mode,
+            }
+        )
+        if phase == "final":
+            return correct_output()
+        return '{"state":"kept"}'
+
+    def generate_messages(self, messages, task, **kwargs):
+        self.legacy_calls += 1
+        raise AssertionError("legacy dispatcher should not be selected")
 
 
 class ZebraTests(unittest.TestCase):
@@ -203,6 +238,76 @@ class ZebraTests(unittest.TestCase):
         summary = summarize_zebra(results)
         self.assertEqual(summary["by_memory_mode"]["incremental_state"]["success"], 1)
         self.assertEqual(summary["by_memory_mode"]["deferred_reasoning"]["success"], 1)
+
+    def test_phase_aware_dispatcher_is_preferred_and_uses_public_phases(self):
+        task = zebra_task_from_dict(
+            task_record(
+                capability="history_memory",
+                clue_turns=["First clue.", "Second clue."],
+            )
+        )
+        agent = PhaseAwareRecordingAgent()
+
+        results = evaluate_zebra_tasks(
+            [task],
+            agent,
+            memory_modes=("incremental_state",),
+            state_max_tokens=7,
+            final_max_tokens=99,
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(
+            [call["phase"] for call in agent.calls],
+            ["intermediate", "intermediate", "final"],
+        )
+        self.assertEqual(
+            [call["max_tokens"] for call in agent.calls],
+            [7, 7, 99],
+        )
+        self.assertEqual(agent.legacy_calls, 0)
+
+    def test_work_plan_keys_skip_completed_modes_and_emit_callbacks(self):
+        direct = zebra_task_from_dict(task_record(id="direct-unit"))
+        history = zebra_task_from_dict(
+            task_record(
+                id="history-unit",
+                capability="history_memory",
+                clue_turns=["Only clue."],
+            )
+        )
+        plan = plan_zebra_work_items(
+            [direct, history],
+            ("incremental_state", "deferred_reasoning"),
+        )
+        self.assertEqual(
+            [zebra_work_key(task.id, mode) for task, mode in plan],
+            [
+                ("direct-unit", "single"),
+                ("history-unit", "incremental_state"),
+                ("history-unit", "deferred_reasoning"),
+            ],
+        )
+        started = []
+        emitted = []
+
+        results = evaluate_zebra_tasks(
+            [direct, history],
+            PhaseAwareRecordingAgent(),
+            skip_keys={
+                ("direct-unit", "single"),
+                ("history-unit", "incremental_state"),
+            },
+            on_work_item_start=started.append,
+            on_result=lambda result: emitted.append(zebra_result_key(result)),
+        )
+
+        self.assertEqual(started, [("history-unit", "deferred_reasoning")])
+        self.assertEqual(emitted, [("history-unit", "deferred_reasoning")])
+        self.assertEqual(
+            [zebra_result_key(result) for result in results],
+            [("history-unit", "deferred_reasoning")],
+        )
 
 
 if __name__ == "__main__":

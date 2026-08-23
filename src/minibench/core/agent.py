@@ -11,6 +11,9 @@ class ChatMessage(TypedDict):
     content: str | list[dict[str, object]]
 
 
+MessagePhase = Literal["intermediate", "final"]
+
+
 class Agent:
     name = "base"
 
@@ -39,6 +42,22 @@ class MessageAgent(Protocol):
         messages: Sequence[ChatMessage],
         task: Any,
         *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+    ) -> str:
+        raise NotImplementedError
+
+
+class PhaseAwareMessageAgent(Protocol):
+    """Optional extension for agents that distinguish history-building and final turns."""
+
+    def generate_messages_for_phase(
+        self,
+        messages: Sequence[ChatMessage],
+        task: Any,
+        *,
+        phase: MessagePhase,
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool | None = None,

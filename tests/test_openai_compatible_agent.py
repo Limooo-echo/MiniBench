@@ -1,6 +1,9 @@
+import io
 import json
+import socket
 from unittest.mock import patch
 import unittest
+import urllib.error
 
 from minibench.factory.providers import OpenAICompatibleAgent, resolve_provider
 
@@ -17,6 +20,24 @@ class FakeHTTPResponse:
 
     def read(self):
         return json.dumps(self.payload).encode("utf-8")
+
+
+class FakeRawHTTPResponse(FakeHTTPResponse):
+    def read(self):
+        return self.payload
+
+
+def make_http_error(status_code, *, retry_after=None):
+    headers = {}
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
+    return urllib.error.HTTPError(
+        "https://example.com/v1/chat/completions",
+        status_code,
+        "request failed",
+        headers,
+        io.BytesIO(b'{"error":"temporary"}'),
+    )
 
 
 class OpenAICompatibleAgentTests(unittest.TestCase):
@@ -249,6 +270,226 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(metrics["llm_calls"], 1)
         self.assertEqual(metrics["usage_missing_calls"], 1)
         self.assertEqual(metrics["token_usage"]["total_tokens"], 0)
+
+    def test_retries_transient_failures_with_exponential_backoff_and_metrics(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+            max_retries=3,
+            retry_initial_backoff_seconds=1.0,
+            retry_max_backoff_seconds=10.0,
+        )
+        payload = {
+            "choices": [{"message": {"content": '{"answer":"C"}'}}],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 4,
+                "total_tokens": 14,
+            },
+        }
+        effects = [
+            make_http_error(503),
+            urllib.error.URLError("connection reset"),
+            socket.timeout("timed out"),
+            FakeHTTPResponse(payload),
+        ]
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch("urllib.request.urlopen", side_effect=effects) as urlopen:
+                with patch("minibench.factory.providers.sleep") as retry_sleep:
+                    output = agent.complete("Question?")
+
+        self.assertEqual(output, '{"answer":"C"}')
+        self.assertEqual(urlopen.call_count, 4)
+        self.assertEqual(
+            [item.args[0] for item in retry_sleep.call_args_list],
+            [1.0, 2.0, 4.0],
+        )
+        metrics = agent.metrics_snapshot()
+        self.assertEqual(metrics["llm_calls"], 4)
+        self.assertEqual(metrics["usage_missing_calls"], 3)
+        self.assertEqual(metrics["token_usage"]["total_tokens"], 14)
+
+    def test_retries_only_selected_http_statuses(self):
+        response = {"choices": [{"message": {"content": '{"ok":true}'}}]}
+        for status_code in (408, 429, 500, 599):
+            with self.subTest(status_code=status_code):
+                agent = OpenAICompatibleAgent(
+                    model="test-model",
+                    base_url="https://example.com/v1",
+                    api_key_env="TEST_KEY",
+                    max_retries=1,
+                    retry_initial_backoff_seconds=0.0,
+                    retry_max_backoff_seconds=0.0,
+                )
+                effects = [make_http_error(status_code), FakeHTTPResponse(response)]
+                with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+                    with patch("urllib.request.urlopen", side_effect=effects) as urlopen:
+                        output = agent.complete("Question?")
+
+                self.assertEqual(output, '{"ok":true}')
+                self.assertEqual(urlopen.call_count, 2)
+
+    def test_retry_after_is_respected_and_capped(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+            max_retries=1,
+            retry_initial_backoff_seconds=1.0,
+            retry_max_backoff_seconds=5.0,
+        )
+        response = {"choices": [{"message": {"content": '{"ok":true}'}}]}
+        effects = [
+            make_http_error(429, retry_after=120),
+            FakeHTTPResponse(response),
+        ]
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch("urllib.request.urlopen", side_effect=effects):
+                with patch("minibench.factory.providers.sleep") as retry_sleep:
+                    output = agent.complete("Question?")
+
+        self.assertEqual(output, '{"ok":true}')
+        retry_sleep.assert_called_once_with(5.0)
+
+    def test_max_retries_are_in_addition_to_the_initial_attempt(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+            max_retries=3,
+            retry_initial_backoff_seconds=1.0,
+            retry_max_backoff_seconds=10.0,
+        )
+        effects = [urllib.error.URLError("offline") for _ in range(4)]
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch("urllib.request.urlopen", side_effect=effects) as urlopen:
+                with patch("minibench.factory.providers.sleep") as retry_sleep:
+                    with self.assertRaisesRegex(RuntimeError, "offline"):
+                        agent.complete("Question?")
+
+        self.assertEqual(urlopen.call_count, 4)
+        self.assertEqual(
+            [item.args[0] for item in retry_sleep.call_args_list],
+            [1.0, 2.0, 4.0],
+        )
+        metrics = agent.metrics_snapshot()
+        self.assertEqual(metrics["llm_calls"], 4)
+        self.assertEqual(metrics["usage_missing_calls"], 4)
+
+    def test_non_retryable_http_error_is_not_retried(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+            max_retries=3,
+        )
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch(
+                "urllib.request.urlopen", side_effect=make_http_error(400)
+            ) as urlopen:
+                with patch("minibench.factory.providers.sleep") as retry_sleep:
+                    with self.assertRaisesRegex(RuntimeError, "HTTP 400"):
+                        agent.complete("Question?")
+
+        self.assertEqual(urlopen.call_count, 1)
+        retry_sleep.assert_not_called()
+        metrics = agent.metrics_snapshot()
+        self.assertEqual(metrics["llm_calls"], 1)
+        self.assertEqual(metrics["usage_missing_calls"], 1)
+
+    def test_empty_content_is_not_retried(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+            max_retries=3,
+        )
+        response = {
+            "choices": [
+                {"finish_reason": "stop", "message": {"content": ""}}
+            ]
+        }
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch(
+                "urllib.request.urlopen", return_value=FakeHTTPResponse(response)
+            ) as urlopen:
+                with self.assertRaisesRegex(RuntimeError, "empty message content"):
+                    agent.complete("Question?")
+
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(agent.metrics_snapshot()["llm_calls"], 1)
+
+    def test_invalid_json_is_not_retried_but_counts_the_attempt(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+            max_retries=3,
+        )
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch(
+                "urllib.request.urlopen",
+                return_value=FakeRawHTTPResponse(b"not-json"),
+            ) as urlopen:
+                with self.assertRaises(json.JSONDecodeError):
+                    agent.complete("Question?")
+
+        self.assertEqual(urlopen.call_count, 1)
+        metrics = agent.metrics_snapshot()
+        self.assertEqual(metrics["llm_calls"], 1)
+        self.assertEqual(metrics["usage_missing_calls"], 1)
+
+    def test_generate_messages_for_phase_delegates_to_message_generation(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+        )
+        messages = [{"role": "user", "content": "Clue 1"}]
+
+        with patch.object(
+            agent, "generate_messages", return_value='{"ok":true}'
+        ) as generate_messages:
+            output = agent.generate_messages_for_phase(
+                messages,
+                None,
+                phase="intermediate",
+                max_tokens=32,
+                json_mode=True,
+            )
+
+        self.assertEqual(output, '{"ok":true}')
+        generate_messages.assert_called_once_with(
+            messages,
+            None,
+            temperature=None,
+            max_tokens=32,
+            json_mode=True,
+        )
+
+    def test_generate_messages_for_phase_rejects_unknown_phase(self):
+        agent = OpenAICompatibleAgent(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+        )
+
+        with patch.object(agent, "generate_messages") as generate_messages:
+            with self.assertRaisesRegex(ValueError, "Unsupported message phase"):
+                agent.generate_messages_for_phase(
+                    [{"role": "user", "content": "Clue 1"}],
+                    None,
+                    phase="unknown",
+                )
+
+        generate_messages.assert_not_called()
 
 
 if __name__ == "__main__":

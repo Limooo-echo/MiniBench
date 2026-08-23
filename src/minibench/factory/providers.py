@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import json
 import os
-from time import perf_counter
+import socket
+from time import perf_counter, sleep
 from typing import Any, Sequence
 import urllib.error
 import urllib.request
 
-from minibench.core.agent import Agent, ChatMessage
+from minibench.core.agent import Agent, ChatMessage, MessagePhase
 from minibench.core.metrics import empty_token_usage, extract_token_usage
 from minibench.core.multimodal import ImageAttachment
 from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT
@@ -19,6 +22,36 @@ class ProviderConfig:
     base_url: str
     api_key_env: str
     default_model: str | None
+
+
+RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 429})
+
+
+def _is_retryable_http_status(status_code: int) -> bool:
+    return status_code in RETRYABLE_HTTP_STATUS_CODES or 500 <= status_code <= 599
+
+
+def _retry_after_seconds(error: urllib.error.HTTPError) -> float | None:
+    headers = error.headers
+    if headers is None:
+        return None
+    raw_value = headers.get("Retry-After")
+    if raw_value is None:
+        return None
+    value = str(raw_value).strip()
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        retry_at = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
 
 
 PROVIDERS = {
@@ -65,7 +98,21 @@ class OpenAICompatibleAgent(Agent):
         json_mode: bool = False,
         extra_body: dict[str, object] | None = None,
         default_system_prompt: str | None = None,
+        max_retries: int = 0,
+        retry_initial_backoff_seconds: float = 1.0,
+        retry_max_backoff_seconds: float = 30.0,
     ):
+        if isinstance(max_retries, bool) or not isinstance(max_retries, int):
+            raise ValueError("max_retries must be an integer")
+        if max_retries < 0:
+            raise ValueError("max_retries must be non-negative")
+        if retry_initial_backoff_seconds < 0:
+            raise ValueError("retry_initial_backoff_seconds must be non-negative")
+        if retry_max_backoff_seconds < retry_initial_backoff_seconds:
+            raise ValueError(
+                "retry_max_backoff_seconds must be greater than or equal to "
+                "retry_initial_backoff_seconds"
+            )
         self.model = model
         self.base_url = base_url
         self.api_key_env = api_key_env
@@ -75,6 +122,9 @@ class OpenAICompatibleAgent(Agent):
         self.json_mode = json_mode
         self.extra_body = extra_body or {}
         self.default_system_prompt = default_system_prompt
+        self.max_retries = max_retries
+        self.retry_initial_backoff_seconds = float(retry_initial_backoff_seconds)
+        self.retry_max_backoff_seconds = float(retry_max_backoff_seconds)
         self._model_elapsed_seconds = 0.0
         self._llm_calls = 0
         self._usage_missing_calls = 0
@@ -208,43 +258,86 @@ class OpenAICompatibleAgent(Agent):
             },
             method="POST",
         )
+        for retry_index in range(self.max_retries + 1):
+            try:
+                return self._complete_request_once(request)
+            except urllib.error.HTTPError as exc:
+                error_body = exc.read().decode("utf-8", errors="replace")
+                if (
+                    retry_index < self.max_retries
+                    and _is_retryable_http_status(exc.code)
+                ):
+                    self._sleep_before_retry(retry_index + 1, exc)
+                    continue
+                raise RuntimeError(
+                    f"{self.name} request failed with HTTP {exc.code}: {error_body}"
+                ) from exc
+            except urllib.error.URLError as exc:
+                if retry_index < self.max_retries:
+                    self._sleep_before_retry(retry_index + 1)
+                    continue
+                raise RuntimeError(f"{self.name} request failed: {exc.reason}") from exc
+            except (TimeoutError, socket.timeout) as exc:
+                if retry_index < self.max_retries:
+                    self._sleep_before_retry(retry_index + 1)
+                    continue
+                raise RuntimeError(f"{self.name} request timed out: {exc}") from exc
+        raise AssertionError("retry loop terminated without returning or raising")
+
+    def _complete_request_once(self, request: urllib.request.Request) -> str:
         started_at = perf_counter()
+        usage: object = None
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            error_body = exc.read().decode("utf-8", errors="replace")
-            self._record_completion_metrics(perf_counter() - started_at, None)
-            raise RuntimeError(
-                f"{self.name} request failed with HTTP {exc.code}: {error_body}"
-            ) from exc
-        except urllib.error.URLError as exc:
-            self._record_completion_metrics(perf_counter() - started_at, None)
-            raise RuntimeError(f"{self.name} request failed: {exc.reason}") from exc
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                raise RuntimeError(
+                    f"Unexpected chat completion response object: {raw}"
+                )
+            usage = payload.get("usage")
+            try:
+                choice = payload["choices"][0]
+                message = choice["message"]
+                content = _message_text(message)
+            except (KeyError, IndexError, TypeError) as exc:
+                raise RuntimeError(f"Unexpected chat completion response: {raw}") from exc
 
-        payload = json.loads(raw)
-        self._record_completion_metrics(perf_counter() - started_at, payload.get("usage"))
-        try:
-            choice = payload["choices"][0]
-            message = choice["message"]
-            content = _message_text(message)
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError(f"Unexpected chat completion response: {raw}") from exc
+            if not isinstance(content, str):
+                raise RuntimeError(f"Unexpected message content in response: {raw}")
 
-        if not isinstance(content, str):
-            raise RuntimeError(f"Unexpected message content in response: {raw}")
+            if not content.strip():
+                finish_reason = choice.get("finish_reason")
+                message_keys = ", ".join(sorted(str(key) for key in message.keys()))
+                raise RuntimeError(
+                    "OpenAI-compatible response had empty message content "
+                    f"(finish_reason={finish_reason}, message_keys=[{message_keys}]). "
+                    "Try increasing --max-tokens, disabling provider thinking mode via "
+                    "--extra-body-json, or using a non-reasoning/chat model."
+                )
 
-        if not content.strip():
-            finish_reason = choice.get("finish_reason")
-            message_keys = ", ".join(sorted(str(key) for key in message.keys()))
-            raise RuntimeError(
-                "OpenAI-compatible response had empty message content "
-                f"(finish_reason={finish_reason}, message_keys=[{message_keys}]). "
-                "Try increasing --max-tokens, disabling provider thinking mode via "
-                "--extra-body-json, or using a non-reasoning/chat model."
-            )
+            return content
+        finally:
+            self._record_completion_metrics(perf_counter() - started_at, usage)
 
-        return content
+    def _sleep_before_retry(
+        self,
+        retry_number: int,
+        http_error: urllib.error.HTTPError | None = None,
+    ) -> None:
+        delay = min(
+            self.retry_max_backoff_seconds,
+            self.retry_initial_backoff_seconds * (2 ** (retry_number - 1)),
+        )
+        if http_error is not None:
+            retry_after = _retry_after_seconds(http_error)
+            if retry_after is not None:
+                delay = max(
+                    delay,
+                    min(self.retry_max_backoff_seconds, retry_after),
+                )
+        if delay > 0:
+            sleep(delay)
 
     def generate(self, prompt: str, task: Any) -> str:
         return self.complete(prompt)
@@ -274,6 +367,28 @@ class OpenAICompatibleAgent(Agent):
             max_tokens=max_tokens,
             json_mode=json_mode,
             images=images,
+        )
+
+    def generate_messages_for_phase(
+        self,
+        messages: Sequence[ChatMessage],
+        task: Any,
+        *,
+        phase: MessagePhase,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+    ) -> str:
+        if phase not in ("intermediate", "final"):
+            raise ValueError(
+                f"Unsupported message phase {phase!r}; expected 'intermediate' or 'final'"
+            )
+        return self.generate_messages(
+            messages,
+            task,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
         )
 
     def metrics_snapshot(self) -> dict[str, Any]:
