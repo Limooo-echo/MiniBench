@@ -151,6 +151,27 @@ class ReasoningAgentTests(unittest.TestCase):
         self.assertTrue(client.calls[-1]["json_mode"])
         self.assertIn("schema requested", client.calls[-1]["prompt"])
 
+    def test_cot_final_message_phase_keeps_turn_specific_instructions(self):
+        client = FakeClient(["discard 5s", '{"action":"discard","tile":"5s"}'])
+        agent = CoTAgent(client, ReasoningConfig())
+        messages = [
+            {"role": "user", "content": "Turn 4: you draw 3m."},
+        ]
+
+        output = agent.generate_messages_for_phase(
+            messages,
+            object(),
+            phase="final",
+        )
+
+        self.assertEqual(output, '{"action":"discard","tile":"5s"}')
+        reasoning_prompt = client.calls[0]["messages"][-1]["content"]
+        final_prompt = client.calls[1]["messages"][-1]["content"]
+        self.assertIn("about the current turn", reasoning_prompt)
+        self.assertIn("action in the required schema", reasoning_prompt)
+        self.assertIn("Convert the action", final_prompt)
+        self.assertIn("schema requested for this conversation", final_prompt)
+
     def test_self_consistency_uses_generic_judge(self):
         client = FakeClient(
             ["candidate C", "candidate B", "candidate C", '{"answer":"C"}']

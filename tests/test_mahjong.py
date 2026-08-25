@@ -19,7 +19,9 @@ from minibench.datasets.mahjong.dataset import load_mahjong_tasks, mahjong_task_
 from minibench.datasets.mahjong.evaluation import (
     evaluate_mahjong_tasks,
     extract_mahjong_answer,
+    summarize_mahjong,
     validate_mahjong_answer,
+    write_mahjong_run,
 )
 from minibench.datasets.mahjong.generation import generate_mahjong_static_tasks
 from minibench.datasets.mahjong.prompting import build_mahjong_prompt
@@ -150,6 +152,58 @@ class MahjongTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(reasons, ["valid_winning_tiles"])
 
+    def test_rejects_non_string_winning_tile(self):
+        parsed = extract_mahjong_answer('{"winning_tiles":["E",123]}')
+
+        ok, reasons = validate_mahjong_answer(wait_task(), parsed)
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["winning_tiles_must_be_strings"])
+
+    def test_rejects_invalid_winning_tile(self):
+        parsed = extract_mahjong_answer('{"winning_tiles":["E","banana"]}')
+
+        ok, reasons = validate_mahjong_answer(wait_task(), parsed)
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["invalid_winning_tile"])
+
+    def test_rejects_duplicate_winning_tiles(self):
+        parsed = extract_mahjong_answer('{"winning_tiles":["E","1z"]}')
+
+        ok, reasons = validate_mahjong_answer(wait_task(), parsed)
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["duplicate_winning_tiles"])
+
+    def test_rejects_incomplete_winning_tiles(self):
+        ok, reasons = validate_mahjong_answer(
+            wait_task(),
+            {"winning_tiles": []},
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("wrong_winning_tiles", reasons)
+        self.assertIn("missing:E", reasons)
+
+    def test_rejects_undefined_winning_tile_fields(self):
+        parsed = extract_mahjong_answer(
+            '{"winning_tiles":["E"],"discard":"1m"}'
+        )
+
+        ok, reasons = validate_mahjong_answer(wait_task(), parsed)
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["unexpected_fields:discard"])
+
+    def test_rejects_waits_alias_as_an_undefined_field(self):
+        parsed = extract_mahjong_answer('{"waits":["E"]}')
+
+        ok, reasons = validate_mahjong_answer(wait_task(), parsed)
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["unexpected_fields:waits"])
+
     def test_wait_prompt_requires_full_decomposition(self):
         prompt = build_mahjong_prompt(wait_task())
 
@@ -268,6 +322,52 @@ class MahjongTests(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.expected_answer, {"winning_tiles": ["E"]})
+
+    def test_static_summary_omits_multimodal_metrics(self):
+        results = evaluate_mahjong_tasks(
+            [wait_task()],
+            FixedMahjongAgent({"winning_tiles": ["E"]}),
+        )
+
+        summary = summarize_mahjong(results)
+
+        multimodal_keys = {
+            "by_input_mode",
+            "visual_gap",
+            "hand_transcription_accuracy",
+            "hand_transcription_exact_rate",
+            "visible_tiles_transcription_accuracy",
+            "visible_tiles_transcription_exact_rate",
+            "transcription_exact_rate",
+            "joint_success_rate",
+        }
+        self.assertTrue(multimodal_keys.isdisjoint(summary))
+
+    def test_static_predictions_omit_multimodal_transcription_fields(self):
+        results = evaluate_mahjong_tasks(
+            [wait_task()],
+            FixedMahjongAgent({"winning_tiles": ["E"]}),
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = write_mahjong_run(
+                results,
+                output_dir=tmpdir,
+                run_name="static-prediction-fields",
+            )
+            prediction = json.loads(
+                (run_dir / "predictions.jsonl").read_text(encoding="utf-8")
+            )
+
+        transcription_fields = {
+            "expected_transcription",
+            "hand_transcription_accuracy",
+            "hand_transcription_exact",
+            "visible_tiles_transcription_accuracy",
+            "visible_tiles_transcription_exact",
+            "transcription_exact",
+            "joint_success",
+        }
+        self.assertTrue(transcription_fields.isdisjoint(prediction))
 
     def test_winning_hand_shanten_is_negative_one(self):
         hand = [

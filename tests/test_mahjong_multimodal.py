@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ from minibench.datasets.mahjong.evaluation import (
     evaluate_mahjong_tasks,
     expected_answer,
     summarize_mahjong,
+    write_mahjong_run,
 )
 from minibench.datasets.mahjong.generation import generate_mahjong_visual_tasks
 from minibench.datasets.mahjong.prompting import build_mahjong_prompt
@@ -111,10 +113,92 @@ class MahjongMultimodalTests(unittest.TestCase):
         self.assertEqual(len(results), 4)
         self.assertEqual(agent.image_calls, 2)
         self.assertTrue(all(result.success for result in results))
-        self.assertTrue(all(result.hand_transcription_exact for result in results))
+        self.assertTrue(
+            all(
+                result.hand_transcription_exact
+                for result in results
+                if result.input_mode == "image"
+            )
+        )
+        self.assertTrue(
+            all(
+                result.hand_transcription_exact is None
+                for result in results
+                if result.input_mode == "text"
+            )
+        )
         summary = summarize_mahjong(results)
         self.assertEqual(summary["visual_gap"]["image"]["visual_gap"], 0.0)
         self.assertEqual(summary["hand_transcription_exact_rate"], 1.0)
+
+    def test_visual_predictions_keep_multimodal_transcription_fields(self):
+        results = evaluate_mahjong_tasks(
+            [self.tasks[0]],
+            OracleMahjongVisualAgent(),
+            input_modes=("text", "image"),
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = write_mahjong_run(
+                results,
+                output_dir=tmpdir,
+                run_name="visual-prediction-fields",
+            )
+            predictions = [
+                json.loads(line)
+                for line in (run_dir / "predictions.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+
+        transcription_fields = {
+            "expected_transcription",
+            "hand_transcription_accuracy",
+            "hand_transcription_exact",
+            "visible_tiles_transcription_accuracy",
+            "visible_tiles_transcription_exact",
+            "transcription_exact",
+            "joint_success",
+        }
+        self.assertEqual(len(predictions), 2)
+        self.assertTrue(
+            all(transcription_fields.issubset(prediction) for prediction in predictions)
+        )
+
+    def test_transcription_summary_uses_image_mode_only(self):
+        results = evaluate_mahjong_tasks(
+            [self.tasks[0]],
+            OracleMahjongVisualAgent(),
+            input_modes=("text", "image"),
+        )
+        text_result = next(
+            result for result in results if result.input_mode == "text"
+        )
+        image_result = next(
+            result for result in results if result.input_mode == "image"
+        )
+        text_result_with_wrong_transcription = replace(
+            text_result,
+            hand_transcription_accuracy=0.0,
+            hand_transcription_exact=False,
+            visible_tiles_transcription_accuracy=0.0,
+            visible_tiles_transcription_exact=False,
+            transcription_exact=False,
+            joint_success=False,
+        )
+
+        summary = summarize_mahjong(
+            [text_result_with_wrong_transcription, image_result]
+        )
+
+        self.assertEqual(summary["total"], 2)
+        self.assertEqual(summary["success"], 2)
+        self.assertEqual(set(summary["by_input_mode"]), {"text", "image"})
+        self.assertEqual(summary["hand_transcription_accuracy"], 1.0)
+        self.assertEqual(summary["hand_transcription_exact_rate"], 1.0)
+        self.assertEqual(summary["visible_tiles_transcription_accuracy"], 1.0)
+        self.assertEqual(summary["visible_tiles_transcription_exact_rate"], 1.0)
+        self.assertEqual(summary["transcription_exact_rate"], 1.0)
+        self.assertEqual(summary["joint_success_rate"], 1.0)
 
     def test_answer_score_is_separate_from_transcription(self):
         result = evaluate_mahjong_tasks(

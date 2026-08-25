@@ -53,27 +53,34 @@ class MahjongInstanceResult:
     metrics: dict[str, object]
 
 
+_TRANSCRIPTION_PREDICTION_FIELDS = (
+    "expected_transcription",
+    "hand_transcription_accuracy",
+    "hand_transcription_exact",
+    "visible_tiles_transcription_accuracy",
+    "visible_tiles_transcription_exact",
+    "transcription_exact",
+    "joint_success",
+)
+
+
 def extract_mahjong_answer(output: str) -> dict[str, Any] | None:
     payload = _parse_json_object(output)
     if payload is None:
         return None
 
-    parsed: dict[str, Any] = {}
+    parsed: dict[str, Any] = dict(payload)
     discard = payload.get("discard")
     if isinstance(discard, str):
         parsed["discard"] = _normalize_output_tile_or_none(discard)
 
     waits = payload.get("winning_tiles")
-    if waits is None:
-        waits = payload.get("waits")
     if isinstance(waits, list):
-        normalized_waits = [
-            _normalize_output_tile_or_none(tile)
-            for tile in waits
-            if isinstance(tile, str)
-        ]
         parsed["winning_tiles"] = [
-            tile for tile in normalized_waits if tile is not None
+            (_normalize_output_tile_or_none(tile) or tile.strip())
+            if isinstance(tile, str)
+            else tile
+            for tile in waits
         ]
 
     for key in ("hand", "visible_tiles"):
@@ -169,11 +176,29 @@ def validate_mahjong_answer(
         return True, [f"valid_{task.goal}"]
 
     if task.goal == "winning_tiles":
+        allowed_fields = {"winning_tiles"}
+        if "visual" in task.tags or task.image is not None:
+            allowed_fields.update(("hand", "visible_tiles"))
+        unexpected_fields = sorted(set(parsed_answer) - allowed_fields)
+        if unexpected_fields:
+            return False, [f"unexpected_fields:{','.join(unexpected_fields)}"]
+
         expected = set(winning_tiles(task.hand))
         waits = parsed_answer.get("winning_tiles")
         if not isinstance(waits, list):
             return False, ["missing_winning_tiles"]
-        actual = {tile for tile in waits if isinstance(tile, str)}
+        if not all(isinstance(tile, str) for tile in waits):
+            return False, ["winning_tiles_must_be_strings"]
+        normalized_waits = [
+            _normalize_output_tile_or_none(tile)
+            for tile in waits
+        ]
+        if any(tile is None for tile in normalized_waits):
+            return False, ["invalid_winning_tile"]
+        actual_list = [tile for tile in normalized_waits if tile is not None]
+        if len(actual_list) != len(set(actual_list)):
+            return False, ["duplicate_winning_tiles"]
+        actual = set(actual_list)
         if actual != expected:
             missing = sorted(expected - actual, key=_tile_sort_key)
             extra = sorted(actual - expected, key=_tile_sort_key)
@@ -251,6 +276,9 @@ def summarize_mahjong(
     visual_results = [
         result for result in results if result.expected_transcription is not None
     ]
+    image_transcription_results = [
+        result for result in visual_results if result.input_mode == "image"
+    ]
     paired = (
         summarize_paired_modes(visual_results, baseline_mode="text")
         if visual_results
@@ -262,29 +290,39 @@ def summarize_mahjong(
         "success_rate": success_count / total if total else 0.0,
         "by_tag": by_tag,
         "by_task_type": by_task_type,
-        "by_input_mode": paired.get("by_input_mode", {}),
-        "visual_gap": paired.get("visual_gap", {}),
-        "hand_transcription_accuracy": _mean_optional(
-            result.hand_transcription_accuracy for result in visual_results
-        ),
-        "hand_transcription_exact_rate": _mean_optional(
-            float(bool(result.hand_transcription_exact)) for result in visual_results
-        ),
-        "visible_tiles_transcription_accuracy": _mean_optional(
-            result.visible_tiles_transcription_accuracy for result in visual_results
-        ),
-        "visible_tiles_transcription_exact_rate": _mean_optional(
-            float(bool(result.visible_tiles_transcription_exact))
-            for result in visual_results
-        ),
-        "transcription_exact_rate": _mean_optional(
-            float(bool(result.transcription_exact)) for result in visual_results
-        ),
-        "joint_success_rate": _mean_optional(
-            float(bool(result.joint_success)) for result in visual_results
-        ),
-        "metrics": summarize_metrics(results),
     }
+    if visual_results:
+        summary.update(
+            {
+                "by_input_mode": paired.get("by_input_mode", {}),
+                "visual_gap": paired.get("visual_gap", {}),
+                "hand_transcription_accuracy": _mean_optional(
+                    result.hand_transcription_accuracy
+                    for result in image_transcription_results
+                ),
+                "hand_transcription_exact_rate": _mean_optional(
+                    float(bool(result.hand_transcription_exact))
+                    for result in image_transcription_results
+                ),
+                "visible_tiles_transcription_accuracy": _mean_optional(
+                    result.visible_tiles_transcription_accuracy
+                    for result in image_transcription_results
+                ),
+                "visible_tiles_transcription_exact_rate": _mean_optional(
+                    float(bool(result.visible_tiles_transcription_exact))
+                    for result in image_transcription_results
+                ),
+                "transcription_exact_rate": _mean_optional(
+                    float(bool(result.transcription_exact))
+                    for result in image_transcription_results
+                ),
+                "joint_success_rate": _mean_optional(
+                    float(bool(result.joint_success))
+                    for result in image_transcription_results
+                ),
+            }
+        )
+    summary["metrics"] = summarize_metrics(results)
     if planned_total is not None or run_status != "completed" or error is not None:
         planned = planned_total if planned_total is not None else total
         summary.update(
@@ -316,7 +354,11 @@ def write_mahjong_run(
 
     with (run_dir / "predictions.jsonl").open("w", encoding="utf-8") as handle:
         for result in results:
-            handle.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
+            record = asdict(result)
+            if result.expected_transcription is None:
+                for field in _TRANSCRIPTION_PREDICTION_FIELDS:
+                    record.pop(field)
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     summary = summarize_mahjong(
         results,
@@ -356,7 +398,8 @@ def _make_result(
     reasons: list[str],
     metrics: dict[str, object],
 ) -> MahjongInstanceResult:
-    tracks_transcription = "visual" in task.tags or task.image is not None
+    is_visual_task = "visual" in task.tags or task.image is not None
+    tracks_transcription = is_visual_task and input_mode == "image"
     hand_accuracy, hand_exact = _transcription_metrics(
         parsed_answer.get("hand"), task.hand, enabled=tracks_transcription
     )
@@ -380,7 +423,7 @@ def _make_result(
         input_mode=input_mode,
         expected_transcription=(
             {"hand": list(task.hand), "visible_tiles": list(task.visible_tiles)}
-            if tracks_transcription
+            if is_visual_task
             else None
         ),
         hand_transcription_accuracy=hand_accuracy,

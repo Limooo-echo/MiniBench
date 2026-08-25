@@ -13,15 +13,29 @@ class OfflineMahjongAgent:
     def generate(self, prompt, task):
         if isinstance(task, MahjongRuleVariantTask):
             return json.dumps({"action": "tsumo"})
-        return json.dumps(
-            {
-                "hand": list(task.hand),
-                "visible_tiles": list(task.visible_tiles),
-                "winning_tiles": ["E"],
-            }
-        )
+        answer = {"winning_tiles": ["E"]}
+        if "visual" in task.tags or task.image is not None:
+            answer.update(
+                {
+                    "hand": list(task.hand),
+                    "visible_tiles": list(task.visible_tiles),
+                }
+            )
+        return json.dumps(answer)
 
     def generate_multimodal(self, prompt, task, *, images):
+        return self.generate(prompt, task)
+
+    def generate_messages(
+        self,
+        messages,
+        task,
+        *,
+        temperature=None,
+        max_tokens=None,
+        json_mode=None,
+    ):
+        prompt = str(messages[-1]["content"]) if messages else ""
         return self.generate(prompt, task)
 
 

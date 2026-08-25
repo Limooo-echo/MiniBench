@@ -1,6 +1,6 @@
 # MiniBench 0.2.0
 
-MiniBench 是一个用统一 YAML、统一 agent/provider 接口和统一结果格式评测推理模型的小型基准。当前包含 Zebra 逻辑题、象棋、一笔画、麻将与四人立直麻将。
+MiniBench 是一个用统一 YAML、统一 agent/provider 接口和统一结果格式评测推理模型的小型基准。当前包含 Zebra 逻辑题、象棋、一笔画与麻将。
 
 本 README 以 **WSL 2 + Ubuntu 22.04 + Python 3.10** 为标准环境。进入 Ubuntu 后，下面所有安装、配置、运行和排错命令都在 WSL 终端执行。
 
@@ -226,7 +226,7 @@ minibench run-config config/experiments/zebra_rule_codebook.yaml
 minibench run-config config/experiments/zebra_history.yaml
 ```
 
-`zebra_history.yaml` 必须保持 `agent.name: openai-compatible`，因为该评测调用真实的多轮 `generate_messages()` 接口。
+内置推理 agent 均支持分阶段多轮 messages：历史累积轮使用 `intermediate`，最终计分轮使用 `final`。因此 `zebra_history.yaml` 可以切换为 `direct`、`cot`、`self-consistency`、`tot`、`plan-then-solve` 或 `critic-refine`。
 
 ### 4.2 象棋 schema v2
 
@@ -331,25 +331,27 @@ minibench run-config config/experiments/one_stroke_generated.yaml
 minibench run-config config/experiments/one_stroke_generated_euler_theorem.yaml
 ```
 
-`one_stroke_a3_history.yaml` 与 Zebra history 一样要求 `openai-compatible`，不能直接换成当前的 CoT/ToT 包装器。
+`one_stroke_a3_history.yaml` 与 Zebra history 一样支持分阶段多轮 messages，可以切换内置推理 agent。
 
 ### 4.4 麻将
 
 | 配置 | 内容 |
 | --- | --- |
 | `mahjong.yaml` | 静态牌型文本推理 |
+| `mahjong_solo.yaml` | 标准规则下的 full-hand 单人摸弃决策 |
 | `mahjong_rule_variants.yaml` | 全手牌规则适应，默认扩展全部规则通道 |
-| `mahjong_riichi.yaml` | 本地四人立直麻将；默认其余座位使用 shanten bot |
-| `mahjong_multimodal.yaml` | 牌面图片输入，默认 Qwen |
+| `mahjong_history_only.yaml` | 标准规则下的在线多轮 history-only 决策 |
 | `mahjong_multimodal_ablation.yaml` | 同题 text/image 配对消融，默认 Qwen |
 
 ```bash
 minibench run-config config/experiments/mahjong.yaml
+minibench run-config config/experiments/mahjong_solo.yaml
 minibench run-config config/experiments/mahjong_rule_variants.yaml
-minibench run-config config/experiments/mahjong_riichi.yaml
-minibench run-config config/experiments/mahjong_multimodal.yaml
+minibench run-config config/experiments/mahjong_history_only.yaml
 minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
 ```
+
+麻将 history-only 只在第一轮提供初始手牌，后续只提供新摸牌和环境已接受的历史弃牌。由于每轮弃牌都是正式计分决策，每轮都以 `final` 阶段调用 agent；兼容仅实现旧 `generate_messages()` 接口的自定义 agent。
 
 麻将视觉图片来自仓库内牌面素材与确定性 Pillow 渲染器。更换 Qwen provider/agent 不会改变牌局数据、答案或评分逻辑。
 
@@ -359,7 +361,7 @@ agent 架构和 provider 是两个独立维度：`agent.name` 决定一次题目
 
 | `agent.name` | 单次静态题的大致模型调用数 | 用途 |
 | --- | ---: | --- |
-| `openai-compatible` | 1 | 最小基线；支持真实多轮 messages |
+| `openai-compatible` | 1 | 最小基线；直接进行一次模型调用 |
 | `direct` | 1 | 强制直接输出最终 JSON |
 | `cot` | 2 | 先推理，再整理最终 JSON |
 | `self-consistency` | `samples + 1` | 多条推理路径后评选 |
@@ -367,7 +369,7 @@ agent 架构和 provider 是两个独立维度：`agent.name` 决定一次题目
 | `plan-then-solve` | 3 | 计划、求解、最终格式化 |
 | `critic-refine` | 3 | 草稿、批评、修订 |
 
-动态棋局/牌局会在每个 agent 行动回合重复上述过程；多模态推理包装器还会在各阶段重复发送图片，因此调用量和图片 token 成本会明显增加。
+所有内置 agent 都支持分阶段多轮 messages。动态棋局/牌局会在每个正式行动回合重复上述推理过程；多模态推理包装器还会在各阶段重复发送图片，因此调用量和图片 token 成本会明显增加。
 
 复制一份 YAML 后修改 agent：
 
@@ -412,14 +414,14 @@ minibench run-config tmp/configs/mahjong-cot.yaml
 - 先用 `openai-compatible` 做一题连通性 smoke test。
 - 再用 `direct` 或 `cot` 建基线。
 - 只有在预算允许时再用 `self-consistency`、`tot`、`plan-then-solve`、`critic-refine`。
-- `zebra_history.yaml` 和 `one_stroke_a3_history.yaml` 当前必须使用 `openai-compatible`。
+- Zebra、一笔画和麻将 history 均可切换内置推理 agent；`intermediate` 轮只累积上下文，`final` 轮执行所选推理流程。
 - 象棋 history 可以切换 agent，但会在多步对局中产生很多模型调用。
 
 ## 6. 多模态：DeepSeek 文本 + Qwen 图片的正确跑法
 
 ### 6.1 推荐的主实验
 
-五份正式视觉配置已经使用 Qwen：
+四份正式视觉配置已经使用 Qwen：
 
 ```bash
 export DASHSCOPE_API_KEY
@@ -427,7 +429,6 @@ export DASHSCOPE_API_KEY
 minibench run-config config/experiments/xiangqi_multimodal.yaml
 minibench run-config config/experiments/one_stroke_a4.yaml
 minibench run-config config/experiments/one_stroke_a4_ablation.yaml
-minibench run-config config/experiments/mahjong_multimodal.yaml
 minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
 ```
 
@@ -435,7 +436,7 @@ minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
 
 - 象棋运行 `text`、`chinese-piece-image`、`latin-piece-image`。
 - 一笔画 A4 正式运行 `challenge_image`，消融运行 `text`、`clear_image`、`challenge_image`。
-- 麻将正式运行 `image`，消融运行 `text`、`image`。
+- 麻将配对消融运行 `text`、`image`；只需图片模式时可在同一 YAML 中将 `evaluation.input_modes` 设为 `[image]`。
 
 配对消融应让同一个 Qwen 模型同时跑文本和图片，才能把差异主要归因于输入模态，而不是模型能力差异。
 

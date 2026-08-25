@@ -21,7 +21,6 @@ PROVIDER_CHOICES = (
     "siliconflow",
 )
 
-ENV_AGENT_CHOICES = ("openai-compatible",)
 STATIC_GENERATIVE_AGENT_CHOICES = AGENT_NAMES
 
 XIANGQI_CONFIGS = {
@@ -533,10 +532,6 @@ def _cmd_evaluate_mahjong_solo(args: argparse.Namespace) -> int:
         results = evaluate_mahjong_solo_tasks(
             tasks,
             agent,
-            move_scorer=args.move_scorer,
-            mahjong_ai_command=args.mahjong_ai_command,
-            mahjong_ai_mode=args.mahjong_ai_mode,
-            mahjong_ai_timeout=args.mahjong_ai_timeout,
             observation_mode=args.observation_mode,
             show_progress=args.progress,
             on_result=checkpoint,
@@ -669,37 +664,6 @@ def _cmd_evaluate_mahjong_rules(args: argparse.Namespace) -> int:
         planned_total=planned_total,
         run_status="completed",
     )
-    print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
-    return 0 if summary["success"] == summary["total"] else 1
-
-
-def _cmd_evaluate_mahjong_riichi(args: argparse.Namespace) -> int:
-    from minibench.datasets.mahjong_riichi.dataset import load_mahjong_riichi_tasks
-    from minibench.datasets.mahjong_riichi.evaluation import (
-        evaluate_mahjong_riichi_tasks,
-        summarize_mahjong_riichi,
-        write_mahjong_riichi_run,
-    )
-    from minibench.datasets.mahjong_riichi.prompting import MAHJONG_RIICHI_SYSTEM_PROMPT
-
-    tasks = load_mahjong_riichi_tasks(args.mahjong_riichi_tasks)
-    tasks = _select_tasks(tasks, args.task_id)
-    if args.limit is not None:
-        tasks = tasks[: args.limit]
-    try:
-        agent = _make_cli_agent(args, system_prompt=MAHJONG_RIICHI_SYSTEM_PROMPT)
-        results = evaluate_mahjong_riichi_tasks(
-            tasks,
-            agent,
-            opponent=args.riichi_opponent,
-            mahjong_ai_command=args.mahjong_ai_command,
-            mahjong_ai_mode=args.mahjong_ai_mode,
-            mahjong_ai_timeout=args.mahjong_ai_timeout,
-        )
-    except (KeyError, RuntimeError, ValueError) as exc:
-        raise SystemExit(f"mahjong riichi evaluation failed: {exc}") from exc
-    run_dir = write_mahjong_riichi_run(results, args.output_dir, args.run_name)
-    summary = summarize_mahjong_riichi(results)
     print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
     return 0 if summary["success"] == summary["total"] else 1
 
@@ -1375,15 +1339,6 @@ def build_parser() -> argparse.ArgumentParser:
         default="openai-compatible",
     )
     evaluate_mahjong_solo.add_argument(
-        "--move-scorer",
-        choices=["none", "shanten", "akochan-choice"],
-        default="shanten",
-        help=(
-            "Per-discard scoring mode. shanten uses local shanten/ukeire scoring; "
-            "akochan-choice compares each discard with an external Akochan wrapper choice."
-        ),
-    )
-    evaluate_mahjong_solo.add_argument(
         "--observation-mode",
         choices=["full-hand", "history-only"],
         default="full-hand",
@@ -1391,26 +1346,6 @@ def build_parser() -> argparse.ArgumentParser:
             "full-hand shows the current hand; history-only shows the initial "
             "deal and completed draw-discard history."
         ),
-    )
-    evaluate_mahjong_solo.add_argument(
-        "--mahjong-ai-command",
-        default=None,
-        help=(
-            "Command for --move-scorer akochan-choice. Also supports "
-            "MAHJONG_AI_COMMAND."
-        ),
-    )
-    evaluate_mahjong_solo.add_argument(
-        "--mahjong-ai-mode",
-        choices=["stdio", "oneshot"],
-        default="stdio",
-        help="stdio keeps one wrapper process; oneshot starts one process per decision.",
-    )
-    evaluate_mahjong_solo.add_argument(
-        "--mahjong-ai-timeout",
-        type=float,
-        default=30.0,
-        help="Timeout in seconds for each external Mahjong AI scoring decision.",
     )
     evaluate_mahjong_solo.add_argument(
         "--progress",
@@ -1472,57 +1407,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_provider_args(evaluate_mahjong_rules, max_tokens=256)
     _add_run_args(evaluate_mahjong_rules)
     evaluate_mahjong_rules.set_defaults(func=_cmd_evaluate_mahjong_rules)
-
-    evaluate_mahjong_riichi = subparsers.add_parser(
-        "evaluate-mahjong-riichi",
-        help="Run local four-player Riichi Mahjong v1 evaluation.",
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--mahjong-riichi-tasks",
-        type=Path,
-        default=None,
-        help=(
-            "Path to Riichi Mahjong tasks JSONL. Defaults to "
-            "data/mahjong_riichi/tasks.jsonl."
-        ),
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--agent",
-        choices=ENV_AGENT_CHOICES,
-        default="openai-compatible",
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--riichi-opponent",
-        choices=["shanten", "external"],
-        default="shanten",
-        help=(
-            "Opponent controller for non-agent seats. shanten uses the local "
-            "baseline bot; external calls a real Mahjong AI wrapper process."
-        ),
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--mahjong-ai-command",
-        default=None,
-        help=(
-            "Command for the external Mahjong AI wrapper. Also supports "
-            "MAHJONG_AI_COMMAND."
-        ),
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--mahjong-ai-mode",
-        choices=["stdio", "oneshot"],
-        default="stdio",
-        help="stdio keeps one wrapper process per opponent seat; oneshot starts one per decision.",
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--mahjong-ai-timeout",
-        type=float,
-        default=30.0,
-        help="Timeout in seconds for each external Mahjong AI decision.",
-    )
-    _add_provider_args(evaluate_mahjong_riichi, max_tokens=256)
-    _add_run_args(evaluate_mahjong_riichi)
-    evaluate_mahjong_riichi.set_defaults(func=_cmd_evaluate_mahjong_riichi)
 
     return parser
 

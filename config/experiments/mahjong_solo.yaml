@@ -1,12 +1,13 @@
 task:
-  family: mahjong
-  path: data/mahjong/tasks.jsonl
+  # 标准麻将 Solo：不展开任何改规则通道
+  family: mahjong_solo
+  path: data/mahjong_solo/tasks_win.jsonl
   limit: null
   task_ids: []
 
 agent:
-  name: openai-compatible
-  samples: 3
+  name: 
+  samples: 1
   reasoning_temperature: 0.0
   final_temperature: 0.0
   max_reasoning_tokens: 1024
@@ -21,6 +22,10 @@ provider:
     thinking:
       type: disabled
 
+evaluation:
+  observation_mode: full-hand
+  show_progress: true
+
 run:
   output_dir: runs
-  run_name: mahjong-openai-compatible
+  run_name: mahjong-solo-cot-full-hand-v2

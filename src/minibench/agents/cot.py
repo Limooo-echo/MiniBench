@@ -63,7 +63,13 @@ class CoTAgent(Agent):
         reasoning = complete_transformed_messages(
             self.client,
             messages,
-            transform=cot_prompt,
+            transform=lambda prompt: "\n\n".join(
+                (
+                    prompt,
+                    "Reason step by step about the current turn. End with the "
+                    "action in the required schema.",
+                )
+            ),
             phase_system_prompt=REASONING_SYSTEM_PROMPT,
             temperature=self.config.reasoning_temperature,
             max_tokens=self.config.max_reasoning_tokens,
@@ -72,7 +78,15 @@ class CoTAgent(Agent):
         return complete_transformed_messages(
             self.client,
             messages,
-            transform=lambda prompt: finalize_prompt(prompt, reasoning),
+            transform=lambda prompt: "\n\n".join(
+                (
+                    prompt,
+                    "Reasoning or draft answer:\n"
+                    + reasoning
+                    + "\n\nConvert the action to exactly one JSON object using "
+                    "the schema requested for this conversation.",
+                )
+            ),
             phase_system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
             temperature=resolved_temperature,
             max_tokens=resolved_max_tokens,

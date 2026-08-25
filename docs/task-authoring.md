@@ -7,7 +7,6 @@ MiniBench currently has several task families:
 - Xiangqi schema-v2 tasks under `data/xiangqi/<family>/tasks.jsonl`.
 - One-stroke graph puzzles in `data/one_stroke_tasks.jsonl`.
 - Riichi Mahjong tile-shape tasks in `data/mahjong_tasks.jsonl`.
-- Local Riichi Mahjong v1 table tasks in `data/mahjong_riichi_tasks.jsonl`.
 
 ## Zebra Tasks
 
@@ -125,55 +124,6 @@ For `winning_tiles`, the hand should have 13 tiles and the agent must return
 tiles and the agent must return `{"discard":"5m"}`. The loader validates that
 each task has at least one correct answer.
 
-## Riichi Mahjong V1 Tasks
-
-Riichi v1 tasks use a local four-player table with one LLM-controlled seat and
-three shanten-based API bots. Compared with `mahjong-table`, this path adds
-riichi declarations, chi/pon/kan calls, tsumo, ron, yaku/fu/point checks, and
-score deltas through the `mahjong` Python package.
-
-The built-in file contains seeded hands. Each task is random-looking but
-reproducible because its wall shuffle is derived from the `seed` field.
-
-Riichi v1 writes both a strict win flag and softer per-seat benchmark scores.
-The strict `success` flag is true only when seat 0 wins. The per-seat score gives
-`1.0` to the winner, `0.25` to non-winners on another player's tsumo, `0.5` to
-all seats on a normal draw, and `0.0` to the deal-in seat on ron while uninvolved
-seats receive a rank-based survival score.
-
-```json
-{"id":"mj-riichi-006","seed":666,"agent_seat":0,"max_draws":70,"starting_scores":[25000,25000,25000,25000],"tags":["mahjong","riichi-full-v1","four-player","difficulty:medium"]}
-```
-
-Required fields:
-
-- `id`: unique task id. Use `mj-riichi-...`.
-- `seed`: integer seed for the reproducible wall shuffle.
-- `tags`: normalized tags.
-
-Optional fields:
-
-- `agent_seat`: currently expected to be `0`.
-- `max_draws`: maximum draw events before the hand is treated as a draw.
-- `starting_scores`: four integer scores, defaulting to 25000 each.
-
-Agent actions:
-
-- `{"action":"discard","tile":"5m"}`
-- `{"action":"riichi","discard":"5m"}`
-- `{"action":"kan","tile":"5m"}` on a legal closed kan turn
-
-When another player discards a tile that seat 0 can call, MiniBench prompts the
-agent separately for a call decision:
-
-- `{"action":"pass"}`
-- `{"action":"chi","tiles":["3m","4m","5m"]}`
-- `{"action":"pon","tile":"5m"}`
-- `{"action":"kan","tile":"5m"}`
-
-This v1 path does not yet implement dora, ura-dora, ippatsu, added-kan/chankan,
-multi-ron, or complete round bookkeeping.
-
 ## Tag Schema
 
 Use flat tags with a `prefix:value` pattern where useful. Zebra tags include:
@@ -189,8 +139,6 @@ Environment and game tasks can add task-family tags such as:
 - `xiangqi`
 - `one-stroke`
 - `mahjong`
-- `four-player`
-- `riichi-full-v1`
 - `riichi`
 - `euler-trail`
 - `euler-circuit`

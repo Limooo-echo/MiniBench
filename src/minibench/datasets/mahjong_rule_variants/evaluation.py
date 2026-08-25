@@ -7,13 +7,20 @@ from pathlib import Path
 from time import strftime
 from typing import Any
 
-from minibench.core.agent import Agent
+from minibench.core.agent import Agent, ChatMessage
 from minibench.datasets.mahjong.api import normalize_tile
-from minibench.datasets.mahjong_solo.evaluation import extract_mahjong_solo_action
-from minibench.datasets.mahjong_solo.prompting import MAHJONG_SOLO_OBSERVATION_MODES
+from minibench.datasets.mahjong_solo.evaluation import (
+    extract_mahjong_solo_action,
+    generate_mahjong_history_action,
+)
+from minibench.datasets.mahjong_solo.prompting import (
+    MAHJONG_SOLO_OBSERVATION_MODES,
+    build_mahjong_solo_history_turn_prompt,
+)
 from minibench.datasets.mahjong_rule_variants.dataset import MahjongRuleVariantTask
 from minibench.datasets.mahjong_rule_variants.prompting import (
     build_mahjong_rule_variant_prompt,
+    rule_texts_for_channel,
 )
 from minibench.datasets.mahjong_rule_variants.rules import (
     STANDARD_RULES,
@@ -41,6 +48,7 @@ class MahjongRuleVariantInstanceResult:
     draws: list[str]
     discards: list[str]
     raw_outputs: list[str]
+    conversation: list[ChatMessage]
     agent_actions: list[dict[str, Any]]
     action_errors: list[dict[str, Any]]
     final_hand: list[str]
@@ -59,13 +67,9 @@ def evaluate_mahjong_rule_variant_tasks(
     _validate_observation_mode(observation_mode)
     results: list[MahjongRuleVariantInstanceResult] = []
     total = len(tasks)
+    if show_progress:
+        print(f"[mahjong-rules] total={total} completed=0 success=0", flush=True)
     for index, task in enumerate(tasks, start=1):
-        if show_progress:
-            print(
-                f"[mahjong-rules] {index}/{total} {task.source_task_id} "
-                f"({task.channel})",
-                flush=True,
-            )
         result = evaluate_mahjong_rule_variant_task(
             task,
             agent,
@@ -74,6 +78,13 @@ def evaluate_mahjong_rule_variant_tasks(
         results.append(result)
         if on_result is not None:
             on_result(results)
+        if show_progress:
+            success_count = sum(item.success for item in results)
+            print(
+                f"[mahjong-rules] completed={index}/{total} "
+                f"success={success_count}",
+                flush=True,
+            )
     return results
 
 
@@ -88,6 +99,7 @@ def evaluate_mahjong_rule_variant_task(
     draws: list[str] = []
     discards: list[str] = []
     raw_outputs: list[str] = []
+    conversation: list[ChatMessage] = []
     agent_actions: list[dict[str, Any]] = []
     action_errors: list[dict[str, Any]] = []
     prior_turns: list[tuple[str, str]] = []
@@ -109,21 +121,43 @@ def evaluate_mahjong_rule_variant_task(
         turn_completed = False
         last_error = "action_attempts_exhausted"
         for attempt_number in range(1, MAX_ACTION_ATTEMPTS + 1):
-            prompt = build_mahjong_rule_variant_prompt(
-                task,
-                draw_number=draw_number,
-                drawn_tile=drawn_tile,
-                hand=hand,
-                discards=discards,
-                remaining_draws=task.max_draws - draw_number,
-                observation_mode=observation_mode,
-                prior_turns=tuple(prior_turns),
-                attempt_number=attempt_number,
-                max_attempts=MAX_ACTION_ATTEMPTS,
-                action_feedback=tuple(action_feedback),
-            )
+            if observation_mode == "history-only":
+                prompt = build_mahjong_solo_history_turn_prompt(
+                    task,
+                    draw_number=draw_number,
+                    drawn_tile=drawn_tile,
+                    previous_discard=(prior_turns[-1][1] if prior_turns else None),
+                    remaining_draws=task.max_draws - draw_number,
+                    attempt_number=attempt_number,
+                    max_attempts=MAX_ACTION_ATTEMPTS,
+                    action_feedback=tuple(action_feedback),
+                    rule_texts=rule_texts_for_channel(task.channel),
+                )
+                conversation.append({"role": "user", "content": prompt})
+            else:
+                prompt = build_mahjong_rule_variant_prompt(
+                    task,
+                    draw_number=draw_number,
+                    drawn_tile=drawn_tile,
+                    hand=hand,
+                    discards=discards,
+                    remaining_draws=task.max_draws - draw_number,
+                    observation_mode=observation_mode,
+                    prior_turns=tuple(prior_turns),
+                    attempt_number=attempt_number,
+                    max_attempts=MAX_ACTION_ATTEMPTS,
+                    action_feedback=tuple(action_feedback),
+                )
             try:
-                raw_output = agent.generate(prompt, task)
+                if observation_mode == "history-only":
+                    raw_output = generate_mahjong_history_action(
+                        agent,
+                        tuple(conversation),
+                        task,
+                    )
+                    conversation.append({"role": "assistant", "content": raw_output})
+                else:
+                    raw_output = agent.generate(prompt, task)
             except RuntimeError as exc:
                 error_detail = str(exc)
                 action_errors.append(
@@ -145,6 +179,7 @@ def evaluate_mahjong_rule_variant_task(
                     draws=draws,
                     discards=discards,
                     raw_outputs=raw_outputs,
+                    conversation=conversation,
                     agent_actions=agent_actions,
                     action_errors=action_errors,
                     final_hand=hand,
@@ -172,6 +207,7 @@ def evaluate_mahjong_rule_variant_task(
                             draws=draws,
                             discards=discards,
                             raw_outputs=raw_outputs,
+                            conversation=conversation,
                             agent_actions=agent_actions,
                             action_errors=action_errors,
                             final_hand=hand,
@@ -226,6 +262,7 @@ def evaluate_mahjong_rule_variant_task(
         draws=draws,
         discards=discards,
         raw_outputs=raw_outputs,
+        conversation=conversation,
         agent_actions=agent_actions,
         action_errors=action_errors,
         final_hand=hand,
@@ -341,6 +378,7 @@ def write_mahjong_rule_variant_run(
                         "active_rules": result.active_rules,
                         "observation_mode": result.observation_mode,
                         "raw_outputs": result.raw_outputs,
+                        "conversation": result.conversation,
                         "agent_actions": result.agent_actions,
                         "action_errors": result.action_errors,
                         "win_rule": result.win_rule,
@@ -377,6 +415,7 @@ def _make_result(
     draws: list[str],
     discards: list[str],
     raw_outputs: list[str],
+    conversation: list[ChatMessage],
     agent_actions: list[dict[str, Any]],
     action_errors: list[dict[str, Any]],
     final_hand: list[str],
@@ -399,6 +438,7 @@ def _make_result(
         draws=list(draws),
         discards=list(discards),
         raw_outputs=list(raw_outputs),
+        conversation=list(conversation),
         agent_actions=list(agent_actions),
         action_errors=list(action_errors),
         final_hand=list(final_hand),

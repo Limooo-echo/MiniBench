@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
-from minibench.core.agent import Agent
+from minibench.core.agent import Agent, ChatMessage
 from minibench.core.multimodal import ImageAttachment
 
 
@@ -61,4 +61,16 @@ class PredictionFileAgent(Agent):
         *,
         images: Sequence[ImageAttachment],
     ) -> str:
+        return self.generate(prompt, task)
+
+    def generate_messages(
+        self,
+        messages: Sequence[ChatMessage],
+        task: Any,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+    ) -> str:
+        prompt = str(messages[-1]["content"]) if messages else ""
         return self.generate(prompt, task)

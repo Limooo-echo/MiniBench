@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from minibench.core.agent import ChatMessage
+
 FINAL_ANSWER_SYSTEM_PROMPT = (
     "You are finalizing a benchmark answer. Return exactly one JSON object "
     "and no markdown. Follow the output schema requested in the user prompt."
@@ -24,6 +28,31 @@ def direct_prompt(task_prompt: str) -> str:
             "Solve the task. Return only the required JSON object.",
         ]
     )
+
+
+def append_instruction_to_last_user(
+    messages: Sequence[ChatMessage],
+    instruction: str,
+) -> tuple[ChatMessage, ...]:
+    """Copy a chat history and extend its latest text-only user message."""
+
+    prepared: list[ChatMessage] = [
+        {"role": message["role"], "content": message["content"]}
+        for message in messages
+    ]
+    for index in range(len(prepared) - 1, -1, -1):
+        message = prepared[index]
+        if message["role"] != "user":
+            continue
+        content = message["content"]
+        if not isinstance(content, str):
+            raise ValueError("message reasoning requires a text-only user message")
+        prepared[index] = {
+            "role": "user",
+            "content": "\n\n".join((content, instruction)),
+        }
+        return tuple(prepared)
+    raise ValueError("message reasoning requires at least one user message")
 
 
 def cot_prompt(task_prompt: str) -> str:

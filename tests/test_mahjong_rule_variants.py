@@ -55,6 +55,47 @@ class SequenceAgent:
         return json.dumps(self.payloads.pop(0))
 
 
+class MessageSequenceAgent:
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.conversations = []
+
+    def generate_messages(
+        self,
+        messages,
+        task,
+        *,
+        temperature=None,
+        max_tokens=None,
+        json_mode=None,
+    ):
+        self.conversations.append(tuple(dict(message) for message in messages))
+        return json.dumps(self.payloads.pop(0))
+
+
+class PhaseAwareMessageSequenceAgent(MessageSequenceAgent):
+    def __init__(self, payloads):
+        super().__init__(payloads)
+        self.phases = []
+
+    def generate_messages_for_phase(
+        self,
+        messages,
+        task,
+        *,
+        phase,
+        temperature=None,
+        max_tokens=None,
+        json_mode=None,
+    ):
+        self.phases.append(phase)
+        self.conversations.append(tuple(dict(message) for message in messages))
+        return json.dumps(self.payloads.pop(0))
+
+    def generate_messages(self, *args, **kwargs):
+        raise AssertionError("phase-aware generation should take precedence")
+
+
 class RuntimeFailingAgent:
     def generate(self, prompt, task):
         raise RuntimeError("request timed out")
@@ -303,6 +344,9 @@ class MahjongRuleVariantTests(unittest.TestCase):
             )
             self.assertNotIn("Base winning-shape rules", prompt)
             self.assertNotIn("Tips:", prompt)
+            self.assertIn("best advances the concealed hand", prompt)
+            self.assertNotIn("post-discard standard shanten", prompt)
+            self.assertNotIn("higher live ukeire", prompt)
 
     def test_standard_channel_is_a_non_variant_baseline(self):
         task = make_task(
@@ -326,7 +370,7 @@ class MahjongRuleVariantTests(unittest.TestCase):
             "1m 2m 3m 4p 5p 6p 7s 8s 9s E E E N".split(),
             ["9s", "N"],
         )
-        agent = SequenceAgent(
+        agent = MessageSequenceAgent(
             [
                 {"action": "discard", "tile": "9s"},
                 {"action": "tsumo"},
@@ -341,12 +385,44 @@ class MahjongRuleVariantTests(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.observation_mode, "history-only")
-        self.assertNotIn("Current hand (", agent.prompts[0])
-        self.assertNotIn("Current hand (", agent.prompts[1])
-        self.assertIn("Initial concealed hand:", agent.prompts[0])
-        self.assertIn("Turn 1: drew 9s; discarded 9s", agent.prompts[1])
-        self.assertIn("Your cumulative discards: 9s", agent.prompts[1])
-        self.assertIn("You just drew: N", agent.prompts[1])
+        self.assertEqual(len(agent.conversations), 2)
+        second_call = agent.conversations[1]
+        self.assertEqual(
+            [message["role"] for message in second_call],
+            ["user", "assistant", "user"],
+        )
+        self.assertIn("Initial concealed hand (13 tiles):", second_call[0]["content"])
+        self.assertIn(RULE_TEXT[STANDARD_RULES], second_call[0]["content"])
+        self.assertIn("previous discard 9s was accepted", second_call[2]["content"])
+        self.assertIn("Turn 2: you draw N", second_call[2]["content"])
+        self.assertNotIn("Initial concealed hand", second_call[2]["content"])
+        self.assertNotIn(
+            "Current hand (",
+            "\n".join(str(message["content"]) for message in second_call),
+        )
+        self.assertEqual(len(result.conversation), 4)
+
+    def test_history_only_rule_actions_use_final_phase(self):
+        task = make_task(
+            STANDARD_RULES,
+            "1m 2m 3m 4p 5p 6p 7s 8s 9s E E E N".split(),
+            ["9s", "N"],
+        )
+        agent = PhaseAwareMessageSequenceAgent(
+            [
+                {"action": "discard", "tile": "9s"},
+                {"action": "tsumo"},
+            ]
+        )
+
+        result = evaluate_mahjong_rule_variant_tasks(
+            [task],
+            agent,
+            observation_mode="history-only",
+        )[0]
+
+        self.assertTrue(result.success)
+        self.assertEqual(agent.phases, ["final", "final"])
 
     def test_variant_only_tsumo_is_identified_in_predictions(self):
         task = make_task(
@@ -432,7 +508,7 @@ class MahjongRuleVariantTests(unittest.TestCase):
         )
         self.assertIn("previous action was rejected", agent.prompts[1])
         self.assertIn("Attempt 2 of 3", agent.prompts[1])
-        self.assertNotIn("tsumo declaration was illegal", agent.prompts[1])
+        self.assertIn("tsumo declaration was illegal", agent.prompts[1])
 
     def test_illegal_discard_feedback_allows_retry_on_same_draw(self):
         task = make_task(
@@ -452,7 +528,7 @@ class MahjongRuleVariantTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.action_errors[0]["error"], "discard_not_in_hand:9m")
         self.assertIn("previous action was rejected", agent.prompts[1])
-        self.assertNotIn("9m is not in the hand", agent.prompts[1])
+        self.assertIn("9m is not in the hand", agent.prompts[1])
 
     def test_full_draw_discard_loop_can_win_on_a_later_draw(self):
         task = make_task(
@@ -718,6 +794,21 @@ class MahjongRuleVariantTests(unittest.TestCase):
             {task.channel for task in selected},
             {f"{CYCLIC_SEQUENCES}+{RED_DRAGON_WILDCARD}"},
         )
+
+    def test_experiment_config_selects_all_seven_modified_rule_channels(self):
+        tasks = load_mahjong_rule_variant_tasks()
+        modified_channels = list(RULE_CHANNELS[1:])
+
+        selected = _select_mahjong_rule_configuration(
+            tasks,
+            {"rule_channels": modified_channels},
+        )
+
+        self.assertEqual(
+            {task.channel for task in selected},
+            set(modified_channels),
+        )
+        self.assertNotIn(STANDARD_RULES, {task.channel for task in selected})
 
 
 if __name__ == "__main__":

@@ -17,17 +17,18 @@ provider:
   json_mode: true
   max_tokens: 512
   timeout: 120
+  max_retries: 3
+  retry_initial_backoff_seconds: 1.0
+  retry_max_backoff_seconds: 30.0
   extra_body:
     thinking:
       type: disabled
 
 evaluation:
-  observation_mode: full-hand
+  rule_channel: standard
+  observation_mode: history-only
   show_progress: true
-  rule_channels:
-    - no_cross_suit_duplicate_sequences
-    - cyclic_sequences
 
 run:
   output_dir: runs
-  run_name: null
+  run_name: mahjong-history-only-cot-current-turn-v2
