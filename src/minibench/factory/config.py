@@ -11,6 +11,12 @@ from minibench.factory.experiments import TASK_FAMILIES
 
 
 REQUIRED_SECTIONS = ("task", "agent", "provider", "run")
+ONE_STROKE_OPENAI_COMPATIBLE_UNSUPPORTED_FIELDS = (
+    "samples",
+    "reasoning_temperature",
+    "final_temperature",
+    "max_reasoning_tokens",
+)
 
 
 def load_experiment_config(path: str | Path) -> dict[str, Any]:
@@ -76,6 +82,19 @@ def validate_experiment_config(
     if agent_name not in AGENT_NAMES:
         choices = ", ".join(AGENT_NAMES)
         raise ValueError(f"{source}: agent.name must be one of: {choices}")
+    if family == "one_stroke" and agent_name == "openai-compatible":
+        unsupported_fields = [
+            field
+            for field in ONE_STROKE_OPENAI_COMPATIBLE_UNSUPPORTED_FIELDS
+            if field in agent
+        ]
+        if unsupported_fields:
+            fields = ", ".join(f"agent.{field}" for field in unsupported_fields)
+            raise ValueError(
+                f"{source}: {fields} are only supported by reasoning-agent "
+                "architectures and would be ignored by "
+                "agent.name=openai-compatible for task.family=one_stroke"
+            )
 
     provider = raw["provider"]
     if "name" not in provider:

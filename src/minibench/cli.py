@@ -1138,8 +1138,11 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_one_stroke.add_argument(
         "--one-stroke-tasks",
         type=Path,
-        default=None,
-        help="Path to one-stroke tasks JSONL. Defaults to data/one_stroke/tasks.jsonl.",
+        default=Path("data/one_stroke/a1_direct.jsonl"),
+        help=(
+            "Path to one-stroke tasks JSONL. "
+            "Defaults to the canonical A1 dataset: data/one_stroke/a1_direct.jsonl."
+        ),
     )
     evaluate_one_stroke.add_argument(
         "--agent",
@@ -1177,7 +1180,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show one-stroke evaluation progress on stderr.",
     )
-    _add_provider_args(evaluate_one_stroke, max_tokens=256)
+    _add_provider_args(evaluate_one_stroke, max_tokens=1024)
     _add_run_args(evaluate_one_stroke)
     evaluate_one_stroke.set_defaults(func=_cmd_evaluate_one_stroke)
 

@@ -314,7 +314,7 @@ minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 | `one_stroke_a3_history.yaml` | A3 增量状态与仅历史对照 |
 | `one_stroke_a4.yaml` | A4 挑战图片，默认 Qwen |
 | `one_stroke_a4_ablation.yaml` | A4 text/clear image/challenge image 配对消融 |
-| `one_stroke_euler_theorem.yaml` | 旧 smoke 数据的欧拉定理提示消融 |
+| `one_stroke_euler_theorem.yaml` | 与正式 A1 同题的欧拉定理提示消融 |
 | `one_stroke_generated.yaml` | 生成数据，baseline prompt |
 | `one_stroke_generated_euler_theorem.yaml` | 生成数据，Euler prompt |
 
@@ -331,7 +331,8 @@ minibench run-config config/experiments/one_stroke_generated.yaml
 minibench run-config config/experiments/one_stroke_generated_euler_theorem.yaml
 ```
 
-`one_stroke_a3_history.yaml` 与 Zebra history 一样要求 `openai-compatible`，不能直接换成当前的 CoT/ToT 包装器。
+一笔画 A3 会区分 `intermediate` 与 `final` 阶段。`openai-compatible` 可直接运行；
+CoT/ToT 等 phase-aware 包装器会在中间轮使用轻量消息调用，只在最终轮执行其完整推理流程。
 
 ### 4.4 麻将
 
@@ -412,7 +413,7 @@ minibench run-config tmp/configs/mahjong-cot.yaml
 - 先用 `openai-compatible` 做一题连通性 smoke test。
 - 再用 `direct` 或 `cot` 建基线。
 - 只有在预算允许时再用 `self-consistency`、`tot`、`plan-then-solve`、`critic-refine`。
-- `zebra_history.yaml` 和 `one_stroke_a3_history.yaml` 当前必须使用 `openai-compatible`。
+- Zebra history 和一笔画 A3 都支持 `openai-compatible` 以及实现了 phase-aware 消息接口的推理 agent。
 - 象棋 history 可以切换 agent，但会在多步对局中产生很多模型调用。
 
 ## 6. 多模态：DeepSeek 文本 + Qwen 图片的正确跑法

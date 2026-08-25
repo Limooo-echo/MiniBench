@@ -16,12 +16,13 @@ from minibench.datasets.one_stroke.rules import (
 ONE_STROKE_PROMPT_VARIANTS = ("baseline", "euler_theorem")
 
 ONE_STROKE_SYSTEM_PROMPT = (
-    "You solve one-stroke graph puzzles. Return exactly one JSON object with "
-    "the path schema requested in the task when a one-stroke path exists, "
-    'or {"solvable":false} when no such path exists. A path must visit every '
+    "You solve one-stroke graph puzzles. Return exactly one JSON object using "
+    "the schema requested in the task for both solvable and unsolvable cases. "
+    "A path must visit every "
     "listed edge exactly once, may repeat vertices when needed, and must not "
     "include markdown or commentary. If no valid path exists, do not invent or "
-    "guess a path; return exactly {\"solvable\":false}."
+    "guess a path; express unsolvability using exactly the fields and values "
+    "requested by the task."
 )
 
 ONE_STROKE_MEMORY_MODES = ("incremental_state", "step_history_only")
@@ -255,7 +256,6 @@ def history_system_prompt(task: OneStrokeTask, memory_mode: str) -> str:
         "At the final turn, continue from the current vertex and use every remaining "
         "edge exactly once.",
         "",
-        f"Task ID: {task.id}",
         f"Initial vertex: {task.start}",
         f"Required final vertex: {task.end if task.end is not None else 'not fixed'}",
         f"Vertices: {', '.join(task.vertices)}",

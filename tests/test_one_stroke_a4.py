@@ -156,10 +156,14 @@ class OneStrokeA4EvaluationTests(unittest.TestCase):
         self.assertEqual(agent.image_calls, 60)
         self.assertTrue(all(result.success for result in results))
         self.assertTrue(all(result.graph_transcription_exact for result in results))
+        self.assertTrue(all(result.response_schema_valid for result in results))
         summary = summarize_one_stroke(results)
         self.assertEqual(set(summary["by_input_mode"]), {"text", "clear_image", "challenge_image"})
         self.assertEqual(summary["visual_gap"]["clear_image"]["visual_gap"], 0.0)
         self.assertEqual(summary["by_input_mode"]["challenge_image"]["difficulty_macro_accuracy"], 1.0)
+        self.assertEqual(summary["a4_path_score"], 1.0)
+        self.assertEqual(summary["a4_transcription_score"], 1.0)
+        self.assertEqual(summary["a4_joint_score"], 1.0)
         self.assertEqual(summary["a4_score"], 1.0)
 
     def test_correct_path_is_primary_even_when_transcription_is_wrong(self):
@@ -170,6 +174,10 @@ class OneStrokeA4EvaluationTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertFalse(result.graph_transcription_exact)
         self.assertFalse(result.joint_success)
+        summary = summarize_one_stroke([result])
+        self.assertEqual(summary["a4_path_score"], 1.0)
+        self.assertEqual(summary["a4_transcription_score"], 0.0)
+        self.assertEqual(summary["a4_joint_score"], 0.0)
 
     def test_correct_transcription_does_not_rescue_wrong_solution(self):
         result = evaluate_one_stroke_tasks(
@@ -179,6 +187,29 @@ class OneStrokeA4EvaluationTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertTrue(result.graph_transcription_exact)
         self.assertFalse(result.joint_success)
+
+    def test_three_official_a4_scores_share_difficulty_macro_weighting(self):
+        selected = [
+            *[task for task in self.tasks if task.difficulty == "easy"][:2],
+            next(task for task in self.tasks if task.difficulty == "hard"),
+        ]
+
+        class DifficultyAgent(OracleA4Agent):
+            def _answer(self, task):
+                self.transcription = task.difficulty == "hard"
+                return super()._answer(task)
+
+        summary = summarize_one_stroke(
+            evaluate_one_stroke_tasks(selected, DifficultyAgent())
+        )
+
+        challenge = summary["by_input_mode"]["challenge_image"]
+        self.assertAlmostEqual(challenge["graph_transcription_exact_rate"], 1 / 3)
+        self.assertEqual(challenge["difficulty_macro_denominator"], 2)
+        self.assertEqual(challenge["difficulty_totals"], {"easy": 2, "hard": 1})
+        self.assertEqual(summary["a4_path_score"], 1.0)
+        self.assertEqual(summary["a4_transcription_score"], 0.5)
+        self.assertEqual(summary["a4_joint_score"], 0.5)
 
     def test_parallel_edges_use_multiset_scoring(self):
         task = next(task for task in self.tasks if task.id == "a4-hard-03")
@@ -213,6 +244,7 @@ class OneStrokeA4EvaluationTests(unittest.TestCase):
 
         result = evaluate_one_stroke_tasks([task], MissingPathAgent())[0]
         self.assertFalse(result.success)
+        self.assertFalse(result.response_schema_valid)
         self.assertEqual(result.reasons, ["missing_path_field"])
 
 

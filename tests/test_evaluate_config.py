@@ -298,6 +298,102 @@ class EvaluateConfigTests(unittest.TestCase):
         self.assertEqual(one_stroke.input_mode, "all")
         self.assertEqual(mahjong.input_mode, "all")
 
+    def test_cli_one_stroke_defaults_to_canonical_a1(self):
+        from minibench.cli import build_parser
+
+        args = build_parser().parse_args(["evaluate-one-stroke"])
+
+        self.assertEqual(
+            args.one_stroke_tasks,
+            Path("data/one_stroke/a1_direct.jsonl"),
+        )
+        self.assertEqual(args.max_tokens, 1024)
+
+    def test_one_stroke_openai_compatible_rejects_reasoning_only_fields(self):
+        field_values = {
+            "samples": 3,
+            "reasoning_temperature": 0.7,
+            "final_temperature": 0.0,
+            "max_reasoning_tokens": 512,
+        }
+        for field, value in field_values.items():
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"agent\.{field}.*would be ignored",
+                ):
+                    validate_experiment_config(
+                        {
+                            "task": {"family": "one_stroke"},
+                            "agent": {
+                                "name": "openai-compatible",
+                                field: value,
+                            },
+                            "provider": {"name": "generic"},
+                            "run": {"output_dir": "runs"},
+                        }
+                    )
+
+    def test_reasoning_only_field_guard_is_narrowly_scoped(self):
+        for family, agent_name in (
+            ("zebra", "openai-compatible"),
+            ("one_stroke", "cot"),
+        ):
+            with self.subTest(family=family, agent_name=agent_name):
+                config = validate_experiment_config(
+                    {
+                        "task": {"family": family},
+                        "agent": {
+                            "name": agent_name,
+                            "samples": 3,
+                            "reasoning_temperature": 0.7,
+                            "final_temperature": 0.0,
+                            "max_reasoning_tokens": 512,
+                        },
+                        "provider": {"name": "generic"},
+                        "run": {"output_dir": "runs"},
+                    }
+                )
+                self.assertEqual(config["agent"]["samples"], 3)
+
+    def test_one_stroke_configs_are_canonical_and_retry_safe(self):
+        unsupported_fields = {
+            "samples",
+            "reasoning_temperature",
+            "final_temperature",
+            "max_reasoning_tokens",
+        }
+        paths = sorted(Path("config/experiments").glob("one_stroke*.yaml"))
+        self.assertTrue(paths)
+        for path in paths:
+            with self.subTest(path=path):
+                config = load_experiment_config(path)
+                self.assertTrue(unsupported_fields.isdisjoint(config["agent"]))
+                self.assertEqual(config["provider"]["max_retries"], 3)
+                self.assertEqual(
+                    config["provider"]["retry_initial_backoff_seconds"],
+                    1.0,
+                )
+                self.assertEqual(
+                    config["provider"]["retry_max_backoff_seconds"],
+                    30.0,
+                )
+
+        alias = load_experiment_config("config/experiments/one_stroke.yaml")
+        canonical = load_experiment_config(
+            "config/experiments/one_stroke_a1.yaml"
+        )
+        self.assertEqual(alias, canonical)
+        self.assertEqual(canonical["provider"]["max_tokens"], 1024)
+
+        theorem = load_experiment_config(
+            "config/experiments/one_stroke_euler_theorem.yaml"
+        )
+        self.assertEqual(theorem["task"], canonical["task"])
+        self.assertEqual(theorem["agent"], canonical["agent"])
+        self.assertEqual(theorem["provider"], canonical["provider"])
+        self.assertEqual(theorem["evaluation"]["prompt_variant"], "euler_theorem")
+
     def test_invalid_task_family_reports_clear_error(self):
         with self.assertRaisesRegex(ValueError, "task.family must be one of"):
             validate_experiment_config(

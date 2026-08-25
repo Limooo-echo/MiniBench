@@ -2,9 +2,13 @@ import io
 import json
 import unittest
 from collections import Counter
+from dataclasses import replace
+from pathlib import Path
+import tempfile
 
 from minibench.datasets.one_stroke.dataset import (
     load_one_stroke_tasks,
+    one_stroke_edge_ids,
     one_stroke_task_from_dict,
     simulate_one_stroke_history,
 )
@@ -12,6 +16,8 @@ from minibench.datasets.one_stroke.evaluation import (
     evaluate_one_stroke_tasks,
     extract_no_solution,
     extract_path,
+    one_stroke_result_key,
+    plan_one_stroke_work_items,
     summarize_one_stroke,
     validate_one_stroke_completion,
     validate_one_stroke_path,
@@ -20,6 +26,7 @@ from minibench.datasets.one_stroke.prompting import (
     build_one_stroke_prompt,
     history_event_prompt,
 )
+from minibench.datasets.one_stroke.rules import find_constrained_one_stroke_path
 
 
 class FixedPathAgent:
@@ -55,6 +62,93 @@ class HistoryCompletionAgent:
                 }
             )
         return json.dumps({"step": 1})
+
+
+class PhaseAwareHistoryAgent:
+    def __init__(
+        self,
+        *,
+        wrong_state=False,
+        step_scratchpad=False,
+        wrapped_final=False,
+    ):
+        self.wrong_state = wrong_state
+        self.step_scratchpad = step_scratchpad
+        self.wrapped_final = wrapped_final
+        self.phases = []
+
+    def generate_messages_for_phase(self, messages, task, *, phase, **kwargs):
+        self.phases.append(phase)
+        if phase == "final":
+            output = json.dumps({"path": ["B", "C", "A"]})
+            return f"Answer: {output}" if self.wrapped_final else output
+        if "complete intermediate state" in messages[-1]["content"]:
+            if self.wrong_state:
+                return json.dumps(
+                    {
+                        "current_vertex": "A",
+                        "used_edges": [],
+                        "remaining_edges": ["e01", "e02", "e03"],
+                    }
+                )
+            return json.dumps(
+                {
+                    "current_vertex": "B",
+                    "used_edges": ["e01"],
+                    "remaining_edges": ["e02", "e03"],
+                }
+            )
+        payload = {"step": 1}
+        if self.step_scratchpad:
+            payload["scratchpad"] = "edge e01 was used"
+        return json.dumps(payload)
+
+
+class WrappedJsonAgent:
+    def generate(self, prompt, task):
+        return 'Answer: {"path":["A","B","C"]}'
+
+
+class FormalHistoryOracleAgent:
+    def generate_messages_for_phase(self, messages, task, *, phase, **kwargs):
+        if phase == "intermediate":
+            step_number = sum(
+                int(
+                    message["role"] == "user"
+                    and isinstance(message["content"], str)
+                    and message["content"].startswith("Step ")
+                )
+                for message in messages
+            )
+            if "complete intermediate state" not in messages[-1]["content"]:
+                return json.dumps({"step": step_number})
+            state = simulate_one_stroke_history(
+                replace(task, history_events=task.history_events[:step_number])
+            )
+            return json.dumps(
+                {
+                    "current_vertex": state.current_vertex,
+                    "used_edges": list(state.used_edge_ids),
+                    "remaining_edges": list(state.remaining_edge_ids),
+                }
+            )
+
+        state = simulate_one_stroke_history(task)
+        remaining_ids = set(state.remaining_edge_ids)
+        remaining_edges = tuple(
+            edge
+            for edge_id, edge in zip(one_stroke_edge_ids(task.edges), task.edges)
+            if edge_id in remaining_ids
+        )
+        oracle = find_constrained_one_stroke_path(
+            task.vertices,
+            remaining_edges,
+            start=state.current_vertex,
+            end=task.end,
+        )
+        if oracle is None:
+            raise AssertionError(f"formal history unexpectedly has no completion: {task.id}")
+        return json.dumps({"path": list(oracle[0])})
 
 
 def sample_task():
@@ -113,6 +207,25 @@ class OneStrokeTests(unittest.TestCase):
         tasks = load_one_stroke_tasks()
 
         self.assertGreaterEqual(len(tasks), 10)
+
+    def test_loader_rejects_duplicate_task_ids(self):
+        record = {
+            "id": "duplicate-task",
+            "vertices": ["A", "B", "C"],
+            "edges": [["A", "B"], ["B", "C"]],
+            "start": "A",
+            "end": "C",
+            "tags": ["one-stroke", "difficulty:easy"],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "duplicate.jsonl"
+            path.write_text(
+                json.dumps(record) + "\n" + json.dumps(record) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "duplicate task id"):
+                load_one_stroke_tasks(path)
 
     def test_formal_a1_inventory_and_unsolvable_quota(self):
         tasks = load_one_stroke_tasks("data/one_stroke/a1_direct.jsonl")
@@ -316,6 +429,167 @@ class OneStrokeTests(unittest.TestCase):
         summary = summarize_one_stroke(results)
         self.assertEqual(summary["by_memory_mode"]["incremental_state"]["total"], 1)
         self.assertEqual(summary["by_memory_mode"]["step_history_only"]["total"], 1)
+
+    def test_history_prefers_phase_aware_calls_and_scores_joint_success(self):
+        agent = PhaseAwareHistoryAgent()
+
+        result = evaluate_one_stroke_tasks(
+            [history_task()],
+            agent,
+            memory_modes=("incremental_state",),
+        )[0]
+
+        self.assertEqual(agent.phases, ["intermediate", "final"])
+        self.assertTrue(result.success)
+        self.assertTrue(result.history_intermediate_protocol_valid)
+        self.assertTrue(result.history_protocol_valid)
+        self.assertTrue(result.history_state_exact)
+        self.assertTrue(result.history_joint_success)
+        self.assertTrue(result.response_schema_valid)
+        summary = summarize_one_stroke([result])
+        self.assertEqual(summary["a3_final_score"], 1.0)
+        self.assertEqual(summary["a3_protocol_score"], 1.0)
+        self.assertEqual(summary["a3_state_score"], 1.0)
+        self.assertEqual(summary["a3_score"], 1.0)
+
+    def test_history_final_wrapped_json_keeps_semantic_score_but_fails_joint(self):
+        result = evaluate_one_stroke_tasks(
+            [history_task()],
+            PhaseAwareHistoryAgent(wrapped_final=True),
+            memory_modes=("incremental_state",),
+        )[0]
+
+        self.assertTrue(result.history_final_success)
+        self.assertTrue(result.history_intermediate_protocol_valid)
+        self.assertFalse(result.json_format_valid)
+        self.assertFalse(result.response_schema_valid)
+        self.assertFalse(result.history_protocol_valid)
+        self.assertFalse(result.history_joint_success)
+        self.assertIn(
+            "final:invalid_exact_json_object",
+            result.history_protocol_reasons,
+        )
+        summary = summarize_one_stroke([result])
+        self.assertEqual(summary["a3_final_score"], 1.0)
+        self.assertEqual(summary["a3_intermediate_protocol_score"], 1.0)
+        self.assertEqual(summary["a3_protocol_score"], 0.0)
+        self.assertEqual(summary["a3_score"], 0.0)
+
+    def test_formal_a3_protocol_oracle_passes_all_tasks_and_modes(self):
+        tasks = load_one_stroke_tasks("data/one_stroke/a3_history.jsonl")
+
+        results = evaluate_one_stroke_tasks(tasks, FormalHistoryOracleAgent())
+
+        self.assertEqual(len(results), 60)
+        self.assertTrue(all(result.history_joint_success for result in results))
+        summary = summarize_one_stroke(results)
+        self.assertEqual(summary["a3_final_score"], 1.0)
+        self.assertEqual(summary["a3_protocol_score"], 1.0)
+        self.assertEqual(summary["a3_state_score"], 1.0)
+        self.assertEqual(summary["a3_score"], 1.0)
+
+    def test_history_wrong_intermediate_state_fails_joint_not_final(self):
+        result = evaluate_one_stroke_tasks(
+            [history_task()],
+            PhaseAwareHistoryAgent(wrong_state=True),
+            memory_modes=("incremental_state",),
+        )[0]
+
+        self.assertTrue(result.success)
+        self.assertTrue(result.history_protocol_valid)
+        self.assertFalse(result.history_state_exact)
+        self.assertFalse(result.history_joint_success)
+        self.assertIn("step_1:current_vertex_mismatch:expected=B,actual=A", result.history_protocol_reasons)
+        summary = summarize_one_stroke([result])
+        self.assertEqual(summary["a3_final_score"], 1.0)
+        self.assertEqual(summary["a3_state_score"], 0.0)
+        self.assertEqual(summary["a3_score"], 0.0)
+
+    def test_step_only_scratchpad_is_a_protocol_violation(self):
+        result = evaluate_one_stroke_tasks(
+            [history_task()],
+            PhaseAwareHistoryAgent(step_scratchpad=True),
+            memory_modes=("step_history_only",),
+        )[0]
+
+        self.assertTrue(result.success)
+        self.assertFalse(result.history_protocol_valid)
+        self.assertIsNone(result.history_state_exact)
+        self.assertFalse(result.history_joint_success)
+        self.assertIn("step_1:wrong_fields", result.history_protocol_reasons)
+
+    def test_lenient_answer_scoring_reports_non_exact_json(self):
+        result = evaluate_one_stroke_tasks([sample_task()], WrappedJsonAgent())[0]
+
+        self.assertTrue(result.success)
+        self.assertFalse(result.json_format_valid)
+        self.assertFalse(result.response_schema_valid)
+        summary = summarize_one_stroke([result])
+        self.assertEqual(summary["json_format_exact_rate"], 0.0)
+        self.assertEqual(summary["response_schema_valid_rate"], 0.0)
+
+    def test_legacy_path_alias_scores_but_reports_schema_violation(self):
+        class AliasAgent:
+            def generate(self, prompt, task):
+                return json.dumps({"vertices": ["A", "B", "C"]})
+
+        result = evaluate_one_stroke_tasks([sample_task()], AliasAgent())[0]
+
+        self.assertTrue(result.success)
+        self.assertTrue(result.json_format_valid)
+        self.assertFalse(result.response_schema_valid)
+
+    def test_exact_json_rejects_duplicate_keys_and_nonstandard_constants(self):
+        outputs = (
+            '{"path":["A","B","C"],"path":["A","B","C"]}',
+            '{"path":["A","B","C"],"extra":NaN}',
+        )
+        for output in outputs:
+            with self.subTest(output=output):
+                class FixedOutputAgent:
+                    def generate(self, prompt, task):
+                        return output
+
+                result = evaluate_one_stroke_tasks(
+                    [sample_task()],
+                    FixedOutputAgent(),
+                )[0]
+                self.assertTrue(result.success)
+                self.assertFalse(result.json_format_valid)
+                self.assertFalse(result.response_schema_valid)
+
+    def test_work_item_callbacks_and_resume_skip_use_stable_keys(self):
+        task = sample_task()
+        expected_key = (task.id, "direct")
+        self.assertEqual(plan_one_stroke_work_items([task]), (expected_key,))
+        started = []
+        completed = []
+        result = evaluate_one_stroke_tasks(
+            [task],
+            FixedPathAgent(["A", "B", "C"]),
+            on_work_item_start=started.append,
+            on_result=completed.append,
+        )[0]
+
+        self.assertEqual(started, [expected_key])
+        self.assertEqual(completed, [result])
+        self.assertEqual(one_stroke_result_key(result), expected_key)
+        skipped = evaluate_one_stroke_tasks(
+            [task],
+            FixedPathAgent(["A", "B", "C"]),
+            skip_keys={expected_key},
+        )
+        self.assertEqual(skipped, [])
+
+    def test_work_planner_rejects_duplicate_modes_and_keys(self):
+        task = sample_task()
+        with self.assertRaisesRegex(ValueError, "duplicate one-stroke memory mode"):
+            plan_one_stroke_work_items(
+                [history_task()],
+                memory_modes=("incremental_state", "incremental_state"),
+            )
+        with self.assertRaisesRegex(ValueError, "duplicate one-stroke work key"):
+            plan_one_stroke_work_items([task, task])
 
     def test_history_requires_message_aware_agent(self):
         with self.assertRaisesRegex(ValueError, "requires an agent with generate_messages"):

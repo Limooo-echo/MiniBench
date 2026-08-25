@@ -675,6 +675,7 @@ def _canonical_edge(edge: tuple[str, str]) -> tuple[str, str]:
 def load_one_stroke_tasks(path: str | Path | None = None) -> list[OneStrokeTask]:
     task_path = Path(path) if path else default_one_stroke_tasks_path()
     tasks: list[OneStrokeTask] = []
+    task_id_lines: dict[str, int] = {}
     with task_path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
@@ -683,7 +684,15 @@ def load_one_stroke_tasks(path: str | Path | None = None) -> list[OneStrokeTask]
                 raw = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise ValueError(f"{task_path}:{line_number}: invalid JSON") from exc
-            tasks.append(one_stroke_task_from_dict(raw, base_dir=task_path.parent))
+            task = one_stroke_task_from_dict(raw, base_dir=task_path.parent)
+            previous_line = task_id_lines.get(task.id)
+            if previous_line is not None:
+                raise ValueError(
+                    f"{task_path}:{line_number}: duplicate task id {task.id!r}; "
+                    f"first seen on line {previous_line}"
+                )
+            task_id_lines[task.id] = line_number
+            tasks.append(task)
     if not tasks:
         raise ValueError(f"{task_path} contains no tasks")
     return tasks

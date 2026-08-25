@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
 import re
 import sys
 from time import strftime
-from typing import Any, Sequence, TextIO
+from typing import Any, Callable, Sequence, TextIO
 
-from minibench.core.agent import Agent, ChatMessage
+from minibench.core.agent import Agent, ChatMessage, MessagePhase
 from minibench.core.metrics import (
     finish_task_metrics,
     start_task_metrics,
@@ -76,6 +76,29 @@ class OneStrokeInstanceResult:
     conversation: tuple[ChatMessage, ...]
     tags: tuple[str, ...]
     metrics: dict[str, object]
+    prompt: str = ""
+    json_format_valid: bool = False
+    response_schema_valid: bool = False
+    history_final_success: bool | None = None
+    history_intermediate_protocol_valid: bool | None = None
+    history_protocol_valid: bool | None = None
+    history_state_exact: bool | None = None
+    history_joint_success: bool | None = None
+    history_protocol_reasons: tuple[str, ...] = ()
+
+
+OneStrokeWorkKey = tuple[str, str]
+OneStrokeWorkItemCallback = Callable[[OneStrokeWorkKey], None]
+OneStrokeResultCallback = Callable[[OneStrokeInstanceResult], None]
+
+
+@dataclass(frozen=True)
+class _HistoryProtocolOutcome:
+    final_output: str
+    conversation: tuple[ChatMessage, ...]
+    protocol_valid: bool
+    state_exact: bool | None
+    reasons: tuple[str, ...]
 
 
 def extract_path(output: str) -> list[str] | None:
@@ -237,6 +260,147 @@ def validate_one_stroke_completion(
     return not reasons, reasons
 
 
+def plan_one_stroke_work_items(
+    tasks: Sequence[OneStrokeTask],
+    memory_modes: Sequence[str] = ONE_STROKE_MEMORY_MODES,
+    rule_modes: Sequence[str] = ("full",),
+    input_modes: Sequence[str] = ("challenge_image",),
+) -> tuple[OneStrokeWorkKey, ...]:
+    """Return the stable task/mode keys used for checkpoints and resume."""
+    selected_modes, selected_rule_modes, selected_input_modes = _validate_work_modes(
+        memory_modes,
+        rule_modes,
+        input_modes,
+    )
+    keys = tuple(
+        _work_item_key(task, memory_mode, rule_mode, input_mode)
+        for task in tasks
+        for memory_mode, rule_mode, input_mode in _work_modes_for_task(
+            task,
+            selected_modes,
+            selected_rule_modes,
+            selected_input_modes,
+        )
+    )
+    duplicate_keys = sorted(
+        key for key, count in Counter(keys).items() if count > 1
+    )
+    if duplicate_keys:
+        rendered = ", ".join(
+            f"{task_id}/{mode}" for task_id, mode in duplicate_keys
+        )
+        raise ValueError(f"duplicate one-stroke work key(s): {rendered}")
+    return keys
+
+
+def one_stroke_result_key(result: OneStrokeInstanceResult) -> OneStrokeWorkKey:
+    """Recover a checkpoint key from a completed result."""
+    return _work_item_key(
+        result,
+        result.memory_mode,
+        result.rule_mode,
+        result.input_mode,
+    )
+
+
+def _validate_work_modes(
+    memory_modes: Sequence[str],
+    rule_modes: Sequence[str],
+    input_modes: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    selected_modes = tuple(memory_modes)
+    duplicate_modes = sorted(
+        mode for mode, count in Counter(selected_modes).items() if count > 1
+    )
+    if duplicate_modes:
+        raise ValueError(
+            "duplicate one-stroke memory mode(s): "
+            + ", ".join(duplicate_modes)
+        )
+    unknown_modes = set(selected_modes) - set(ONE_STROKE_MEMORY_MODES)
+    if unknown_modes:
+        raise ValueError(
+            "unknown one-stroke memory mode(s): "
+            + ", ".join(sorted(unknown_modes))
+        )
+    if not selected_modes:
+        raise ValueError("memory_modes must not be empty")
+
+    selected_rule_modes = tuple(rule_modes)
+    duplicate_rule_modes = sorted(
+        mode for mode, count in Counter(selected_rule_modes).items() if count > 1
+    )
+    if duplicate_rule_modes:
+        raise ValueError(
+            "duplicate one-stroke rule mode(s): "
+            + ", ".join(duplicate_rule_modes)
+        )
+    unknown_rule_modes = set(selected_rule_modes) - set(ONE_STROKE_RULE_MODES)
+    if unknown_rule_modes:
+        raise ValueError(
+            "unknown one-stroke rule mode(s): "
+            + ", ".join(sorted(unknown_rule_modes))
+        )
+    if not selected_rule_modes:
+        raise ValueError("rule_modes must not be empty")
+
+    selected_input_modes = tuple(input_modes)
+    duplicate_input_modes = sorted(
+        mode for mode, count in Counter(selected_input_modes).items() if count > 1
+    )
+    if duplicate_input_modes:
+        raise ValueError(
+            "duplicate one-stroke input mode(s): "
+            + ", ".join(duplicate_input_modes)
+        )
+    unknown_input_modes = set(selected_input_modes) - set(ONE_STROKE_INPUT_MODES)
+    if unknown_input_modes:
+        raise ValueError(
+            "unknown one-stroke input mode(s): "
+            + ", ".join(sorted(unknown_input_modes))
+        )
+    if not selected_input_modes:
+        raise ValueError("input_modes must not be empty")
+    return selected_modes, selected_rule_modes, selected_input_modes
+
+
+def _work_modes_for_task(
+    task: OneStrokeTask,
+    memory_modes: tuple[str, ...],
+    rule_modes: tuple[str, ...],
+    input_modes: tuple[str, ...],
+) -> tuple[tuple[str | None, str | None, str | None], ...]:
+    if task.capability == "history_memory":
+        return tuple((mode, None, None) for mode in memory_modes)
+    if task.capability == "rule_condition":
+        return tuple((None, mode, None) for mode in rule_modes)
+    if task.capability == "multimodal":
+        return tuple((None, None, mode) for mode in input_modes)
+    return ((None, None, None),)
+
+
+def _work_item_key(
+    task_or_result: OneStrokeTask | OneStrokeInstanceResult,
+    memory_mode: str | None,
+    rule_mode: str | None,
+    input_mode: str | None,
+) -> OneStrokeWorkKey:
+    if memory_mode is not None:
+        mode_key = f"memory:{memory_mode}"
+    elif rule_mode is not None:
+        mode_key = f"rule:{rule_mode}"
+    elif input_mode is not None:
+        mode_key = f"input:{input_mode}"
+    else:
+        mode_key = "direct"
+    task_id = (
+        task_or_result.task_id
+        if isinstance(task_or_result, OneStrokeInstanceResult)
+        else task_or_result.id
+    )
+    return task_id, mode_key
+
+
 def evaluate_one_stroke_tasks(
     tasks: list[OneStrokeTask],
     agent: Agent,
@@ -250,68 +414,58 @@ def evaluate_one_stroke_tasks(
     final_max_tokens: int | None = None,
     show_progress: bool = False,
     progress_stream: TextIO | None = None,
+    skip_keys: set[OneStrokeWorkKey] | None = None,
+    on_work_item_start: OneStrokeWorkItemCallback | None = None,
+    on_result: OneStrokeResultCallback | None = None,
 ) -> list[OneStrokeInstanceResult]:
-    selected_modes = tuple(memory_modes)
-    unknown_modes = set(selected_modes) - set(ONE_STROKE_MEMORY_MODES)
-    if unknown_modes:
-        raise ValueError(
-            "unknown one-stroke memory mode(s): "
-            + ", ".join(sorted(unknown_modes))
-        )
-    if not selected_modes:
-        raise ValueError("memory_modes must not be empty")
-    selected_rule_modes = tuple(rule_modes)
-    unknown_rule_modes = set(selected_rule_modes) - set(ONE_STROKE_RULE_MODES)
-    if unknown_rule_modes:
-        raise ValueError(
-            "unknown one-stroke rule mode(s): "
-            + ", ".join(sorted(unknown_rule_modes))
-        )
-    if not selected_rule_modes:
-        raise ValueError("rule_modes must not be empty")
-    selected_input_modes = tuple(input_modes)
-    unknown_input_modes = set(selected_input_modes) - set(ONE_STROKE_INPUT_MODES)
-    if unknown_input_modes:
-        raise ValueError(
-            "unknown one-stroke input mode(s): "
-            + ", ".join(sorted(unknown_input_modes))
-        )
-    if not selected_input_modes:
-        raise ValueError("input_modes must not be empty")
+    selected_modes, selected_rule_modes, selected_input_modes = _validate_work_modes(
+        memory_modes,
+        rule_modes,
+        input_modes,
+    )
     if state_max_tokens < 1 or ack_max_tokens < 1:
         raise ValueError("one-stroke history token limits must be positive")
     results: list[OneStrokeInstanceResult] = []
+    skipped = skip_keys or set()
     if show_progress and progress_stream is None:
         progress_stream = sys.stderr
 
     total = sum(
-        len(selected_modes)
-        if task.capability == "history_memory"
-        else len(selected_rule_modes)
-        if task.capability == "rule_condition"
-        else len(selected_input_modes)
-        if task.capability == "multimodal"
-        else 1
-        for task in tasks
+        key not in skipped
+        for key in plan_one_stroke_work_items(
+            tasks,
+            memory_modes=selected_modes,
+            rule_modes=selected_rule_modes,
+            input_modes=selected_input_modes,
+        )
     )
     completed = 0
     for task in tasks:
-        if task.capability == "history_memory":
-            work_modes = tuple((mode, None, None) for mode in selected_modes)
-        elif task.capability == "rule_condition":
-            work_modes = tuple((None, mode, None) for mode in selected_rule_modes)
-        elif task.capability == "multimodal":
-            work_modes = tuple((None, None, mode) for mode in selected_input_modes)
-        else:
-            work_modes = ((None, None, None),)
+        work_modes = _work_modes_for_task(
+            task,
+            selected_modes,
+            selected_rule_modes,
+            selected_input_modes,
+        )
         for memory_mode, rule_mode, input_mode in work_modes:
+            work_key = _work_item_key(task, memory_mode, rule_mode, input_mode)
+            if work_key in skipped:
+                continue
             completed += 1
             if show_progress and progress_stream is not None:
                 suffix = memory_mode or rule_mode or input_mode
                 label = task.id if suffix is None else f"{task.id}:{suffix}"
                 _write_progress(progress_stream, completed, total, label)
 
+            if on_work_item_start is not None:
+                on_work_item_start(work_key)
             metrics_start = start_task_metrics(agent)
+            history_final_success: bool | None = None
+            history_intermediate_protocol_valid: bool | None = None
+            history_protocol_valid: bool | None = None
+            history_state_exact: bool | None = None
+            history_joint_success: bool | None = None
+            history_protocol_reasons: tuple[str, ...] = ()
             if input_mode is not None:
                 prompt = build_one_stroke_prompt(task, input_mode=input_mode)
                 if input_mode == "text":
@@ -359,7 +513,7 @@ def evaluate_one_stroke_tasks(
                     }
                 result_prompt_variant = prompt_variant
             else:
-                raw_output, conversation = _run_history_protocol(
+                history_outcome = _run_history_protocol(
                     task,
                     agent,
                     memory_mode,
@@ -367,7 +521,14 @@ def evaluate_one_stroke_tasks(
                     ack_max_tokens=ack_max_tokens,
                     final_max_tokens=final_max_tokens,
                 )
+                raw_output = history_outcome.final_output
+                conversation = history_outcome.conversation
+                prompt = history_final_prompt(task)
                 path, success, score, reasons = _score_history_output(task, raw_output)
+                history_final_success = success
+                history_intermediate_protocol_valid = history_outcome.protocol_valid
+                history_state_exact = history_outcome.state_exact
+                history_protocol_reasons = history_outcome.reasons
                 scored = {
                     "path": path,
                     "edge_path": [],
@@ -381,48 +542,79 @@ def evaluate_one_stroke_tasks(
                     "rule_ignored": False,
                 }
                 result_prompt_variant = "history"
-            results.append(
-                OneStrokeInstanceResult(
-                    task_id=task.id,
-                    prompt_variant=result_prompt_variant,
-                    solution_exists=bool(scored["solution_exists"]),
-                    success=bool(scored["success"]),
-                    score=float(scored["score"]),
-                    raw_output=raw_output,
-                    path=list(scored["path"]),
-                    edge_path=list(scored["edge_path"]),
-                    reasons=list(scored["reasons"]),
-                    constraint_reasons=list(scored["constraint_reasons"]),
-                    capability=task.capability,
-                    difficulty=task.difficulty,
-                    memory_mode=memory_mode,
-                    rule_mode=rule_mode,
-                    rule_types=tuple(scored["rule_types"]),
-                    standard_path_valid=bool(scored["standard_path_valid"]),
-                    rule_ignored=bool(scored["rule_ignored"]),
-                    source_task_id=task.source_task_id or task.id,
-                    input_mode=input_mode,
-                    recognized_vertices=list(scored.get("recognized_vertices", [])),
-                    recognized_edges=[
-                        list(edge) for edge in scored.get("recognized_edges", [])
-                    ],
-                    vertex_precision=scored.get("vertex_precision"),
-                    vertex_recall=scored.get("vertex_recall"),
-                    vertex_f1=scored.get("vertex_f1"),
-                    vertex_exact=scored.get("vertex_exact"),
-                    edge_precision=scored.get("edge_precision"),
-                    edge_recall=scored.get("edge_recall"),
-                    edge_f1=scored.get("edge_f1"),
-                    edge_exact=scored.get("edge_exact"),
-                    graph_transcription_exact=scored.get(
-                        "graph_transcription_exact"
-                    ),
-                    joint_success=scored.get("joint_success"),
-                    conversation=conversation,
-                    tags=task.tags,
-                    metrics=finish_task_metrics(agent, metrics_start),
+            json_format_valid = _parse_exact_json_object(raw_output) is not None
+            response_schema_valid = _response_schema_valid(task, raw_output)
+            if memory_mode is not None:
+                history_protocol_valid = bool(
+                    history_intermediate_protocol_valid and response_schema_valid
                 )
+                history_joint_success = bool(
+                    scored["success"]
+                    and history_protocol_valid
+                    and history_state_exact is not False
+                )
+                if not response_schema_valid:
+                    final_reason = (
+                        "final:invalid_response_schema"
+                        if json_format_valid
+                        else "final:invalid_exact_json_object"
+                    )
+                    history_protocol_reasons = (
+                        *history_protocol_reasons,
+                        final_reason,
+                    )
+            result = OneStrokeInstanceResult(
+                task_id=task.id,
+                prompt_variant=result_prompt_variant,
+                solution_exists=bool(scored["solution_exists"]),
+                success=bool(scored["success"]),
+                score=float(scored["score"]),
+                raw_output=raw_output,
+                path=list(scored["path"]),
+                edge_path=list(scored["edge_path"]),
+                reasons=list(scored["reasons"]),
+                constraint_reasons=list(scored["constraint_reasons"]),
+                capability=task.capability,
+                difficulty=task.difficulty,
+                memory_mode=memory_mode,
+                rule_mode=rule_mode,
+                rule_types=tuple(scored["rule_types"]),
+                standard_path_valid=bool(scored["standard_path_valid"]),
+                rule_ignored=bool(scored["rule_ignored"]),
+                source_task_id=task.source_task_id or task.id,
+                input_mode=input_mode,
+                recognized_vertices=list(scored.get("recognized_vertices", [])),
+                recognized_edges=[
+                    list(edge) for edge in scored.get("recognized_edges", [])
+                ],
+                vertex_precision=scored.get("vertex_precision"),
+                vertex_recall=scored.get("vertex_recall"),
+                vertex_f1=scored.get("vertex_f1"),
+                vertex_exact=scored.get("vertex_exact"),
+                edge_precision=scored.get("edge_precision"),
+                edge_recall=scored.get("edge_recall"),
+                edge_f1=scored.get("edge_f1"),
+                edge_exact=scored.get("edge_exact"),
+                graph_transcription_exact=scored.get("graph_transcription_exact"),
+                joint_success=scored.get("joint_success"),
+                conversation=conversation,
+                tags=task.tags,
+                metrics=finish_task_metrics(agent, metrics_start),
+                prompt=prompt,
+                json_format_valid=json_format_valid,
+                response_schema_valid=response_schema_valid,
+                history_final_success=history_final_success,
+                history_intermediate_protocol_valid=(
+                    history_intermediate_protocol_valid
+                ),
+                history_protocol_valid=history_protocol_valid,
+                history_state_exact=history_state_exact,
+                history_joint_success=history_joint_success,
+                history_protocol_reasons=history_protocol_reasons,
             )
+            results.append(result)
+            if on_result is not None:
+                on_result(result)
     if show_progress and progress_stream is not None:
         _write_progress(progress_stream, total, total, "done")
         progress_stream.write("\n")
@@ -661,16 +853,13 @@ def _run_history_protocol(
     state_max_tokens: int,
     ack_max_tokens: int,
     final_max_tokens: int | None,
-) -> tuple[str, tuple[ChatMessage, ...]]:
-    generate_messages = getattr(agent, "generate_messages", None)
-    if not callable(generate_messages):
-        raise ValueError(
-            "one-stroke history evaluation requires an agent with "
-            "generate_messages(); use openai-compatible or a message-aware agent"
-        )
+) -> _HistoryProtocolOutcome:
     messages: list[ChatMessage] = [
         {"role": "system", "content": history_system_prompt(task, memory_mode)}
     ]
+    protocol_valid = True
+    state_checks: list[bool] = []
+    protocol_reasons: list[str] = []
     per_turn_limit = (
         state_max_tokens if memory_mode == "incremental_state" else ack_max_tokens
     )
@@ -681,22 +870,145 @@ def _run_history_protocol(
                 "content": history_event_prompt(task, memory_mode, step_number),
             }
         )
-        response = generate_messages(
+        response = _generate_messages_for_phase(
+            agent,
             tuple(messages),
             task,
+            phase="intermediate",
             max_tokens=per_turn_limit,
             json_mode=True,
         )
+        turn_protocol_valid, turn_state_exact, turn_reasons = (
+            _validate_history_intermediate(
+                task,
+                memory_mode,
+                step_number,
+                response,
+            )
+        )
+        protocol_valid = protocol_valid and turn_protocol_valid
+        if turn_state_exact is not None:
+            state_checks.append(turn_state_exact)
+        protocol_reasons.extend(
+            f"step_{step_number}:{reason}" for reason in turn_reasons
+        )
         messages.append({"role": "assistant", "content": response})
     messages.append({"role": "user", "content": history_final_prompt(task)})
-    final_output = generate_messages(
+    final_output = _generate_messages_for_phase(
+        agent,
         tuple(messages),
         task,
+        phase="final",
         max_tokens=final_max_tokens,
         json_mode=True,
     )
     messages.append({"role": "assistant", "content": final_output})
-    return final_output, tuple(messages)
+    return _HistoryProtocolOutcome(
+        final_output=final_output,
+        conversation=tuple(messages),
+        protocol_valid=protocol_valid,
+        state_exact=all(state_checks) if memory_mode == "incremental_state" else None,
+        reasons=tuple(protocol_reasons),
+    )
+
+
+def _generate_messages_for_phase(
+    agent: Agent,
+    messages: tuple[ChatMessage, ...],
+    task: OneStrokeTask,
+    *,
+    phase: MessagePhase,
+    max_tokens: int | None,
+    json_mode: bool,
+) -> str:
+    phase_generate = getattr(agent, "generate_messages_for_phase", None)
+    if callable(phase_generate):
+        return phase_generate(
+            messages,
+            task,
+            phase=phase,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+        )
+    generate_messages = getattr(agent, "generate_messages", None)
+    if callable(generate_messages):
+        return generate_messages(
+            messages,
+            task,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+        )
+    raise ValueError(
+        "one-stroke history evaluation requires an agent with "
+        "generate_messages_for_phase() or generate_messages(); use "
+        "openai-compatible or a message-aware test agent"
+    )
+
+
+def _validate_history_intermediate(
+    task: OneStrokeTask,
+    memory_mode: str,
+    step_number: int,
+    output: str,
+) -> tuple[bool, bool | None, tuple[str, ...]]:
+    payload = _parse_exact_json_object(output)
+    if payload is None:
+        return (
+            False,
+            False if memory_mode == "incremental_state" else None,
+            ("invalid_exact_json_object",),
+        )
+
+    if memory_mode == "step_history_only":
+        reasons: list[str] = []
+        if set(payload) != {"step"}:
+            reasons.append("wrong_fields")
+        step = payload.get("step")
+        if not isinstance(step, int) or isinstance(step, bool):
+            reasons.append("invalid_step")
+        elif step != step_number:
+            reasons.append(f"wrong_step:expected={step_number},actual={step}")
+        return not reasons, None, tuple(reasons)
+
+    expected_fields = {"current_vertex", "used_edges", "remaining_edges"}
+    protocol_reasons: list[str] = []
+    if set(payload) != expected_fields:
+        protocol_reasons.append("wrong_fields")
+    current_vertex = payload.get("current_vertex")
+    used_edges = payload.get("used_edges")
+    remaining_edges = payload.get("remaining_edges")
+    if not isinstance(current_vertex, str):
+        protocol_reasons.append("invalid_current_vertex")
+    if not _is_unique_string_list(used_edges):
+        protocol_reasons.append("invalid_used_edges")
+    if not _is_unique_string_list(remaining_edges):
+        protocol_reasons.append("invalid_remaining_edges")
+    protocol_ok = not protocol_reasons
+    if not protocol_ok:
+        return False, False, tuple(protocol_reasons)
+
+    expected_state = simulate_one_stroke_history(
+        replace(task, history_events=task.history_events[:step_number])
+    )
+    state_reasons: list[str] = []
+    if current_vertex != expected_state.current_vertex:
+        state_reasons.append(
+            "current_vertex_mismatch:"
+            f"expected={expected_state.current_vertex},actual={current_vertex}"
+        )
+    if set(used_edges) != set(expected_state.used_edge_ids):
+        state_reasons.append("used_edges_mismatch")
+    if set(remaining_edges) != set(expected_state.remaining_edge_ids):
+        state_reasons.append("remaining_edges_mismatch")
+    return True, not state_reasons, tuple(state_reasons)
+
+
+def _is_unique_string_list(value: object) -> bool:
+    return bool(
+        isinstance(value, list)
+        and all(isinstance(item, str) for item in value)
+        and len(value) == len(set(value))
+    )
 
 
 def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, Any]:
@@ -727,6 +1039,69 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
         group["rule_ignore_count"] = ignored
         group["rule_ignore_denominator"] = denominator
         group["rule_ignore_rate"] = ignored / denominator if denominator else None
+    history_results = [result for result in results if result.memory_mode is not None]
+    by_memory_mode = _group_results(history_results, "memory_mode")
+    for mode, group in by_memory_mode.items():
+        selected = [result for result in history_results if result.memory_mode == mode]
+        final_flags = [
+            result.success
+            if result.history_final_success is None
+            else result.history_final_success
+            for result in selected
+        ]
+        intermediate_protocol_flags = [
+            result.history_intermediate_protocol_valid
+            for result in selected
+            if result.history_intermediate_protocol_valid is not None
+        ]
+        protocol_flags = [
+            result.history_protocol_valid
+            for result in selected
+            if result.history_protocol_valid is not None
+        ]
+        state_flags = [
+            result.history_state_exact
+            for result in selected
+            if result.history_state_exact is not None
+        ]
+        joint_flags = [
+            result.history_joint_success
+            for result in selected
+            if result.history_joint_success is not None
+        ]
+        group["final_success"] = sum(int(value) for value in final_flags)
+        group["final_success_rate"] = (
+            sum(int(value) for value in final_flags) / len(final_flags)
+            if final_flags
+            else None
+        )
+        group["intermediate_protocol_valid_denominator"] = len(
+            intermediate_protocol_flags
+        )
+        group["intermediate_protocol_valid_rate"] = (
+            sum(int(value) for value in intermediate_protocol_flags)
+            / len(intermediate_protocol_flags)
+            if intermediate_protocol_flags
+            else None
+        )
+        group["protocol_valid_denominator"] = len(protocol_flags)
+        group["protocol_valid_rate"] = (
+            sum(int(value) for value in protocol_flags) / len(protocol_flags)
+            if protocol_flags
+            else None
+        )
+        group["state_exact_denominator"] = len(state_flags)
+        group["state_exact_rate"] = (
+            sum(int(value) for value in state_flags) / len(state_flags)
+            if state_flags
+            else None
+        )
+        group["joint_success"] = sum(int(value) for value in joint_flags)
+        group["joint_success_rate"] = (
+            sum(int(value) for value in joint_flags) / len(joint_flags)
+            if joint_flags
+            else None
+        )
     multimodal_results = [result for result in results if result.input_mode is not None]
     paired_summary = (
         summarize_paired_modes(multimodal_results) if multimodal_results else {}
@@ -734,10 +1109,18 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
     by_input_mode = paired_summary.get("by_input_mode", {})
     for mode, group in by_input_mode.items():
         selected = [result for result in multimodal_results if result.input_mode == mode]
+        difficulties = sorted({item.difficulty for item in selected})
+        group["difficulty_macro_denominator"] = len(difficulties)
+        group["difficulty_totals"] = {
+            difficulty: sum(
+                1 for item in selected if item.difficulty == difficulty
+            )
+            for difficulty in difficulties
+        }
         difficulty_rates = [
             sum(int(item.success) for item in selected if item.difficulty == difficulty)
             / sum(1 for item in selected if item.difficulty == difficulty)
-            for difficulty in sorted({item.difficulty for item in selected})
+            for difficulty in difficulties
         ]
         group["difficulty_macro_accuracy"] = (
             sum(difficulty_rates) / len(difficulty_rates) if difficulty_rates else 0.0
@@ -753,6 +1136,34 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
             1.0 - group["graph_transcription_exact_rate"] if selected else 0.0
         )
         group["joint_success_rate"] = joint_count / len(selected) if selected else 0.0
+        graph_difficulty_rates = [
+            sum(
+                int(bool(item.graph_transcription_exact))
+                for item in selected
+                if item.difficulty == difficulty
+            )
+            / sum(1 for item in selected if item.difficulty == difficulty)
+            for difficulty in difficulties
+        ]
+        joint_difficulty_rates = [
+            sum(
+                int(bool(item.joint_success))
+                for item in selected
+                if item.difficulty == difficulty
+            )
+            / sum(1 for item in selected if item.difficulty == difficulty)
+            for difficulty in difficulties
+        ]
+        group["difficulty_macro_graph_transcription_exact_rate"] = (
+            sum(graph_difficulty_rates) / len(graph_difficulty_rates)
+            if graph_difficulty_rates
+            else 0.0
+        )
+        group["difficulty_macro_joint_success_rate"] = (
+            sum(joint_difficulty_rates) / len(joint_difficulty_rates)
+            if joint_difficulty_rates
+            else 0.0
+        )
         for field in (
             "vertex_precision",
             "vertex_recall",
@@ -764,6 +1175,46 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
             values = [getattr(item, field) for item in selected]
             present = [float(value) for value in values if value is not None]
             group[f"mean_{field}"] = sum(present) / len(present) if present else 0.0
+    history_intermediate_protocol_flags = [
+        result.history_intermediate_protocol_valid
+        for result in history_results
+        if result.history_intermediate_protocol_valid is not None
+    ]
+    history_protocol_flags = [
+        result.history_protocol_valid
+        for result in history_results
+        if result.history_protocol_valid is not None
+    ]
+    history_state_flags = [
+        result.history_state_exact
+        for result in history_results
+        if result.history_state_exact is not None
+    ]
+    history_joint_flags = [
+        result.history_joint_success
+        for result in history_results
+        if result.history_joint_success is not None
+    ]
+    challenge_summary = by_input_mode.get("challenge_image")
+    a4_path_score = (
+        challenge_summary["difficulty_macro_accuracy"]
+        if challenge_summary is not None
+        else None
+    )
+    a4_transcription_score = (
+        challenge_summary["difficulty_macro_graph_transcription_exact_rate"]
+        if challenge_summary is not None
+        else None
+    )
+    a4_joint_score = (
+        challenge_summary["difficulty_macro_joint_success_rate"]
+        if challenge_summary is not None
+        else None
+    )
+    history_task_ids = {result.task_id for result in history_results}
+    history_negative_task_ids = {
+        result.task_id for result in history_results if not result.solution_exists
+    }
     return {
         "total": total,
         "success": success_count,
@@ -771,19 +1222,80 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
         "by_tag": by_tag,
         "by_difficulty": _group_results(results, "difficulty"),
         "by_capability": _group_results(results, "capability"),
-        "by_memory_mode": _group_results(
-            [result for result in results if result.memory_mode is not None],
-            "memory_mode",
-        ),
+        "by_solution_exists": _group_results(results, "solution_exists"),
+        "by_memory_mode": by_memory_mode,
         "by_rule_mode": by_rule_mode,
         "by_rule_type": _group_rule_types(rule_results),
         "by_input_mode": by_input_mode,
         "visual_gap": paired_summary.get("visual_gap", {}),
-        "a4_score": (
-            by_input_mode["challenge_image"]["difficulty_macro_accuracy"]
-            if "challenge_image" in by_input_mode
+        "a1_score": _capability_success_rate(results, "direct"),
+        "a2_score": (
+            by_rule_mode["full"]["success_rate"]
+            if "full" in by_rule_mode
             else None
         ),
+        "a3_final_score": (
+            sum(int(result.success) for result in history_results)
+            / len(history_results)
+            if history_results
+            else None
+        ),
+        "a3_protocol_score": (
+            sum(int(value) for value in history_protocol_flags)
+            / len(history_protocol_flags)
+            if history_protocol_flags
+            else None
+        ),
+        "a3_intermediate_protocol_score": (
+            sum(int(value) for value in history_intermediate_protocol_flags)
+            / len(history_intermediate_protocol_flags)
+            if history_intermediate_protocol_flags
+            else None
+        ),
+        "a3_state_score": (
+            sum(int(value) for value in history_state_flags)
+            / len(history_state_flags)
+            if history_state_flags
+            else None
+        ),
+        "a3_joint_score": (
+            sum(int(value) for value in history_joint_flags)
+            / len(history_joint_flags)
+            if history_joint_flags
+            else None
+        ),
+        "a3_score": (
+            sum(int(value) for value in history_joint_flags)
+            / len(history_joint_flags)
+            if history_joint_flags
+            else None
+        ),
+        "a4_path_score": a4_path_score,
+        "a4_transcription_score": a4_transcription_score,
+        "a4_joint_score": a4_joint_score,
+        "a4_score": a4_path_score,
+        "json_format_exact_rate": (
+            sum(int(result.json_format_valid) for result in results) / total
+            if total
+            else 0.0
+        ),
+        "response_schema_valid_rate": (
+            sum(int(result.response_schema_valid) for result in results) / total
+            if total
+            else 0.0
+        ),
+        "coverage": {
+            "unique_task_count": len({result.task_id for result in results}),
+            "history_task_count": len(history_task_ids),
+            "history_negative_task_count": len(history_negative_task_ids),
+            "history_has_negative_cases": bool(history_negative_task_ids),
+            "multimodal_source_task_count": len(
+                {result.source_task_id for result in multimodal_results}
+            ),
+            "evaluated_input_modes": sorted(
+                {result.input_mode for result in multimodal_results if result.input_mode}
+            ),
+        },
         "rule_ignore_count": rule_ignored_count,
         "rule_ignore_denominator": rule_denominator,
         "rule_ignore_rate": (
@@ -807,9 +1319,29 @@ def _group_results(
             "success_rate": (
                 sum(int(item.success) for item in items) / len(items) if items else 0.0
             ),
+            "json_format_exact_rate": (
+                sum(int(item.json_format_valid) for item in items) / len(items)
+                if items
+                else 0.0
+            ),
+            "response_schema_valid_rate": (
+                sum(int(item.response_schema_valid) for item in items) / len(items)
+                if items
+                else 0.0
+            ),
         }
         for key, items in sorted(groups.items())
     }
+
+
+def _capability_success_rate(
+    results: Sequence[OneStrokeInstanceResult],
+    capability: str,
+) -> float | None:
+    selected = [result for result in results if result.capability == capability]
+    if not selected:
+        return None
+    return sum(int(result.success) for result in selected) / len(selected)
 
 
 def _group_rule_types(
@@ -897,3 +1429,80 @@ def _parse_json_object(output: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _parse_exact_json_object(output: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(
+            output,
+            parse_constant=_reject_nonstandard_json_constant,
+            object_pairs_hook=_unique_json_object,
+        )
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _reject_nonstandard_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def _response_schema_valid(task: OneStrokeTask, output: str) -> bool:
+    payload = _parse_exact_json_object(output)
+    if payload is None:
+        return False
+    if task.capability == "multimodal":
+        if set(payload) != {
+            "recognized_vertices",
+            "recognized_edges",
+            "solvable",
+            "path",
+        }:
+            return False
+        recognized_vertices = payload["recognized_vertices"]
+        recognized_edges = payload["recognized_edges"]
+        solvable = payload["solvable"]
+        path = payload["path"]
+        if not _is_string_list(recognized_vertices):
+            return False
+        if not (
+            isinstance(recognized_edges, list)
+            and all(
+                isinstance(edge, list)
+                and len(edge) == 2
+                and all(isinstance(vertex, str) for vertex in edge)
+                for edge in recognized_edges
+            )
+        ):
+            return False
+        if not isinstance(solvable, bool):
+            return False
+        return _is_string_list(path) if solvable else path is None
+
+    if set(payload) == {"solvable"} and payload["solvable"] is False:
+        return True
+    expected_fields = (
+        {"path", "edge_path"}
+        if task.capability == "rule_condition"
+        else {"path"}
+    )
+    if set(payload) != expected_fields or not _is_string_list(payload.get("path")):
+        return False
+    return (
+        _is_string_list(payload.get("edge_path"))
+        if task.capability == "rule_condition"
+        else True
+    )
+
+
+def _is_string_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
