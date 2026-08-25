@@ -8,6 +8,10 @@ from minibench.agents._message_utils import (
     validate_message_phase,
     visible_generation_options,
 )
+from minibench.agents._trace_utils import (
+    complete_with_stage_metrics,
+    copy_generation_trace,
+)
 from minibench.core.agent import (
     Agent,
     ChatClient,
@@ -31,6 +35,10 @@ class PlanThenSolveAgent(Agent):
     def __init__(self, client: ChatClient, config: ReasoningConfig | None = None):
         self.client = client
         self.config = config or ReasoningConfig()
+        self._last_generation_trace: dict[str, Any] | None = None
+
+    def last_generation_trace(self) -> dict[str, Any] | None:
+        return copy_generation_trace(self._last_generation_trace)
 
     def generate(self, prompt: str, task: Any) -> str:
         return self._generate(prompt, images=())
@@ -53,6 +61,7 @@ class PlanThenSolveAgent(Agent):
         max_tokens: int | None = None,
         json_mode: bool | None = None,
     ) -> str:
+        self._last_generation_trace = None
         resolved_temperature, resolved_max_tokens, resolved_json_mode = (
             visible_generation_options(
                 self.config,
@@ -61,33 +70,54 @@ class PlanThenSolveAgent(Agent):
                 json_mode=json_mode,
             )
         )
-        plan = complete_transformed_messages(
+        plan, plan_metrics = complete_with_stage_metrics(
             self.client,
-            messages,
-            transform=plan_prompt,
-            phase_system_prompt=REASONING_SYSTEM_PROMPT,
-            temperature=self.config.reasoning_temperature,
-            max_tokens=self.config.max_reasoning_tokens,
-            json_mode=False,
+            lambda: complete_transformed_messages(
+                self.client,
+                messages,
+                transform=plan_prompt,
+                phase_system_prompt=REASONING_SYSTEM_PROMPT,
+                temperature=self.config.reasoning_temperature,
+                max_tokens=self.config.max_reasoning_tokens,
+                json_mode=False,
+            ),
         )
-        solution = complete_transformed_messages(
+        solution, solution_metrics = complete_with_stage_metrics(
             self.client,
-            messages,
-            transform=lambda prompt: solve_with_plan_prompt(prompt, plan),
-            phase_system_prompt=REASONING_SYSTEM_PROMPT,
-            temperature=self.config.reasoning_temperature,
-            max_tokens=self.config.max_reasoning_tokens,
-            json_mode=False,
+            lambda: complete_transformed_messages(
+                self.client,
+                messages,
+                transform=lambda prompt: solve_with_plan_prompt(prompt, plan),
+                phase_system_prompt=REASONING_SYSTEM_PROMPT,
+                temperature=self.config.reasoning_temperature,
+                max_tokens=self.config.max_reasoning_tokens,
+                json_mode=False,
+            ),
         )
-        return complete_transformed_messages(
+        final, final_metrics = complete_with_stage_metrics(
             self.client,
-            messages,
-            transform=lambda prompt: finalize_prompt(prompt, solution),
-            phase_system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
-            temperature=resolved_temperature,
-            max_tokens=resolved_max_tokens,
-            json_mode=resolved_json_mode,
+            lambda: complete_transformed_messages(
+                self.client,
+                messages,
+                transform=lambda prompt: finalize_prompt(prompt, solution),
+                phase_system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
+                temperature=resolved_temperature,
+                max_tokens=resolved_max_tokens,
+                json_mode=resolved_json_mode,
+            ),
         )
+        self._last_generation_trace = {
+            "architecture": self.name,
+            "plan": plan,
+            "solution": solution,
+            "final": final,
+            "stage_metrics": {
+                "plan": plan_metrics,
+                "solution": solution_metrics,
+                "final": final_metrics,
+            },
+        }
+        return final
 
     def generate_messages_for_phase(
         self,
@@ -122,27 +152,49 @@ class PlanThenSolveAgent(Agent):
         *,
         images: Sequence[ImageAttachment],
     ) -> str:
-        plan = self.client.complete(
-            plan_prompt(prompt),
-            system_prompt=REASONING_SYSTEM_PROMPT,
-            temperature=self.config.reasoning_temperature,
-            max_tokens=self.config.max_reasoning_tokens,
-            json_mode=False,
-            images=images,
+        self._last_generation_trace = None
+        plan, plan_metrics = complete_with_stage_metrics(
+            self.client,
+            lambda: self.client.complete(
+                plan_prompt(prompt),
+                system_prompt=REASONING_SYSTEM_PROMPT,
+                temperature=self.config.reasoning_temperature,
+                max_tokens=self.config.max_reasoning_tokens,
+                json_mode=False,
+                images=images,
+            ),
         )
-        solution = self.client.complete(
-            solve_with_plan_prompt(prompt, plan),
-            system_prompt=REASONING_SYSTEM_PROMPT,
-            temperature=self.config.reasoning_temperature,
-            max_tokens=self.config.max_reasoning_tokens,
-            json_mode=False,
-            images=images,
+        solution, solution_metrics = complete_with_stage_metrics(
+            self.client,
+            lambda: self.client.complete(
+                solve_with_plan_prompt(prompt, plan),
+                system_prompt=REASONING_SYSTEM_PROMPT,
+                temperature=self.config.reasoning_temperature,
+                max_tokens=self.config.max_reasoning_tokens,
+                json_mode=False,
+                images=images,
+            ),
         )
-        return self.client.complete(
-            finalize_prompt(prompt, solution),
-            system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
-            temperature=self.config.final_temperature,
-            max_tokens=self.config.final_max_tokens,
-            json_mode=True,
-            images=images,
+        final, final_metrics = complete_with_stage_metrics(
+            self.client,
+            lambda: self.client.complete(
+                finalize_prompt(prompt, solution),
+                system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
+                temperature=self.config.final_temperature,
+                max_tokens=self.config.final_max_tokens,
+                json_mode=True,
+                images=images,
+            ),
         )
+        self._last_generation_trace = {
+            "architecture": self.name,
+            "plan": plan,
+            "solution": solution,
+            "final": final,
+            "stage_metrics": {
+                "plan": plan_metrics,
+                "solution": solution_metrics,
+                "final": final_metrics,
+            },
+        }
+        return final

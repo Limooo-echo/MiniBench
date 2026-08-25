@@ -168,7 +168,8 @@ class ReasoningAgentTests(unittest.TestCase):
         reasoning_prompt = client.calls[0]["messages"][-1]["content"]
         final_prompt = client.calls[1]["messages"][-1]["content"]
         self.assertIn("about the current turn", reasoning_prompt)
-        self.assertIn("action in the required schema", reasoning_prompt)
+        self.assertIn("proposed action in plain text", reasoning_prompt)
+        self.assertIn("do not emit the final JSON", reasoning_prompt)
         self.assertIn("Convert the action", final_prompt)
         self.assertIn("schema requested for this conversation", final_prompt)
 
@@ -426,6 +427,58 @@ class ReasoningAgentTests(unittest.TestCase):
         self.assertEqual(metrics["token_usage"]["completion_tokens"], 6)
         self.assertEqual(metrics["token_usage"]["total_tokens"], 20)
         self.assertTrue(metrics["usage_available"])
+
+    def test_reasoning_agents_expose_internal_stage_outputs_and_metrics(self):
+        config = ReasoningConfig(samples=2)
+        cases = [
+            (
+                CoTAgent,
+                ["reasoning", "final"],
+                {"reasoning", "final"},
+            ),
+            (
+                TreeOfThoughtAgent,
+                ["candidate one", "candidate two", "final"],
+                {"candidates", "final"},
+            ),
+            (
+                PlanThenSolveAgent,
+                ["plan", "solution", "final"],
+                {"plan", "solution", "final"},
+            ),
+            (
+                CriticRefineAgent,
+                ["draft", "critique", "refinement"],
+                {"draft", "critique", "refinement"},
+            ),
+        ]
+
+        for agent_type, responses, expected_output_fields in cases:
+            with self.subTest(agent=agent_type.__name__):
+                client = MetricsClient(responses)
+                agent = agent_type(client, config)
+
+                agent.generate("Question prompt", sample_task())
+                trace = agent.last_generation_trace()
+
+                self.assertIsNotNone(trace)
+                self.assertEqual(trace["architecture"], agent.name)
+                self.assertTrue(expected_output_fields.issubset(trace))
+                stage_metrics = trace["stage_metrics"]
+                metric_records = (
+                    [*stage_metrics["candidates"], stage_metrics["judge"]]
+                    if agent_type is TreeOfThoughtAgent
+                    else list(stage_metrics.values())
+                )
+                self.assertTrue(
+                    all(record["llm_calls"] == 1 for record in metric_records)
+                )
+                self.assertTrue(
+                    all(
+                        record["token_usage"]["completion_tokens"] == 3
+                        for record in metric_records
+                    )
+                )
 
 
 if __name__ == "__main__":

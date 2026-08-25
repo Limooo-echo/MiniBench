@@ -1,0 +1,34 @@
+task:
+  family: mahjong_solo
+  path: data/mahjong_solo/tasks_win.jsonl
+  limit: null
+  task_ids: [mj-solo-001, mj-solo-002]
+
+agent:
+  name: tot
+  samples: 3
+  reasoning_temperature: 0.7
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+
+provider:
+  name: deepseek
+  model: deepseek-v4-flash
+  temperature: 0.0
+  json_mode: true
+  max_tokens: 512
+  timeout: 180
+  max_retries: 3
+  retry_initial_backoff_seconds: 1.0
+  retry_max_backoff_seconds: 30.0
+  extra_body:
+    thinking:
+      type: disabled
+
+evaluation:
+  observation_mode: full-hand
+  show_progress: true
+
+run:
+  output_dir: runs/diagnostics
+  run_name: mahjong-solo2-tot-phasefix

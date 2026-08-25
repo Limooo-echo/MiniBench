@@ -8,6 +8,10 @@ from minibench.agents._message_utils import (
     validate_message_phase,
     visible_generation_options,
 )
+from minibench.agents._trace_utils import (
+    complete_with_stage_metrics,
+    copy_generation_trace,
+)
 from minibench.core.agent import (
     Agent,
     ChatClient,
@@ -30,6 +34,10 @@ class CoTAgent(Agent):
     def __init__(self, client: ChatClient, config: ReasoningConfig | None = None):
         self.client = client
         self.config = config or ReasoningConfig()
+        self._last_generation_trace: dict[str, Any] | None = None
+
+    def last_generation_trace(self) -> dict[str, Any] | None:
+        return copy_generation_trace(self._last_generation_trace)
 
     def generate(self, prompt: str, task: Any) -> str:
         return self._generate(prompt, images=())
@@ -52,6 +60,7 @@ class CoTAgent(Agent):
         max_tokens: int | None = None,
         json_mode: bool | None = None,
     ) -> str:
+        self._last_generation_trace = None
         resolved_temperature, resolved_max_tokens, resolved_json_mode = (
             visible_generation_options(
                 self.config,
@@ -60,38 +69,55 @@ class CoTAgent(Agent):
                 json_mode=json_mode,
             )
         )
-        reasoning = complete_transformed_messages(
+        reasoning, reasoning_metrics = complete_with_stage_metrics(
             self.client,
-            messages,
-            transform=lambda prompt: "\n\n".join(
-                (
-                    prompt,
-                    "Reason step by step about the current turn. End with the "
-                    "action in the required schema.",
-                )
+            lambda: complete_transformed_messages(
+                self.client,
+                messages,
+                transform=lambda prompt: "\n\n".join(
+                    (
+                        prompt,
+                        "Reason step by step about the current turn. State the "
+                        "proposed action in plain text; do not emit the final JSON "
+                        "object in this internal stage.",
+                    )
+                ),
+                phase_system_prompt=REASONING_SYSTEM_PROMPT,
+                temperature=self.config.reasoning_temperature,
+                max_tokens=self.config.max_reasoning_tokens,
+                json_mode=False,
             ),
-            phase_system_prompt=REASONING_SYSTEM_PROMPT,
-            temperature=self.config.reasoning_temperature,
-            max_tokens=self.config.max_reasoning_tokens,
-            json_mode=False,
         )
-        return complete_transformed_messages(
+        final, final_metrics = complete_with_stage_metrics(
             self.client,
-            messages,
-            transform=lambda prompt: "\n\n".join(
-                (
-                    prompt,
-                    "Reasoning or draft answer:\n"
-                    + reasoning
-                    + "\n\nConvert the action to exactly one JSON object using "
-                    "the schema requested for this conversation.",
-                )
+            lambda: complete_transformed_messages(
+                self.client,
+                messages,
+                transform=lambda prompt: "\n\n".join(
+                    (
+                        prompt,
+                        "Reasoning or draft answer:\n"
+                        + reasoning
+                        + "\n\nConvert the action to exactly one JSON object using "
+                        "the schema requested for this conversation.",
+                    )
+                ),
+                phase_system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
+                temperature=resolved_temperature,
+                max_tokens=resolved_max_tokens,
+                json_mode=resolved_json_mode,
             ),
-            phase_system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
-            temperature=resolved_temperature,
-            max_tokens=resolved_max_tokens,
-            json_mode=resolved_json_mode,
         )
+        self._last_generation_trace = {
+            "architecture": self.name,
+            "reasoning": reasoning,
+            "final": final,
+            "stage_metrics": {
+                "reasoning": reasoning_metrics,
+                "final": final_metrics,
+            },
+        }
+        return final
 
     def generate_messages_for_phase(
         self,
@@ -126,19 +152,36 @@ class CoTAgent(Agent):
         *,
         images: Sequence[ImageAttachment],
     ) -> str:
-        reasoning = self.client.complete(
-            cot_prompt(prompt),
-            system_prompt=REASONING_SYSTEM_PROMPT,
-            temperature=self.config.reasoning_temperature,
-            max_tokens=self.config.max_reasoning_tokens,
-            json_mode=False,
-            images=images,
+        self._last_generation_trace = None
+        reasoning, reasoning_metrics = complete_with_stage_metrics(
+            self.client,
+            lambda: self.client.complete(
+                cot_prompt(prompt),
+                system_prompt=REASONING_SYSTEM_PROMPT,
+                temperature=self.config.reasoning_temperature,
+                max_tokens=self.config.max_reasoning_tokens,
+                json_mode=False,
+                images=images,
+            ),
         )
-        return self.client.complete(
-            finalize_prompt(prompt, reasoning),
-            system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
-            temperature=self.config.final_temperature,
-            max_tokens=self.config.final_max_tokens,
-            json_mode=True,
-            images=images,
+        final, final_metrics = complete_with_stage_metrics(
+            self.client,
+            lambda: self.client.complete(
+                finalize_prompt(prompt, reasoning),
+                system_prompt=FINAL_ANSWER_SYSTEM_PROMPT,
+                temperature=self.config.final_temperature,
+                max_tokens=self.config.final_max_tokens,
+                json_mode=True,
+                images=images,
+            ),
         )
+        self._last_generation_trace = {
+            "architecture": self.name,
+            "reasoning": reasoning,
+            "final": final,
+            "stage_metrics": {
+                "reasoning": reasoning_metrics,
+                "final": final_metrics,
+            },
+        }
+        return final

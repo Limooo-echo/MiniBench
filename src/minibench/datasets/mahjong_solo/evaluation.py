@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
@@ -41,6 +42,7 @@ class MahjongSoloInstanceResult:
     draws: list[str]
     discards: list[str]
     raw_outputs: list[str]
+    reasoning_traces: list[dict[str, Any] | None]
     conversation: list[ChatMessage]
     agent_actions: list[dict[str, Any]]
     action_errors: list[dict[str, Any]]
@@ -132,6 +134,7 @@ def evaluate_mahjong_solo_task(
     draws: list[str] = []
     discards: list[str] = []
     raw_outputs: list[str] = []
+    reasoning_traces: list[dict[str, Any] | None] = []
     conversation: list[ChatMessage] = []
     agent_actions: list[dict[str, Any]] = []
     action_errors: list[dict[str, Any]] = []
@@ -183,6 +186,7 @@ def evaluate_mahjong_solo_task(
                 )
                 raw_output = agent.generate(prompt, task)
             raw_outputs.append(raw_output)
+            reasoning_traces.append(_read_generation_trace(agent))
             action = extract_mahjong_solo_action(raw_output)
 
             if action is None:
@@ -201,6 +205,7 @@ def evaluate_mahjong_solo_task(
                             draws=draws,
                             discards=discards,
                             raw_outputs=raw_outputs,
+                            reasoning_traces=reasoning_traces,
                             conversation=conversation,
                             agent_actions=agent_actions,
                             action_errors=action_errors,
@@ -254,6 +259,7 @@ def evaluate_mahjong_solo_task(
         draws=draws,
         discards=discards,
         raw_outputs=raw_outputs,
+        reasoning_traces=reasoning_traces,
         conversation=conversation,
         agent_actions=agent_actions,
         action_errors=action_errors,
@@ -373,6 +379,7 @@ def _make_result(
     draws: list[str],
     discards: list[str],
     raw_outputs: list[str],
+    reasoning_traces: list[dict[str, Any] | None],
     conversation: list[ChatMessage],
     agent_actions: list[dict[str, Any]],
     action_errors: list[dict[str, Any]],
@@ -389,6 +396,7 @@ def _make_result(
         draws=list(draws),
         discards=list(discards),
         raw_outputs=list(raw_outputs),
+        reasoning_traces=deepcopy(reasoning_traces),
         conversation=list(conversation),
         agent_actions=list(agent_actions),
         action_errors=list(action_errors),
@@ -398,6 +406,14 @@ def _make_result(
         tags=task.tags,
         metrics=metrics,
     )
+
+
+def _read_generation_trace(agent: Agent) -> dict[str, Any] | None:
+    reader = getattr(agent, "last_generation_trace", None)
+    if not callable(reader):
+        return None
+    trace = reader()
+    return deepcopy(trace) if isinstance(trace, dict) else None
 
 
 def _score_tsumo(

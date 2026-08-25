@@ -18,8 +18,7 @@ STANDARD_MAHJONG_RULE_TEXT = (
 
 MAHJONG_SOLO_SYSTEM_PROMPT = (
     "You play a single-player closed-hand Mahjong draw-discard task. "
-    "Use the selected rule configuration exactly as stated in the user prompt. "
-    "Return exactly one JSON object and no markdown or explanation."
+    "Use the selected rule configuration exactly as stated in the user prompt."
 )
 
 

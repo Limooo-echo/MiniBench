@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from minibench.cli import build_parser
+from minibench.datasets.mahjong.api import is_winning_hand
 from minibench.datasets.mahjong_solo.dataset import (
     load_mahjong_solo_tasks,
     mahjong_solo_task_from_dict,
@@ -16,6 +17,7 @@ from minibench.datasets.mahjong_solo.evaluation import (
 )
 from minibench.datasets.mahjong_solo.generation import generate_mahjong_solo_tasks
 from minibench.datasets.mahjong_solo.prompting import (
+    MAHJONG_SOLO_SYSTEM_PROMPT,
     build_mahjong_solo_history_turn_prompt,
     build_mahjong_solo_prompt,
 )
@@ -33,6 +35,25 @@ class SequenceMahjongAgent:
         hand_line = next(line for line in prompt.splitlines() if line.startswith("Current hand"))
         hand = hand_line.split(": ", 1)[1].split()
         return json.dumps({"action": "discard", "tile": hand[0]})
+
+
+class TracedSequenceMahjongAgent(SequenceMahjongAgent):
+    def __init__(self, payloads):
+        super().__init__(payloads)
+        self.trace = None
+
+    def generate(self, prompt, task):
+        output = super().generate(prompt, task)
+        self.trace = {
+            "architecture": "test-trace",
+            "reasoning": "the hand is complete",
+            "final": output,
+            "stage_metrics": {},
+        }
+        return output
+
+    def last_generation_trace(self):
+        return dict(self.trace) if self.trace is not None else None
 
 
 class MessageSequenceMahjongAgent:
@@ -158,6 +179,32 @@ class MahjongSoloTests(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.reasons, ["agent_tsumo:E"])
+
+    def test_solo_result_saves_reasoning_trace_for_each_action(self):
+        result = evaluate_mahjong_solo_task(
+            tsumo_task(),
+            TracedSequenceMahjongAgent([{"action": "tsumo"}]),
+        )
+
+        self.assertEqual(len(result.raw_outputs), 1)
+        self.assertEqual(len(result.reasoning_traces), 1)
+        self.assertEqual(
+            result.reasoning_traces[0]["reasoning"],
+            "the hand is complete",
+        )
+
+    def test_diagnostic_terminal_task_is_an_immediate_win(self):
+        task = load_mahjong_solo_tasks(
+            "data/mahjong_solo/diagnostic_terminal_win.jsonl"
+        )[0]
+
+        self.assertEqual(task.max_draws, 1)
+        self.assertTrue(is_winning_hand([*task.initial_hand, task.wall[0]]))
+        result = evaluate_mahjong_solo_task(
+            task,
+            SequenceMahjongAgent([{"action": "tsumo"}]),
+        )
+        self.assertTrue(result.success)
         self.assertIsNotNone(result.win_score)
 
     def test_shape_win_succeeds_when_optional_score_is_unavailable(self):
@@ -231,6 +278,22 @@ class MahjongSoloTests(unittest.TestCase):
         self.assertIn("best advances the concealed hand", prompt)
         self.assertNotIn("post-discard standard shanten", prompt)
         self.assertNotIn("higher live ukeire", prompt)
+
+    def test_task_system_prompt_does_not_force_final_json_during_reasoning(self):
+        self.assertIn("single-player closed-hand Mahjong", MAHJONG_SOLO_SYSTEM_PROMPT)
+        self.assertNotIn("Return exactly one JSON", MAHJONG_SOLO_SYSTEM_PROMPT)
+        self.assertNotIn("no markdown or explanation", MAHJONG_SOLO_SYSTEM_PROMPT)
+
+        task = tsumo_task()
+        prompt = build_mahjong_solo_prompt(
+            task,
+            draw_number=1,
+            drawn_tile="E",
+            hand=list(task.initial_hand) + ["E"],
+            discards=[],
+            remaining_draws=2,
+        )
+        self.assertIn("Return exactly one JSON object", prompt)
 
     def test_history_only_turn_prompts_are_incremental(self):
         task = delayed_tsumo_task()
