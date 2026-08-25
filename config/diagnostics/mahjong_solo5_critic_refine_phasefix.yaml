@@ -2,10 +2,14 @@ task:
   family: mahjong_solo
   path: data/mahjong_solo/tasks_win.jsonl
   limit: null
-  task_ids: [mj-solo-001, mj-solo-002]
+  task_ids: [mj-solo-001, mj-solo-002, mj-solo-003, mj-solo-004, mj-solo-005]
 
 agent:
-  name: openai-compatible
+  name: critic-refine
+  samples: 1
+  reasoning_temperature: 0.0
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
 
 provider:
   name: deepseek
@@ -27,4 +31,4 @@ evaluation:
 
 run:
   output_dir: runs/diagnostics
-  run_name: mahjong-solo2-direct-phasefix
+  run_name: mahjong-solo5-critic-refine-phasefix

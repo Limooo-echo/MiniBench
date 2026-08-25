@@ -19,15 +19,15 @@ done
 ```
 
 If ToT, plan-then-solve, and critic-refine all recognize the terminal hand, run
-the two-task rollout checks:
+the five-task rollout checks:
 
 ```bash
 for config in \
-  config/diagnostics/mahjong_solo2_direct_phasefix.yaml \
-  config/diagnostics/mahjong_solo2_cot_phasefix.yaml \
-  config/diagnostics/mahjong_solo2_tot_phasefix.yaml \
-  config/diagnostics/mahjong_solo2_plan_then_solve_phasefix.yaml \
-  config/diagnostics/mahjong_solo2_critic_refine_phasefix.yaml
+  config/diagnostics/mahjong_solo5_direct_phasefix.yaml \
+  config/diagnostics/mahjong_solo5_cot_phasefix.yaml \
+  config/diagnostics/mahjong_solo5_tot_phasefix.yaml \
+  config/diagnostics/mahjong_solo5_plan_then_solve_phasefix.yaml \
+  config/diagnostics/mahjong_solo5_critic_refine_phasefix.yaml
 do
   python -m minibench.cli run-config "$config"
 done
