@@ -50,13 +50,15 @@ def complete_intermediate_message(
             json_mode=json_mode,
         )
     )
-    return client.complete_messages(
-        deepcopy(list(messages)),
-        system_prompt=None,
-        temperature=resolved_temperature,
-        max_tokens=resolved_max_tokens,
-        json_mode=resolved_json_mode,
-    )
+    kwargs = {
+        "system_prompt": None,
+        "temperature": resolved_temperature,
+        "max_tokens": resolved_max_tokens,
+        "json_mode": resolved_json_mode,
+    }
+    if bool(getattr(client, "_is_agent_runtime", False)):
+        kwargs["stage_name"] = "intermediate"
+    return client.complete_messages(deepcopy(list(messages)), **kwargs)
 
 
 def complete_transformed_messages(
@@ -68,6 +70,9 @@ def complete_transformed_messages(
     temperature: float,
     max_tokens: int,
     json_mode: bool,
+    stage_name: str = "completion",
+    strict_json: bool = False,
+    repair_format: bool = True,
 ) -> str:
     prepared_messages = deepcopy(list(messages))
     _transform_last_user_message(prepared_messages, transform)
@@ -75,13 +80,50 @@ def complete_transformed_messages(
         prepared_messages,
         phase_system_prompt,
     )
-    return client.complete_messages(
+    kwargs = {
+        "system_prompt": system_prompt,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "json_mode": json_mode,
+    }
+    if bool(getattr(client, "_is_agent_runtime", False)):
+        kwargs.update(
+            {
+                "stage_name": stage_name,
+                "strict_json": strict_json,
+                "repair_format": repair_format,
+            }
+        )
+    return client.complete_messages(prepared_messages, **kwargs)
+
+
+def transformed_messages(
+    messages: Sequence[ChatMessage],
+    *,
+    transform: Callable[[str], str],
+    phase_system_prompt: str,
+) -> tuple[list[ChatMessage], str | None]:
+    """Return a defensive copy with only the final user turn transformed."""
+
+    prepared_messages = deepcopy(list(messages))
+    _transform_last_user_message(prepared_messages, transform)
+    return (
         prepared_messages,
-        system_prompt=system_prompt,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        json_mode=json_mode,
+        _merge_phase_system_prompt(prepared_messages, phase_system_prompt),
     )
+
+
+def last_user_text(messages: Sequence[ChatMessage]) -> str:
+    for message in reversed(messages):
+        if message["role"] != "user":
+            continue
+        content = message["content"]
+        if not isinstance(content, str):
+            raise TypeError(
+                "Reasoning agents require text content in the last user message"
+            )
+        return content
+    raise ValueError("Reasoning agents require at least one user message")
 
 
 def _transform_last_user_message(

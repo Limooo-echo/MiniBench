@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from minibench.core.multimodal import ImageAttachment
+from minibench.agents.passthrough import PassthroughAgent
 from minibench.datasets.one_stroke.dataset import load_one_stroke_tasks
 from minibench.datasets.one_stroke.prompting import (
     ONE_STROKE_SYSTEM_PROMPT,
@@ -10,20 +11,19 @@ from minibench.datasets.one_stroke.prompting import (
     history_system_prompt,
 )
 from minibench.factory.agents import make_agent_from_config
-from minibench.factory.providers import OpenAICompatibleAgent
 
 
 class OneStrokePromptIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         agent = make_agent_from_config(
-            {"name": "openai-compatible", "max_tokens": 1024},
+            {"name": "passthrough", "max_tokens": 1024},
             {"name": "qwen", "json_mode": True},
             system_prompt=ONE_STROKE_SYSTEM_PROMPT,
         )
-        if not isinstance(agent, OpenAICompatibleAgent):
-            raise AssertionError("expected an OpenAICompatibleAgent")
-        cls.agent = agent
+        if not isinstance(agent, PassthroughAgent):
+            raise AssertionError("expected a PassthroughAgent")
+        cls.client = agent.client
 
     def test_a4_unsolvable_schema_survives_real_payload_construction(self):
         tasks = load_one_stroke_tasks("data/one_stroke/a4_multimodal.jsonl")
@@ -31,7 +31,7 @@ class OneStrokePromptIntegrationTests(unittest.TestCase):
         prompt = build_one_stroke_prompt(task, input_mode="challenge_image")
         image = ImageAttachment(path=task.image_variants["challenge"])
 
-        payload = self.agent.build_payload(prompt, images=(image,))
+        payload = self.client.build_payload(prompt, images=(image,))
 
         messages = payload["messages"]
         self.assertIsInstance(messages, list)
@@ -70,7 +70,7 @@ class OneStrokePromptIntegrationTests(unittest.TestCase):
                 task = next(item for item in tasks if not item.solution_exists)
                 prompt = build_one_stroke_prompt(task)
 
-                payload = self.agent.build_payload(prompt)
+                payload = self.client.build_payload(prompt)
 
                 messages = payload["messages"]
                 system_text = messages[0]["content"]

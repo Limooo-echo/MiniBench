@@ -10,8 +10,9 @@ from time import perf_counter, sleep
 from typing import Any, Sequence
 import urllib.error
 import urllib.request
+import warnings
 
-from minibench.core.agent import Agent, ChatMessage, MessagePhase
+from minibench.core.agent import Agent, ChatMessage, CompletionResult, MessagePhase
 from minibench.core.metrics import empty_token_usage, extract_token_usage
 from minibench.core.multimodal import ImageAttachment
 from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT
@@ -83,7 +84,9 @@ PROVIDERS = {
 }
 
 
-class OpenAICompatibleAgent(Agent):
+class OpenAICompatibleClient:
+    """Transport client for OpenAI-compatible Chat Completions endpoints."""
+
     name = "openai-compatible"
 
     def __init__(
@@ -196,9 +199,7 @@ class OpenAICompatibleAgent(Agent):
 
     def _system_prompt(self, phase_prompt: str | None = None) -> str:
         prompts = [
-            prompt
-            for prompt in (self.default_system_prompt, phase_prompt)
-            if prompt
+            prompt for prompt in (self.default_system_prompt, phase_prompt) if prompt
         ]
         if prompts:
             return "\n\n".join(prompts)
@@ -214,7 +215,26 @@ class OpenAICompatibleAgent(Agent):
         json_mode: bool | None = None,
         images: Sequence[ImageAttachment] = (),
     ) -> str:
-        return self.complete_messages(
+        return self.complete_result(
+            prompt,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+            images=images,
+        ).content
+
+    def complete_result(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+        images: Sequence[ImageAttachment] = (),
+    ) -> CompletionResult:
+        return self.complete_messages_result(
             [{"role": "user", "content": prompt}],
             system_prompt=system_prompt,
             temperature=temperature,
@@ -233,6 +253,25 @@ class OpenAICompatibleAgent(Agent):
         json_mode: bool | None = None,
         images: Sequence[ImageAttachment] = (),
     ) -> str:
+        return self.complete_messages_result(
+            messages,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+            images=images,
+        ).content
+
+    def complete_messages_result(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool | None = None,
+        images: Sequence[ImageAttachment] = (),
+    ) -> CompletionResult:
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
             raise RuntimeError(
@@ -263,9 +302,8 @@ class OpenAICompatibleAgent(Agent):
                 return self._complete_request_once(request)
             except urllib.error.HTTPError as exc:
                 error_body = exc.read().decode("utf-8", errors="replace")
-                if (
-                    retry_index < self.max_retries
-                    and _is_retryable_http_status(exc.code)
+                if retry_index < self.max_retries and _is_retryable_http_status(
+                    exc.code
                 ):
                     self._sleep_before_retry(retry_index + 1, exc)
                     continue
@@ -284,30 +322,46 @@ class OpenAICompatibleAgent(Agent):
                 raise RuntimeError(f"{self.name} request timed out: {exc}") from exc
         raise AssertionError("retry loop terminated without returning or raising")
 
-    def _complete_request_once(self, request: urllib.request.Request) -> str:
+    def _complete_request_once(
+        self, request: urllib.request.Request
+    ) -> CompletionResult:
         started_at = perf_counter()
+        elapsed_seconds: float | None = None
         usage: object = None
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read().decode("utf-8")
             payload = json.loads(raw)
             if not isinstance(payload, dict):
-                raise RuntimeError(
-                    f"Unexpected chat completion response object: {raw}"
-                )
+                raise RuntimeError(f"Unexpected chat completion response object: {raw}")
             usage = payload.get("usage")
             try:
                 choice = payload["choices"][0]
                 message = choice["message"]
                 content = _message_text(message)
             except (KeyError, IndexError, TypeError) as exc:
-                raise RuntimeError(f"Unexpected chat completion response: {raw}") from exc
+                raise RuntimeError(
+                    f"Unexpected chat completion response: {raw}"
+                ) from exc
+
+            if not isinstance(choice, dict) or not isinstance(message, dict):
+                raise RuntimeError(f"Unexpected chat completion response: {raw}")
+
+            finish_reason_value = choice.get("finish_reason")
+            finish_reason = (
+                finish_reason_value if isinstance(finish_reason_value, str) else None
+            )
+            if finish_reason == "length":
+                raise RuntimeError(
+                    "OpenAI-compatible response was truncated "
+                    "(finish_reason=length). Increase max_tokens or reduce the "
+                    "requested output size."
+                )
 
             if not isinstance(content, str):
                 raise RuntimeError(f"Unexpected message content in response: {raw}")
 
             if not content.strip():
-                finish_reason = choice.get("finish_reason")
                 message_keys = ", ".join(sorted(str(key) for key in message.keys()))
                 raise RuntimeError(
                     "OpenAI-compatible response had empty message content "
@@ -316,9 +370,22 @@ class OpenAICompatibleAgent(Agent):
                     "--extra-body-json, or using a non-reasoning/chat model."
                 )
 
-            return content
+            elapsed_seconds = perf_counter() - started_at
+            model = payload.get("model")
+            response_id = payload.get("id")
+            return CompletionResult(
+                content=content,
+                reasoning=_message_reasoning(message),
+                finish_reason=finish_reason,
+                usage=usage if isinstance(usage, dict) else None,
+                model=model if isinstance(model, str) else None,
+                response_id=response_id if isinstance(response_id, str) else None,
+                elapsed_seconds=elapsed_seconds,
+            )
         finally:
-            self._record_completion_metrics(perf_counter() - started_at, usage)
+            if elapsed_seconds is None:
+                elapsed_seconds = perf_counter() - started_at
+            self._record_completion_metrics(elapsed_seconds, usage)
 
     def _sleep_before_retry(
         self,
@@ -338,6 +405,41 @@ class OpenAICompatibleAgent(Agent):
                 )
         if delay > 0:
             sleep(delay)
+
+    def metrics_snapshot(self) -> dict[str, Any]:
+        return {
+            "model_elapsed_seconds": self._model_elapsed_seconds,
+            "llm_calls": self._llm_calls,
+            "usage_missing_calls": self._usage_missing_calls,
+            "token_usage": dict(self._token_usage),
+        }
+
+    def _record_completion_metrics(
+        self,
+        elapsed_seconds: float,
+        usage: object,
+    ) -> None:
+        self._model_elapsed_seconds += elapsed_seconds
+        self._llm_calls += 1
+        token_usage = extract_token_usage(usage)
+        if token_usage is None:
+            self._usage_missing_calls += 1
+            return
+        for key, value in token_usage.items():
+            self._token_usage[key] = self._token_usage.get(key, 0) + value
+
+
+class OpenAICompatibleAgent(OpenAICompatibleClient, Agent):
+    """Deprecated combined transport/agent kept for Python API compatibility."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        warnings.warn(
+            "OpenAICompatibleAgent is deprecated; compose OpenAICompatibleClient "
+            "with PassthroughAgent or another agent architecture instead",
+            FutureWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
 
     def generate(self, prompt: str, task: Any) -> str:
         return self.complete(prompt)
@@ -391,28 +493,6 @@ class OpenAICompatibleAgent(Agent):
             json_mode=json_mode,
         )
 
-    def metrics_snapshot(self) -> dict[str, Any]:
-        return {
-            "model_elapsed_seconds": self._model_elapsed_seconds,
-            "llm_calls": self._llm_calls,
-            "usage_missing_calls": self._usage_missing_calls,
-            "token_usage": dict(self._token_usage),
-        }
-
-    def _record_completion_metrics(
-        self,
-        elapsed_seconds: float,
-        usage: object,
-    ) -> None:
-        self._model_elapsed_seconds += elapsed_seconds
-        self._llm_calls += 1
-        token_usage = extract_token_usage(usage)
-        if token_usage is None:
-            self._usage_missing_calls += 1
-            return
-        for key, value in token_usage.items():
-            self._token_usage[key] = self._token_usage.get(key, 0) + value
-
 
 def _content_part_to_text(part: object) -> str:
     if isinstance(part, str):
@@ -438,9 +518,7 @@ def _validate_messages(messages: Sequence[ChatMessage]) -> list[ChatMessage]:
         role = message.get("role")
         content = message.get("content")
         if role not in {"system", "user", "assistant"}:
-            raise ValueError(
-                f"message {index} role must be system, user, or assistant"
-            )
+            raise ValueError(f"message {index} role must be system, user, or assistant")
         if not isinstance(content, str):
             raise ValueError(f"message {index} content must be a string")
         normalized.append({"role": role, "content": content})
@@ -478,17 +556,17 @@ def _content_to_text(content: object) -> str:
 def _message_text(message: object) -> str:
     if not isinstance(message, dict):
         return ""
-    content = _content_to_text(message.get("content"))
-    if content.strip():
-        return content
+    return _content_to_text(message.get("content"))
 
-    # Reasoning models served through OpenAI-compatible APIs often place their
-    # scratch work in provider-specific fields before emitting visible content.
+
+def _message_reasoning(message: object) -> str | None:
+    if not isinstance(message, dict):
+        return None
     for key in ("reasoning_content", "reasoning", "reasoning_details"):
         reasoning = _content_to_text(message.get(key))
         if reasoning.strip():
             return reasoning
-    return content
+    return None
 
 
 def resolve_provider(

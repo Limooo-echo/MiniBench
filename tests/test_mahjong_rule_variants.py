@@ -593,7 +593,7 @@ class MahjongRuleVariantTests(unittest.TestCase):
                     "--rule-channel",
                     STANDARD_RULES,
                     "--agent",
-                    "openai-compatible",
+                    "passthrough",
                     "--output-dir",
                     tmpdir,
                     "--run-name",

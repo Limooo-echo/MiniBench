@@ -5,7 +5,12 @@ from unittest.mock import patch
 import unittest
 import urllib.error
 
-from minibench.factory.providers import OpenAICompatibleAgent, resolve_provider
+from minibench.core.agent import CompletionResult
+from minibench.factory.providers import (
+    OpenAICompatibleAgent,
+    OpenAICompatibleClient,
+    resolve_provider,
+)
 
 
 class FakeHTTPResponse:
@@ -66,7 +71,9 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(api_key_env, "DASHSCOPE_API_KEY")
 
     def test_siliconflow_provider_requires_model(self):
-        with self.assertRaisesRegex(ValueError, "siliconflow provider requires --model"):
+        with self.assertRaisesRegex(
+            ValueError, "siliconflow provider requires --model"
+        ):
             resolve_provider(
                 "siliconflow",
                 model=None,
@@ -163,9 +170,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
             default_system_prompt="Shared task rules.",
         )
 
-        payload = agent.build_messages_payload(
-            [{"role": "user", "content": "Clue 1"}]
-        )
+        payload = agent.build_messages_payload([{"role": "user", "content": "Clue 1"}])
 
         self.assertEqual(
             [message["role"] for message in payload["messages"]],
@@ -188,7 +193,9 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         ]
 
         with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
-            with patch("urllib.request.urlopen", return_value=FakeHTTPResponse(response)) as urlopen:
+            with patch(
+                "urllib.request.urlopen", return_value=FakeHTTPResponse(response)
+            ) as urlopen:
                 output = agent.complete_messages(messages)
 
         request = urlopen.call_args.args[0]
@@ -196,8 +203,35 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(output, '{"ok":true}')
         self.assertEqual(sent_payload["messages"], messages)
 
-    def test_complete_uses_reasoning_content_when_visible_content_is_empty(self):
-        agent = OpenAICompatibleAgent(
+    def test_complete_rejects_reasoning_only_response(self):
+        client = OpenAICompatibleClient(
+            model="test-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+        )
+        payload = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "private chain of thought",
+                    },
+                }
+            ]
+        }
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch(
+                "urllib.request.urlopen", return_value=FakeHTTPResponse(payload)
+            ):
+                with self.assertRaisesRegex(RuntimeError, "empty message content"):
+                    client.complete("Question?")
+
+        self.assertEqual(client.metrics_snapshot()["llm_calls"], 1)
+
+    def test_complete_rejects_length_finish_even_with_visible_content(self):
+        client = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -206,19 +240,61 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
             "choices": [
                 {
                     "finish_reason": "length",
-                    "message": {
-                        "content": "",
-                        "reasoning_content": "answer: C",
-                    },
+                    "message": {"content": '{"answer":"partial"}'},
                 }
             ]
         }
 
         with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
-            with patch("urllib.request.urlopen", return_value=FakeHTTPResponse(payload)):
-                output = agent.complete("Question?")
+            with patch(
+                "urllib.request.urlopen", return_value=FakeHTTPResponse(payload)
+            ):
+                with self.assertRaisesRegex(RuntimeError, "truncated"):
+                    client.complete("Question?")
 
-        self.assertEqual(output, "answer: C")
+        self.assertEqual(client.metrics_snapshot()["llm_calls"], 1)
+
+    def test_complete_result_preserves_rich_response_metadata(self):
+        client = OpenAICompatibleClient(
+            model="requested-model",
+            base_url="https://example.com/v1",
+            api_key_env="TEST_KEY",
+        )
+        usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 4,
+            "total_tokens": 14,
+        }
+        payload = {
+            "id": "chatcmpl-123",
+            "model": "served-model",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": '{"answer":"C"}',
+                        "reasoning_content": "private reasoning",
+                    },
+                }
+            ],
+            "usage": usage,
+        }
+
+        with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
+            with patch(
+                "urllib.request.urlopen", return_value=FakeHTTPResponse(payload)
+            ):
+                result = client.complete_result("Question?")
+
+        self.assertIsInstance(result, CompletionResult)
+        self.assertEqual(result.content, '{"answer":"C"}')
+        self.assertEqual(result.reasoning, "private reasoning")
+        self.assertEqual(result.finish_reason, "stop")
+        self.assertEqual(result.usage, usage)
+        self.assertEqual(result.model, "served-model")
+        self.assertEqual(result.response_id, "chatcmpl-123")
+        self.assertIsNotNone(result.elapsed_seconds)
+        self.assertGreaterEqual(result.elapsed_seconds, 0.0)
 
     def test_complete_records_usage_metrics(self):
         agent = OpenAICompatibleAgent(
@@ -238,7 +314,9 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         }
 
         with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
-            with patch("urllib.request.urlopen", return_value=FakeHTTPResponse(payload)):
+            with patch(
+                "urllib.request.urlopen", return_value=FakeHTTPResponse(payload)
+            ):
                 output = agent.complete("Question?")
 
         metrics = agent.metrics_snapshot()
@@ -263,7 +341,9 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         }
 
         with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
-            with patch("urllib.request.urlopen", return_value=FakeHTTPResponse(payload)):
+            with patch(
+                "urllib.request.urlopen", return_value=FakeHTTPResponse(payload)
+            ):
                 agent.complete("Question?")
 
         metrics = agent.metrics_snapshot()
@@ -325,7 +405,9 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
                 )
                 effects = [make_http_error(status_code), FakeHTTPResponse(response)]
                 with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
-                    with patch("urllib.request.urlopen", side_effect=effects) as urlopen:
+                    with patch(
+                        "urllib.request.urlopen", side_effect=effects
+                    ) as urlopen:
                         output = agent.complete("Question?")
 
                 self.assertEqual(output, '{"ok":true}')
@@ -409,11 +491,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
             api_key_env="TEST_KEY",
             max_retries=3,
         )
-        response = {
-            "choices": [
-                {"finish_reason": "stop", "message": {"content": ""}}
-            ]
-        }
+        response = {"choices": [{"finish_reason": "stop", "message": {"content": ""}}]}
 
         with patch.dict("os.environ", {"TEST_KEY": "test-key"}):
             with patch(

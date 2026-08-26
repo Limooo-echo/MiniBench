@@ -5,8 +5,7 @@ task:
   task_ids: []
 
 agent:
-  name: openai-compatible
-  samples: 1
+  name: passthrough
 
 provider:
   name: qwen

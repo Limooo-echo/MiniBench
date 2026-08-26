@@ -8,7 +8,7 @@ task:
     strategy: random
 
 agent:
-  name: openai-compatible
+  name: passthrough
   max_tokens: 512
 
 provider:

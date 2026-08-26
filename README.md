@@ -226,7 +226,7 @@ minibench run-config config/experiments/zebra_rule_codebook.yaml
 minibench run-config config/experiments/zebra_history.yaml
 ```
 
-`zebra_history.yaml` 必须保持 `agent.name: openai-compatible`，因为该评测调用真实的多轮 `generate_messages()` 接口。
+`zebra_history.yaml` 默认使用 `agent.name: passthrough`；所有实现 phase-aware 消息接口的推理 Agent 也可运行该多轮评测。
 
 ### 4.2 象棋 schema v2
 
@@ -331,7 +331,7 @@ minibench run-config config/experiments/one_stroke_generated.yaml
 minibench run-config config/experiments/one_stroke_generated_euler_theorem.yaml
 ```
 
-一笔画 A3 会区分 `intermediate` 与 `final` 阶段。`openai-compatible` 可直接运行；
+一笔画 A3 会区分 `intermediate` 与 `final` 阶段。`passthrough` 可直接运行；
 CoT/ToT 等 phase-aware 包装器会在中间轮使用轻量消息调用，只在最终轮执行其完整推理流程。
 
 ### 4.4 麻将
@@ -356,41 +356,140 @@ minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
 
 ## 5. 如何切换 agent 架构
 
-agent 架构和 provider 是两个独立维度：`agent.name` 决定一次题目如何组织模型调用，`provider` 决定这些调用发给哪个模型服务。
+### 5.1 通信客户端与推理策略是两层
 
-| `agent.name` | 单次静态题的大致模型调用数 | 用途 |
+`provider`、通信客户端和 Agent 策略各自负责不同事情：
+
+```text
+provider YAML
+      ↓
+OpenAICompatibleClient        请求、HTTP 重试、provider 兼容、usage、响应解析
+      ↓
+Passthrough / Direct / CoT / SC / Best-of-N / ToT / ...
+                              Prompt 编排与推理算法
+```
+
+`OpenAICompatibleClient` 不是一种推理架构。它只负责把文本、历史消息和图片发送到 OpenAI-compatible `chat/completions` 服务，并解析可见内容、独立 reasoning、finish reason 与 usage。Provider 返回的 `reasoning_content` 不会再被当作最终答案；可见内容为空或被截断会产生明确错误。
+
+`passthrough` 与 `direct` 都通常只调用模型一次，但语义不同：
+
+- `passthrough` 保留原始调用语义，不附加策略 Prompt，也不强制 JSON 校验或格式修复，适合作为 raw baseline 和连接测试。
+- `direct` 会附加 Direct v2 策略契约，要求恰好一个最终 JSON 对象，并可使用统一运行追踪、预算和一次低温格式修复。
+
+公开的 `agent.name` 为：
+
+```text
+passthrough
+direct
+cot
+self-consistency
+best-of-n
+tot
+plan-then-solve
+critic-refine
+least-to-most
+```
+
+未显式填写名称时 factory 默认使用 `direct`。旧 YAML 名称 `openai-compatible` 已从公开列表移除，但仍会在发出 `FutureWarning` 后解析为 `passthrough`，完整保留 raw baseline 语义；它绝不会静默映射为 `direct`。旧代码直接导入的 `OpenAICompatibleAgent` 也只作为兼容包装保留。
+
+### 5.2 各架构的算法与调用数
+
+下表是单次静态题的正常调用数，不包含响应非法后可能发生的格式修复调用：
+
+| `agent.name` | 正常模型调用数 | 算法 |
 | --- | ---: | --- |
-| `openai-compatible` | 1 | 最小基线；支持真实多轮 messages |
-| `direct` | 1 | 强制直接输出最终 JSON |
-| `cot` | 2 | 先推理，再整理最终 JSON |
-| `self-consistency` | `samples + 1` | 多条推理路径后评选 |
-| `tot` | `samples + 1` | 多候选 thought branches 后评选 |
-| `plan-then-solve` | 3 | 计划、求解、最终格式化 |
-| `critic-refine` | 3 | 草稿、批评、修订 |
+| `passthrough` | 1 | 原样调用；支持真实历史 messages |
+| `direct` | 1 | 一次调用直接生成最终 JSON |
+| `cot` | 2 | reasoning → finalizer |
+| `self-consistency` | `N` | `N=samples` 条独立 CoT 路径，程序化 JSON 投票 |
+| `best-of-n` | `N + 1` | `N` 条 CoT 候选 + 一次只选 ID 的 LLM judge |
+| `tot` | 随搜索树变化 | beam/BFS 展开 → 每层 value 评分 → finalizer |
+| `plan-then-solve` | 3 | plan → solve → finalizer |
+| `critic-refine` | 3 | draft → critique → refine |
+| `least-to-most` | `K + 2` | decompose → 顺序解决 `K` 个子问题 → finalizer |
 
-动态棋局/牌局会在每个 agent 行动回合重复上述过程；多模态推理包装器还会在各阶段重复发送图片，因此调用量和图片 token 成本会明显增加。
+Self-Consistency 不再调用 LLM judge。它从每个样本提取最后一个完整 JSON 对象，用排序键和紧凑序列化 canonicalize 后计票；非法候选被忽略，多数票获胜，最高票平局时稳定选择最早生成的候选。若所有样本都非法，且允许格式修复，则只对一个候选执行一次低温修复。`samples` 默认 3、最小 2，`reasoning_temperature` 必须非零。
 
-复制一份 YAML 后修改 agent：
+Best-of-N 保留 LLM judge，但 judge 只能返回 `selected_id` 和每个候选的评分，不能改写任务答案。候选使用稳定 ID，展示顺序按 `selection_seed` 确定性打乱，默认 seed 为 42；程序最终返回被选候选中的 JSON。
+
+当前 `tot` 是任务无关的真正 beam/BFS Tree of Thoughts，而不是多候选别名。它为 beam 中的非终止节点生成子 thought，每层批量调用 value evaluator 得到 `[0,1]` 分数并裁剪到 `beam_width`；终止节点不再展开。同分按稳定 node ID 排序。搜索在 beam 全终止、深度/节点/调用预算耗尽时停止，优先选择最高分终止节点，否则选最高分叶节点，再由统一 finalizer 生成任务 JSON。它不读取数据集标准答案或任务评分器。
+
+Least-to-Most 先结构化分解，随后按依赖顺序解决子问题；每一步只能引用原题和此前结果。合法但为空的分解会把原题作为唯一子问题，最终再合成严格 JSON。默认最多 4 个子问题。
+
+动态棋局或牌局会在每个 Agent 行动回合重复上述过程。多模态推理的每个需要观察原题的阶段都会传递图片，因此调用量和图片 token 成本会明显增加。
+
+### 5.3 严格 YAML 字段
+
+Agent 配置现在严格校验。字段放在不支持它的架构下会直接报错，不再静默忽略。字段组如下：
+
+- 基础字段：`name`、`predictions`、`max_tokens`。
+- 运行字段：`prompt_version`、`trace`、`max_llm_calls`、`max_total_tokens`、`max_format_repairs`。
+- 推理字段：`reasoning_temperature`、`final_temperature`、`max_reasoning_tokens`。
+
+各架构允许的额外字段为：
+
+| Agent | 允许字段 |
+| --- | --- |
+| `passthrough` | 仅基础字段；不接受运行字段、reasoning 字段或 `samples` |
+| `direct` | 基础字段 + 运行字段 + `final_temperature` |
+| `cot` / `plan-then-solve` / `critic-refine` | 基础字段 + 运行字段 + 推理字段 |
+| `self-consistency` | 上述推理 Agent 字段 + `samples` |
+| `best-of-n` | 上述推理 Agent 字段 + `samples` + `selection_seed` |
+| `tot` | 上述推理 Agent 字段 + `max_depth`、`branching_factor`、`beam_width`、`max_search_nodes` |
+| `least-to-most` | 上述推理 Agent 字段 + `max_subproblems` |
+
+`prompt_version` 默认 `v2`。`v1` 完整保留旧 Direct、CoT、Plan、Critic 等模板，供旧实验显式复现；新架构 `best-of-n`、真正的 `tot` 和 `least-to-most` 只支持 `v2`。v2 每个阶段都使用固定的 `<OBJECTIVE>`、`<INPUT>`、`<PRIOR_STATE>`、`<CONSTRAINTS>`、`<OUTPUT_CONTRACT>`、`<STOP_POLICY>` 六段契约，候选和状态以 JSON 安全编码。运行轨迹会记录 Prompt 版本和 SHA-256 hash。
+
+`trace` 默认 `summary`：
+
+- `off`：不保留逐阶段轨迹。
+- `summary`：保留阶段名、Prompt hash、耗时、usage、解析状态和算法元数据，不保存原文。
+- `full`：额外保存完整 Prompt、可见响应、独立 reasoning 和解析后 JSON。它可能包含原题或模型敏感内容，应谨慎启用。
+
+预算与修复字段：
+
+- `max_llm_calls`：一次 Agent run 的逻辑 LLM 调用上限；内部阶段和格式修复都计数。
+- `max_total_tokens`：依据 provider `usage.total_tokens` 累积的软上限。单次调用可能越过上限；达到上限后会在下一次调用前停止。Provider 不返回 usage 时无法精确执行该限制。
+- `max_format_repairs`：只能是 0 或 1，默认 1；控制需要严格 JSON 的阶段是否允许一次低温格式修复。`passthrough` 始终不修复。
+- `max_search_nodes`：ToT 的可选硬节点上限；留空时由深度、分支数和 beam 宽度推导。
+
+最终字符串接口保持不变；对使用统一运行内核的策略 Agent（即除 `passthrough` 外的公开策略），可通过 `agent.last_run` 查看最近一次运行的阶段、预算、状态和停止原因。
+
+### 5.4 配置示例
+
+复制正式 YAML 到 Git 已忽略的 `tmp/` 后再修改：
 
 ```bash
 mkdir -p tmp/configs
-cp config/experiments/mahjong.yaml tmp/configs/mahjong-cot.yaml
-nano tmp/configs/mahjong-cot.yaml
+cp config/experiments/mahjong.yaml tmp/configs/mahjong-agent.yaml
+nano tmp/configs/mahjong-agent.yaml
 ```
 
-例如 CoT：
+Raw passthrough 只写基础字段：
+
+```yaml
+agent:
+  name: passthrough
+  max_tokens: 512
+```
+
+CoT 不接受 `samples`：
 
 ```yaml
 agent:
   name: cot
-  samples: 1
+  prompt_version: v2
+  trace: summary
   reasoning_temperature: 0.0
   final_temperature: 0.0
   max_reasoning_tokens: 1024
   max_tokens: 512
+  max_llm_calls: 3
+  max_total_tokens: 8192
+  max_format_repairs: 1
 ```
 
-例如 self-consistency：
+真正的 Self-Consistency：
 
 ```yaml
 agent:
@@ -400,21 +499,67 @@ agent:
   final_temperature: 0.0
   max_reasoning_tokens: 1024
   max_tokens: 512
+  max_llm_calls: 6
+```
+
+Best-of-N：
+
+```yaml
+agent:
+  name: best-of-n
+  samples: 5
+  selection_seed: 42
+  reasoning_temperature: 0.7
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+  max_tokens: 512
+  max_llm_calls: 8
+```
+
+默认规模的 beam/BFS ToT：
+
+```yaml
+agent:
+  name: tot
+  prompt_version: v2
+  max_depth: 3
+  branching_factor: 3
+  beam_width: 2
+  max_search_nodes: 16
+  reasoning_temperature: 0.7
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+  max_tokens: 512
+  max_llm_calls: 24
+```
+
+Least-to-Most：
+
+```yaml
+agent:
+  name: least-to-most
+  prompt_version: v2
+  max_subproblems: 4
+  reasoning_temperature: 0.0
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+  max_tokens: 512
+  max_llm_calls: 12
 ```
 
 运行修改后的配置：
 
 ```bash
-minibench run-config tmp/configs/mahjong-cot.yaml
+minibench run-config tmp/configs/mahjong-agent.yaml
 ```
 
 选择建议：
 
-- 先用 `openai-compatible` 做一题连通性 smoke test。
-- 再用 `direct` 或 `cot` 建基线。
-- 只有在预算允许时再用 `self-consistency`、`tot`、`plan-then-solve`、`critic-refine`。
-- Zebra history 和一笔画 A3 都支持 `openai-compatible` 以及实现了 phase-aware 消息接口的推理 agent。
-- 象棋 history 可以切换 agent，但会在多步对局中产生很多模型调用。
+- 先用 `passthrough` 做一题连接和 provider 响应 smoke test。
+- 再用 `direct` 或 `cot` 建立可比较基线。
+- 只有在预算允许时再用 `self-consistency`、`best-of-n`、`tot`、`least-to-most`、`plan-then-solve` 或 `critic-refine`。
+- Zebra history 和一笔画 A3 支持 `passthrough` 以及实现 phase-aware 消息接口的推理 Agent。
+- 象棋 history 可以切换 Agent，但会在多步对局中产生很多模型调用。
 
 ## 6. 多模态：DeepSeek 文本 + Qwen 图片的正确跑法
 
@@ -496,7 +641,6 @@ nano tmp/configs/xiangqi-multimodal-qwen-cot.yaml
 ```yaml
 agent:
   name: cot
-  samples: 1
   reasoning_temperature: 0.0
   final_temperature: 0.0
   max_reasoning_tokens: 1024
@@ -537,7 +681,7 @@ find runs -maxdepth 2 -type f -printf '%TY-%Tm-%Td %TH:%TM  %p\n' \
 
 ```yaml
 agent:
-  name: openai-compatible
+  name: passthrough
   predictions: path/to/predictions.jsonl
 ```
 
@@ -580,7 +724,7 @@ env | grep -E 'DEEPSEEK_API_KEY|DASHSCOPE_API_KEY' | sed 's/=.*/=<set>/'
 
 ### 模型输出为空、超时或 JSON 被截断
 
-先使用 `openai-compatible`、关闭 provider 原生 thinking，并提高 `provider.timeout` 与 `agent.max_tokens`/`provider.max_tokens`。不要一开始就运行多样本 agent 或完整多模态消融。
+先使用 `passthrough`、关闭 provider 原生 thinking，并提高 `provider.timeout` 与 `agent.max_tokens`/`provider.max_tokens`。不要一开始就运行多样本 agent 或完整多模态消融。
 
 ### `Pikafish executable was not found`
 

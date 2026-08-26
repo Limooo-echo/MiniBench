@@ -5,11 +5,7 @@ task:
   task_ids: []
 
 agent:
-  name: openai-compatible
-  samples: 3
-  reasoning_temperature: 0.7
-  final_temperature: 0.0
-  max_reasoning_tokens: 512
+  name: passthrough
 
 provider:
   name: deepseek

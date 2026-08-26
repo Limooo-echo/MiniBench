@@ -5,7 +5,7 @@ task:
   task_ids: []
 
 agent:
-  name: openai-compatible
+  name: passthrough
 
 provider:
   name: deepseek
@@ -19,8 +19,8 @@ provider:
 
 evaluation:
   memory_modes:
-    - incremental_state
     - deferred_reasoning
+
   state_max_tokens: 512
   ack_max_tokens: 32
   final_max_tokens: 4096
@@ -28,5 +28,5 @@ evaluation:
 
 run:
   output_dir: runs
-  run_name: zebra-history-deepseek
+  run_name: zebra-history-deferred_0823
   on_existing: resume

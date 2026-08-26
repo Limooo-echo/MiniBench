@@ -5,7 +5,7 @@ task:
   task_ids: []
 
 agent:
-  name: openai-compatible
+  name: passthrough
 
 provider:
   name: deepseek
@@ -27,4 +27,4 @@ evaluation:
 
 run:
   output_dir: runs
-  run_name: null
+  run_name: one_stroke_direct_0825

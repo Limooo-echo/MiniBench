@@ -21,7 +21,7 @@ PROVIDER_CHOICES = (
     "siliconflow",
 )
 
-ENV_AGENT_CHOICES = ("openai-compatible",)
+ENV_AGENT_CHOICES = ("passthrough",)
 STATIC_GENERATIVE_AGENT_CHOICES = AGENT_NAMES
 
 XIANGQI_CONFIGS = {
@@ -80,13 +80,13 @@ def _reject_reasoning_agent_for_xiangqi_battle(
     args: argparse.Namespace,
     tasks: list[Any],
 ) -> None:
-    if args.agent == "openai-compatible":
+    if args.agent == "passthrough":
         return
     if any(_is_xiangqi_battle_task(task, args.opponent) for task in tasks):
         raise SystemExit(
             "reasoning agent architectures are only supported for static Xiangqi "
             "tasks (opponent=none, max_steps=1, goal=capture_enemy_general). "
-            "Use --agent openai-compatible for Pikafish or multi-step Xiangqi "
+            "Use --agent passthrough for Pikafish or multi-step Xiangqi "
             "battle tasks."
         )
 
@@ -909,7 +909,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_xiangqi.add_argument(
         "--agent",
         choices=STATIC_GENERATIVE_AGENT_CHOICES,
-        default="openai-compatible",
+        default="passthrough",
     )
     _add_provider_args(evaluate_xiangqi, max_tokens=128)
     _add_run_args(evaluate_xiangqi)
@@ -1147,7 +1147,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_one_stroke.add_argument(
         "--agent",
         choices=STATIC_GENERATIVE_AGENT_CHOICES,
-        default="openai-compatible",
+        default="passthrough",
     )
     from minibench.datasets.one_stroke.prompting import ONE_STROKE_PROMPT_VARIANTS
 
@@ -1197,7 +1197,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_zebra.add_argument(
         "--agent",
         choices=STATIC_GENERATIVE_AGENT_CHOICES,
-        default="openai-compatible",
+        default="passthrough",
     )
     evaluate_zebra.add_argument(
         "--memory-mode",
@@ -1229,7 +1229,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_mahjong.add_argument(
         "--agent",
         choices=STATIC_GENERATIVE_AGENT_CHOICES,
-        default="openai-compatible",
+        default="passthrough",
     )
     evaluate_mahjong.add_argument(
         "--goal",
@@ -1375,7 +1375,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_mahjong_solo.add_argument(
         "--agent",
         choices=STATIC_GENERATIVE_AGENT_CHOICES,
-        default="openai-compatible",
+        default="passthrough",
     )
     evaluate_mahjong_solo.add_argument(
         "--move-scorer",
@@ -1440,7 +1440,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_mahjong_rules.add_argument(
         "--agent",
         choices=STATIC_GENERATIVE_AGENT_CHOICES,
-        default="openai-compatible",
+        default="passthrough",
     )
     evaluate_mahjong_rules.add_argument(
         "--observation-mode",
@@ -1492,7 +1492,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_mahjong_riichi.add_argument(
         "--agent",
         choices=ENV_AGENT_CHOICES,
-        default="openai-compatible",
+        default="passthrough",
     )
     evaluate_mahjong_riichi.add_argument(
         "--riichi-opponent",

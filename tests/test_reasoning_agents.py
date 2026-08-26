@@ -1,16 +1,20 @@
 from copy import deepcopy
+import json
 import unittest
 
 from minibench.agents import (
+    BestOfNAgent,
     CoTAgent,
     CriticRefineAgent,
     DirectAgent,
+    LeastToMostAgent,
     PlanThenSolveAgent,
-    ReasoningConfig,
     SelfConsistencyAgent,
     TreeOfThoughtAgent,
 )
-from minibench.core.metrics import finish_task_metrics, start_task_metrics
+from minibench.core.agent import ReasoningConfig
+from minibench.core.multimodal import ImageAttachment
+from minibench.core.runtime import StrictJSONObjectError
 
 
 class FakeClient:
@@ -18,393 +22,575 @@ class FakeClient:
         self.responses = list(responses)
         self.calls = []
 
-    def complete(
-        self,
-        prompt,
-        *,
-        system_prompt=None,
-        temperature=None,
-        max_tokens=None,
-        json_mode=None,
-        images=(),
-    ):
+    def _next(self):
+        if not self.responses:
+            raise AssertionError("fake client ran out of responses")
+        return self.responses.pop(0)
+
+    def complete(self, prompt, **options):
         self.calls.append(
             {
                 "kind": "prompt",
                 "prompt": prompt,
-                "system_prompt": system_prompt,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "json_mode": json_mode,
-                "images": images,
+                "options": options,
             }
         )
-        if not self.responses:
-            raise AssertionError("fake client ran out of responses")
-        return self.responses.pop(0)
+        return self._next()
 
-    def complete_messages(
-        self,
-        messages,
-        *,
-        system_prompt=None,
-        temperature=None,
-        max_tokens=None,
-        json_mode=None,
-        images=(),
-    ):
+    def complete_messages(self, messages, **options):
         self.calls.append(
             {
                 "kind": "messages",
                 "messages": deepcopy(list(messages)),
-                "system_prompt": system_prompt,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "json_mode": json_mode,
-                "images": images,
+                "options": options,
             }
         )
-        if not self.responses:
-            raise AssertionError("fake client ran out of responses")
-        return self.responses.pop(0)
+        return self._next()
 
 
-class MetricsClient(FakeClient):
-    def __init__(self, responses):
-        super().__init__(responses)
-        self.model_elapsed_seconds = 0.0
-        self.llm_calls = 0
-        self.usage_missing_calls = 0
-        self.token_usage = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        }
-
-    def complete(self, *args, **kwargs):
-        output = super().complete(*args, **kwargs)
-        self.llm_calls += 1
-        self.model_elapsed_seconds += 0.25
-        self.token_usage["prompt_tokens"] += 7
-        self.token_usage["completion_tokens"] += 3
-        self.token_usage["total_tokens"] += 10
-        return output
-
-    def metrics_snapshot(self):
-        return {
-            "model_elapsed_seconds": self.model_elapsed_seconds,
-            "llm_calls": self.llm_calls,
-            "usage_missing_calls": self.usage_missing_calls,
-            "token_usage": dict(self.token_usage),
-        }
+def image():
+    return ImageAttachment(
+        data=b"\x89PNG\r\n\x1a\n",
+        mime_type="image/png",
+    )
 
 
-def sample_task():
-    return object()
-
-
-def message_agent_cases(config):
+def history():
     return [
-        (DirectAgent, config, 1),
-        (CoTAgent, config, 2),
-        (SelfConsistencyAgent, config, config.samples + 1),
-        (TreeOfThoughtAgent, config, config.samples + 1),
-        (CriticRefineAgent, config, 3),
-        (PlanThenSolveAgent, config, 3),
+        {"role": "system", "content": "Domain rules"},
+        {"role": "user", "content": "Earlier question"},
+        {"role": "assistant", "content": "Earlier answer"},
+        {"role": "user", "content": "Current question"},
     ]
 
 
-class ReasoningAgentTests(unittest.TestCase):
-    def test_every_reasoning_stage_receives_images(self):
-        from minibench.core.multimodal import ImageAttachment
+def reasoning_config(**overrides):
+    values = {
+        "reasoning_temperature": 0.8,
+        "final_temperature": 0.1,
+        "max_reasoning_tokens": 128,
+        "final_max_tokens": 32,
+    }
+    values.update(overrides)
+    return ReasoningConfig(**values)
 
-        image = ImageAttachment(data=b"\x89PNG\r\n\x1a\n", mime_type="image/png")
-        cases = [
-            (DirectAgent, ReasoningConfig(), 1),
-            (CoTAgent, ReasoningConfig(), 2),
-            (SelfConsistencyAgent, ReasoningConfig(samples=2), 3),
-            (TreeOfThoughtAgent, ReasoningConfig(samples=2), 3),
-            (CriticRefineAgent, ReasoningConfig(), 3),
-            (PlanThenSolveAgent, ReasoningConfig(), 3),
-        ]
-        for agent_type, config, call_count in cases:
+
+def one_level_tot_responses(answer=1):
+    return [
+        json.dumps(
+            {
+                "thought": "finish the task",
+                "state_summary": "ready",
+                "terminal": True,
+                "proposed_answer": {"answer": answer},
+            }
+        ),
+        json.dumps(
+            {
+                "evaluations": [
+                    {
+                        "node_id": "n0001",
+                        "score": 0.9,
+                        "valid": True,
+                        "terminal": True,
+                        "reason": "complete",
+                    }
+                ]
+            }
+        ),
+        json.dumps({"answer": answer}),
+    ]
+
+
+class ExistingReasoningTopologyTests(unittest.TestCase):
+    def test_existing_agent_call_topologies_temperatures_and_tokens(self):
+        cases = (
+            (
+                DirectAgent,
+                ['{"answer":"direct"}'],
+                1,
+                [0.1],
+                [32],
+            ),
+            (
+                CoTAgent,
+                ['reasoning {"answer":"cot"}', '{"answer":"cot"}'],
+                2,
+                [0.8, 0.1],
+                [128, 32],
+            ),
+            (
+                PlanThenSolveAgent,
+                [
+                    '{"steps":["inspect"],"risks":[]}',
+                    '{"solution":"done"}',
+                    '{"answer":"plan"}',
+                ],
+                3,
+                [0.8, 0.8, 0.1],
+                [128, 128, 32],
+            ),
+            (
+                CriticRefineAgent,
+                [
+                    '{"answer":"draft"}',
+                    '{"is_valid":false,"issues":["x"],"corrections":["y"]}',
+                    '{"answer":"refined"}',
+                ],
+                3,
+                [0.8, 0.1, 0.1],
+                [128, 128, 32],
+            ),
+        )
+        attachment = image()
+        for agent_type, responses, expected_calls, temperatures, token_limits in cases:
             with self.subTest(agent=agent_type.__name__):
-                client = FakeClient(["draft"] * (call_count - 1) + ['{"ok":true}'])
-                agent = agent_type(client, config)
-                agent.generate_multimodal("Question", object(), images=[image])
-                self.assertEqual(len(client.calls), call_count)
-                self.assertTrue(
-                    all(call["images"] == [image] for call in client.calls)
+                client = FakeClient(responses)
+                agent = agent_type(client, reasoning_config())
+
+                output = agent.generate_multimodal(
+                    "Question",
+                    object(),
+                    images=[attachment],
                 )
 
-    def test_cot_finalizes_non_choice_json_schema(self):
-        client = FakeClient(["The pair wait is E.", '{"winning_tiles":["E"]}'])
-        agent = CoTAgent(client, ReasoningConfig())
+                self.assertEqual(len(client.calls), expected_calls)
+                self.assertTrue(output.startswith('{"answer"'))
+                self.assertEqual(
+                    [call["options"]["temperature"] for call in client.calls],
+                    temperatures,
+                )
+                self.assertEqual(
+                    [call["options"]["max_tokens"] for call in client.calls],
+                    token_limits,
+                )
+                self.assertTrue(
+                    all(
+                        call["options"]["images"] == [attachment]
+                        for call in client.calls
+                    )
+                )
+                self.assertEqual(len(agent.last_run.stages), expected_calls)
 
-        output = agent.generate(
-            'Return {"winning_tiles":["E"]} for this Mahjong task.',
-            object(),
+    def test_existing_agents_preserve_history_and_transform_only_current_turn(self):
+        cases = (
+            (DirectAgent, ['{"answer":"direct"}'], 1),
+            (
+                CoTAgent,
+                ['reasoning {"answer":"cot"}', '{"answer":"cot"}'],
+                2,
+            ),
+            (
+                PlanThenSolveAgent,
+                [
+                    '{"steps":["x"],"risks":[]}',
+                    '{"solution":"s"}',
+                    '{"answer":"plan"}',
+                ],
+                3,
+            ),
+            (
+                CriticRefineAgent,
+                [
+                    '{"answer":"draft"}',
+                    '{"is_valid":true,"issues":[],"corrections":[]}',
+                    '{"answer":"refined"}',
+                ],
+                3,
+            ),
         )
-
-        self.assertEqual(output, '{"winning_tiles":["E"]}')
-        self.assertEqual(len(client.calls), 2)
-        self.assertTrue(client.calls[-1]["json_mode"])
-        self.assertIn("schema requested", client.calls[-1]["prompt"])
-
-    def test_self_consistency_uses_generic_judge(self):
-        client = FakeClient(
-            ["candidate C", "candidate B", "candidate C", '{"answer":"C"}']
-        )
-        agent = SelfConsistencyAgent(client, ReasoningConfig(samples=3))
-
-        output = agent.generate("Question prompt", sample_task())
-
-        self.assertEqual(output, '{"answer":"C"}')
-        self.assertEqual(len(client.calls), 4)
-        self.assertTrue(client.calls[-1]["json_mode"])
-        self.assertIn("Candidate solutions:", client.calls[-1]["prompt"])
-
-    def test_tree_of_thought_generates_candidates_and_judges(self):
-        client = FakeClient(
-            [
-                "Candidate says A",
-                "Candidate says C",
-                "Candidate says B",
-                '{"answer":"C"}',
-            ]
-        )
-        agent = TreeOfThoughtAgent(client, ReasoningConfig(samples=3))
-
-        output = agent.generate("Question prompt", sample_task())
-
-        self.assertEqual(output, '{"answer":"C"}')
-        self.assertEqual(len(client.calls), 4)
-        self.assertTrue(client.calls[-1]["json_mode"])
-        self.assertIn("Candidate solutions:", client.calls[-1]["prompt"])
-
-    def test_critic_refine_returns_refined_answer(self):
-        client = FakeClient(
-            [
-                '{"answer":"A"}',
-                "The draft ignores the clue; C is better.",
-                '{"answer":"C"}',
-            ]
-        )
-        agent = CriticRefineAgent(client, ReasoningConfig())
-
-        output = agent.generate("Question prompt", sample_task())
-
-        self.assertEqual(output, '{"answer":"C"}')
-        self.assertEqual(len(client.calls), 3)
-        self.assertTrue(client.calls[-1]["json_mode"])
-        self.assertIn("Critique:", client.calls[-1]["prompt"])
-
-    def test_generate_messages_runs_full_architecture_without_mutating_history(self):
-        config = ReasoningConfig(
-            samples=2,
-            reasoning_temperature=0.81,
-            final_temperature=0.17,
-            max_reasoning_tokens=123,
-            final_max_tokens=45,
-        )
-        messages = [
-            {"role": "system", "content": "Base system"},
-            {"role": "user", "content": "Remember clue one."},
-            {"role": "assistant", "content": "Clue noted."},
-            {"role": "user", "content": "Return the final answer."},
-        ]
-        original_messages = deepcopy(messages)
-
-        for agent_type, agent_config, call_count in message_agent_cases(config):
+        for agent_type, responses, expected_calls in cases:
             with self.subTest(agent=agent_type.__name__):
-                client = FakeClient(["hidden"] * (call_count - 1) + ["final"])
-                agent = agent_type(client, agent_config)
+                messages = history()
+                original = deepcopy(messages)
+                client = FakeClient(responses)
+                agent = agent_type(client, reasoning_config())
 
                 output = agent.generate_messages(
                     messages,
                     object(),
-                    temperature=0.23,
-                    max_tokens=77,
+                    temperature=0.2,
+                    max_tokens=44,
                     json_mode=False,
                 )
 
-                self.assertEqual(output, "final")
-                self.assertEqual(len(client.calls), call_count)
-                self.assertEqual(messages, original_messages)
-                self.assertTrue(all(call["kind"] == "messages" for call in client.calls))
+                self.assertTrue(output.startswith('{"answer"'))
+                self.assertEqual(messages, original)
+                self.assertEqual(len(client.calls), expected_calls)
+                self.assertTrue(
+                    all(call["kind"] == "messages" for call in client.calls)
+                )
                 for call in client.calls:
-                    self.assertIsNone(call["system_prompt"])
-                    merged_system = call["messages"][0]["content"]
-                    self.assertTrue(merged_system.startswith("Base system\n\n"))
-                    self.assertEqual(merged_system.count("Base system"), 1)
-                    self.assertEqual(call["messages"][1:3], messages[1:3])
-                    self.assertNotEqual(
-                        call["messages"][-1]["content"],
-                        messages[-1]["content"],
-                    )
-                self.assertEqual(client.calls[-1]["temperature"], 0.23)
-                self.assertEqual(client.calls[-1]["max_tokens"], 77)
-                self.assertFalse(client.calls[-1]["json_mode"])
+                    prepared = call["messages"]
+                    self.assertEqual(prepared[1]["content"], "Earlier question")
+                    self.assertNotEqual(prepared[-1]["content"], "Current question")
+                final_options = client.calls[-1]["options"]
+                self.assertEqual(final_options["temperature"], 0.2)
+                self.assertEqual(final_options["max_tokens"], 44)
+                self.assertFalse(final_options["json_mode"])
 
-    def test_final_phase_runs_full_architecture_with_default_visible_options(self):
-        config = ReasoningConfig(
-            samples=2,
-            reasoning_temperature=0.81,
-            final_temperature=0.17,
-            max_reasoning_tokens=123,
-            final_max_tokens=45,
+    def test_intermediate_phase_is_one_raw_history_call_for_every_architecture(self):
+        agent_cases = (
+            (DirectAgent, reasoning_config()),
+            (CoTAgent, reasoning_config()),
+            (SelfConsistencyAgent, reasoning_config(samples=2)),
+            (BestOfNAgent, reasoning_config(samples=2)),
+            (
+                TreeOfThoughtAgent,
+                reasoning_config(max_depth=1, branching_factor=1, beam_width=1),
+            ),
+            (PlanThenSolveAgent, reasoning_config()),
+            (CriticRefineAgent, reasoning_config()),
+            (LeastToMostAgent, reasoning_config()),
         )
-        messages = [
-            {"role": "user", "content": "Remember clue one."},
-            {"role": "assistant", "content": "Clue noted."},
-            {"role": "user", "content": "Return the final answer."},
-        ]
-        original_messages = deepcopy(messages)
-
-        for agent_type, agent_config, call_count in message_agent_cases(config):
+        for agent_type, config in agent_cases:
             with self.subTest(agent=agent_type.__name__):
-                client = FakeClient(["hidden"] * (call_count - 1) + ["final"])
-                agent = agent_type(client, agent_config)
-
-                output = agent.generate_messages_for_phase(
-                    messages,
-                    object(),
-                    phase="final",
-                )
-
-                self.assertEqual(output, "final")
-                self.assertEqual(len(client.calls), call_count)
-                self.assertEqual(messages, original_messages)
-                for call in client.calls:
-                    self.assertEqual(call["kind"], "messages")
-                    self.assertIsNotNone(call["system_prompt"])
-                    self.assertEqual(call["messages"][:2], messages[:2])
-                    self.assertFalse(
-                        any(
-                            message["role"] == "system"
-                            for message in call["messages"]
-                        )
-                    )
-                final_call = client.calls[-1]
-                self.assertEqual(final_call["temperature"], 0.17)
-                self.assertEqual(final_call["max_tokens"], 45)
-                self.assertTrue(final_call["json_mode"])
-
-                hidden_calls = client.calls[:-1]
-                if agent_type is CriticRefineAgent:
-                    self.assertEqual(
-                        [call["temperature"] for call in hidden_calls],
-                        [0.81, 0.17],
-                    )
-                else:
-                    self.assertTrue(
-                        all(call["temperature"] == 0.81 for call in hidden_calls)
-                    )
-                self.assertTrue(
-                    all(call["max_tokens"] == 123 for call in hidden_calls)
-                )
-                self.assertTrue(
-                    all(call["json_mode"] is False for call in hidden_calls)
-                )
-
-    def test_intermediate_phase_is_one_raw_history_call(self):
-        config = ReasoningConfig(samples=2)
-        messages = [
-            {"role": "system", "content": "Base system"},
-            {"role": "user", "content": "New clue."},
-        ]
-        original_messages = deepcopy(messages)
-
-        for agent_type, agent_config, _ in message_agent_cases(config):
-            with self.subTest(agent=agent_type.__name__):
-                client = FakeClient(["acknowledged"])
-                agent = agent_type(client, agent_config)
+                messages = history()
+                original = deepcopy(messages)
+                client = FakeClient(["intermediate"])
+                agent = agent_type(client, config)
 
                 output = agent.generate_messages_for_phase(
                     messages,
                     object(),
                     phase="intermediate",
-                    temperature=0.33,
-                    max_tokens=21,
+                    temperature=0.3,
+                    max_tokens=77,
                     json_mode=False,
                 )
 
-                self.assertEqual(output, "acknowledged")
+                self.assertEqual(output, "intermediate")
+                self.assertEqual(messages, original)
                 self.assertEqual(len(client.calls), 1)
-                call = client.calls[0]
-                self.assertEqual(call["kind"], "messages")
-                self.assertEqual(call["messages"], original_messages)
-                self.assertIsNone(call["system_prompt"])
-                self.assertEqual(call["temperature"], 0.33)
-                self.assertEqual(call["max_tokens"], 21)
-                self.assertFalse(call["json_mode"])
-                self.assertEqual(messages, original_messages)
+                self.assertEqual(client.calls[0]["messages"], original)
+                self.assertEqual(client.calls[0]["options"]["temperature"], 0.3)
+                self.assertEqual(client.calls[0]["options"]["max_tokens"], 77)
+                self.assertFalse(client.calls[0]["options"]["json_mode"])
 
-    def test_invalid_message_phase_fails_before_client_call(self):
-        config = ReasoningConfig(samples=2)
-        messages = [{"role": "user", "content": "Question"}]
 
-        for agent_type, agent_config, _ in message_agent_cases(config):
-            with self.subTest(agent=agent_type.__name__):
-                client = FakeClient([])
-                agent = agent_type(client, agent_config)
+class SelfConsistencyTests(unittest.TestCase):
+    def test_programmatic_vote_canonicalizes_key_order_and_whitespace(self):
+        client = FakeClient(
+            [
+                'path A\n{"b":2, "a":1}',
+                'path B\n{ "a": 1, "b": 2 }',
+                'path C\n{"answer":"other"}',
+            ]
+        )
+        agent = SelfConsistencyAgent(client, reasoning_config(samples=3))
 
-                with self.assertRaisesRegex(ValueError, "Unsupported message phase"):
-                    agent.generate_messages_for_phase(
-                        messages,
-                        object(),
-                        phase="unexpected",
-                    )
+        output = agent.generate("Question", object())
 
-                self.assertEqual(client.calls, [])
+        self.assertEqual(json.loads(output), {"a": 1, "b": 2})
+        self.assertEqual(len(client.calls), 3)
+        self.assertFalse(agent.last_run.metadata["tie"])
+        self.assertAlmostEqual(agent.last_run.metadata["consensus"], 2 / 3)
 
-    def test_candidate_message_branches_start_from_same_history(self):
-        config = ReasoningConfig(samples=2)
-        messages = [
-            {"role": "system", "content": "Base system"},
-            {"role": "user", "content": "Question"},
+    def test_tie_is_stable_and_invalid_candidates_are_ignored(self):
+        client = FakeClient(
+            [
+                'first {"answer":"A"}',
+                "not json",
+                'third {"answer":"B"}',
+            ]
+        )
+        agent = SelfConsistencyAgent(client, reasoning_config(samples=3))
+
+        output = agent.generate("Question", object())
+
+        self.assertEqual(json.loads(output), {"answer": "A"})
+        self.assertTrue(agent.last_run.metadata["tie"])
+        self.assertEqual(agent.last_run.metadata["valid_samples"], 2)
+        self.assertEqual(agent.last_run.metadata["selected_sample"], 1)
+        self.assertEqual(len(client.calls), 3)
+
+    def test_all_invalid_candidates_get_exactly_one_low_temperature_repair(self):
+        client = FakeClient(["bad A", "bad B", '{"answer":"repaired"}'])
+        agent = SelfConsistencyAgent(client, reasoning_config(samples=2))
+
+        output = agent.generate("Question", object())
+
+        self.assertEqual(json.loads(output), {"answer": "repaired"})
+        self.assertEqual(len(client.calls), 3)
+        self.assertEqual(client.calls[-1]["options"]["temperature"], 0.0)
+        self.assertTrue(client.calls[-1]["options"]["json_mode"])
+
+    def test_all_invalid_without_repairs_fails_after_n_calls(self):
+        client = FakeClient(["bad A", "bad B"])
+        config = reasoning_config(samples=2, max_format_repairs=0)
+        agent = SelfConsistencyAgent(client, config)
+
+        with self.assertRaisesRegex(StrictJSONObjectError, "all self-consistency"):
+            agent.generate("Question", object())
+
+        self.assertEqual(len(client.calls), 2)
+
+
+class BestOfNTests(unittest.TestCase):
+    def test_seeded_judge_selects_id_without_rewriting_candidate(self):
+        judgement = json.dumps(
+            {
+                "selected_id": "candidate-2",
+                "scores": [
+                    {
+                        "candidate_id": "candidate-1",
+                        "score": 0.2,
+                        "reason": "weak",
+                    },
+                    {
+                        "candidate_id": "candidate-2",
+                        "score": 0.9,
+                        "reason": "best",
+                    },
+                    {
+                        "candidate_id": "candidate-3",
+                        "score": 0.4,
+                        "reason": "partial",
+                    },
+                ],
+            }
+        )
+        client = FakeClient(
+            [
+                'path 1 {"answer":1}',
+                'path 2 {"answer":2}',
+                'path 3 {"answer":3}',
+                judgement,
+            ]
+        )
+        agent = BestOfNAgent(client, reasoning_config(samples=3, selection_seed=42))
+
+        output = agent.generate("Question", object())
+
+        self.assertEqual(json.loads(output), {"answer": 2})
+        self.assertEqual(len(client.calls), 4)
+        self.assertEqual(
+            agent.last_run.metadata["displayed_order"],
+            ["candidate-2", "candidate-1", "candidate-3"],
+        )
+        judge_prompt = client.calls[-1]["prompt"]
+        self.assertIn('"selected_id"', judge_prompt)
+        self.assertIn("never rewrite", judge_prompt.lower())
+
+    def test_selected_candidate_format_gets_one_repair(self):
+        judgement = json.dumps(
+            {
+                "selected_id": "candidate-1",
+                "scores": [
+                    {
+                        "candidate_id": "candidate-1",
+                        "score": 1.0,
+                        "reason": "best",
+                    },
+                    {
+                        "candidate_id": "candidate-2",
+                        "score": 0.0,
+                        "reason": "weak",
+                    },
+                ],
+            }
+        )
+        client = FakeClient(
+            [
+                "answer one without JSON",
+                'path {"answer":2}',
+                judgement,
+                '{"answer":1}',
+            ]
+        )
+        agent = BestOfNAgent(client, reasoning_config(samples=2))
+
+        output = agent.generate("Question", object())
+
+        self.assertEqual(json.loads(output), {"answer": 1})
+        self.assertEqual(len(client.calls), 4)
+        self.assertEqual(client.calls[-1]["options"]["temperature"], 0.0)
+
+
+class TreeOfThoughtTests(unittest.TestCase):
+    def test_two_level_beam_search_tracks_parents_prunes_and_stops_terminal(self):
+        responses = [
+            '{"thought":"a","state_summary":"a","terminal":false,"proposed_answer":null}',
+            '{"thought":"b","state_summary":"b","terminal":false,"proposed_answer":null}',
+            json.dumps(
+                {
+                    "evaluations": [
+                        {
+                            "node_id": "n0001",
+                            "score": 0.2,
+                            "valid": True,
+                            "terminal": False,
+                            "reason": "weak",
+                        },
+                        {
+                            "node_id": "n0002",
+                            "score": 0.9,
+                            "valid": True,
+                            "terminal": False,
+                            "reason": "strong",
+                        },
+                    ]
+                }
+            ),
+            '{"thought":"b1","state_summary":"done","terminal":true,"proposed_answer":{"answer":1}}',
+            '{"thought":"b2","state_summary":"open","terminal":false,"proposed_answer":null}',
+            json.dumps(
+                {
+                    "evaluations": [
+                        {
+                            "node_id": "n0003",
+                            "score": 0.8,
+                            "valid": True,
+                            "terminal": True,
+                            "reason": "complete",
+                        },
+                        {
+                            "node_id": "n0004",
+                            "score": 0.7,
+                            "valid": True,
+                            "terminal": False,
+                            "reason": "unfinished",
+                        },
+                    ]
+                }
+            ),
+            '{"answer":1}',
         ]
+        client = FakeClient(responses)
+        config = reasoning_config(
+            max_depth=3,
+            branching_factor=2,
+            beam_width=1,
+        )
+        agent = TreeOfThoughtAgent(client, config)
 
-        consistency_client = FakeClient(["candidate one", "candidate two", "final"])
-        SelfConsistencyAgent(consistency_client, config).generate_messages(
-            messages,
-            object(),
-        )
-        self.assertEqual(
-            consistency_client.calls[0]["messages"],
-            consistency_client.calls[1]["messages"],
-        )
+        output = agent.generate("Question", object())
+
+        self.assertEqual(json.loads(output), {"answer": 1})
+        self.assertEqual(len(client.calls), 7)
+        metadata = agent.last_run.metadata
+        self.assertEqual(metadata["selected_node_id"], "n0003")
+        self.assertEqual(metadata["stop_reason"], "all_beam_nodes_terminal")
+        nodes = {node["node_id"]: node for node in metadata["nodes"]}
+        self.assertEqual(nodes["n0003"]["parent_id"], "n0002")
+        self.assertEqual(nodes["n0004"]["parent_id"], "n0002")
         self.assertNotIn(
-            "candidate one",
-            consistency_client.calls[1]["messages"][-1]["content"],
+            "n0001", {nodes["n0003"]["parent_id"], nodes["n0004"]["parent_id"]}
+        )
+        proposal_stages = [
+            stage
+            for stage in agent.last_run.stages
+            if stage.stage_name.startswith("tot.propose")
+        ]
+        self.assertEqual(proposal_stages[-1].parent_id, "n0002")
+
+    def test_call_budget_reserves_the_finalizer(self):
+        client = FakeClient(['{"answer":"root"}'])
+        config = reasoning_config(
+            max_depth=3,
+            branching_factor=3,
+            beam_width=2,
+            max_llm_calls=1,
+        )
+        agent = TreeOfThoughtAgent(client, config)
+
+        output = agent.generate("Question", object())
+
+        self.assertEqual(json.loads(output), {"answer": "root"})
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(agent.last_run.metadata["selected_node_id"], "n0000")
+        self.assertEqual(agent.last_run.metadata["stop_reason"], "llm_call_budget")
+
+    def test_history_and_images_use_the_same_tree_search(self):
+        attachment = image()
+        image_client = FakeClient(one_level_tot_responses())
+        config = reasoning_config(max_depth=1, branching_factor=1, beam_width=1)
+        image_agent = TreeOfThoughtAgent(image_client, config)
+
+        image_agent.generate_multimodal("Question", object(), images=[attachment])
+
+        self.assertEqual(len(image_client.calls), 3)
+        self.assertTrue(
+            all(
+                call["options"]["images"] == [attachment] for call in image_client.calls
+            )
         )
 
-        tree_client = FakeClient(["branch one", "branch two", "final"])
-        TreeOfThoughtAgent(tree_client, config).generate_messages(messages, object())
-        self.assertEqual(
-            tree_client.calls[0]["messages"][:-1],
-            tree_client.calls[1]["messages"][:-1],
+        messages = history()
+        original = deepcopy(messages)
+        message_client = FakeClient(one_level_tot_responses())
+        message_agent = TreeOfThoughtAgent(message_client, config)
+
+        output = message_agent.generate_messages(messages, object())
+
+        self.assertEqual(json.loads(output), {"answer": 1})
+        self.assertEqual(messages, original)
+        self.assertTrue(
+            all(call["kind"] == "messages" for call in message_client.calls)
         )
-        self.assertNotIn(
-            "branch one",
-            tree_client.calls[1]["messages"][-1]["content"],
+
+
+class LeastToMostTests(unittest.TestCase):
+    def test_subproblem_limit_and_sequential_accumulation(self):
+        client = FakeClient(
+            [
+                '{"subproblems":["first","second","third"]}',
+                '{"subproblem":"first","result":"r1","reason":"ok"}',
+                '{"subproblem":"second","result":"r2","reason":"uses r1"}',
+                '{"answer":"done"}',
+            ]
+        )
+        config = reasoning_config(max_subproblems=2)
+        agent = LeastToMostAgent(client, config)
+
+        output = agent.generate("Question", object())
+
+        self.assertEqual(json.loads(output), {"answer": "done"})
+        self.assertEqual(len(client.calls), 4)
+        self.assertEqual(agent.last_run.metadata["subproblems"], ["first", "second"])
+        self.assertIn("r1", client.calls[2]["prompt"])
+
+    def test_empty_decomposition_falls_back_to_original_problem(self):
+        client = FakeClient(
+            [
+                '{"subproblems":[]}',
+                '{"subproblem":"Question","result":"r","reason":"ok"}',
+                '{"answer":"done"}',
+            ]
+        )
+        agent = LeastToMostAgent(client, reasoning_config())
+
+        output = agent.generate("Question", object())
+
+        self.assertEqual(json.loads(output), {"answer": "done"})
+        self.assertEqual(agent.last_run.metadata["subproblems"], ["Question"])
+
+    def test_multimodal_and_history_paths_preserve_context(self):
+        attachment = image()
+        responses = [
+            '{"subproblems":["one"]}',
+            '{"subproblem":"one","result":"r","reason":"ok"}',
+            '{"answer":"done"}',
+        ]
+        image_client = FakeClient(list(responses))
+        image_agent = LeastToMostAgent(image_client, reasoning_config())
+        image_agent.generate_multimodal("Question", object(), images=[attachment])
+        self.assertTrue(
+            all(
+                call["options"]["images"] == [attachment] for call in image_client.calls
+            )
         )
 
-    def test_reasoning_agent_metrics_include_nested_client_calls(self):
-        client = MetricsClient(["Reasoning says C.", '{"answer":"C"}'])
-        agent = CoTAgent(client, ReasoningConfig())
-        metrics_start = start_task_metrics(agent)
-
-        output = agent.generate("Question prompt", sample_task())
-        metrics = finish_task_metrics(agent, metrics_start)
-
-        self.assertEqual(output, '{"answer":"C"}')
-        self.assertEqual(metrics["llm_calls"], 2)
-        self.assertEqual(metrics["model_elapsed_seconds"], 0.5)
-        self.assertEqual(metrics["token_usage"]["prompt_tokens"], 14)
-        self.assertEqual(metrics["token_usage"]["completion_tokens"], 6)
-        self.assertEqual(metrics["token_usage"]["total_tokens"], 20)
-        self.assertTrue(metrics["usage_available"])
+        messages = history()
+        original = deepcopy(messages)
+        message_client = FakeClient(list(responses))
+        message_agent = LeastToMostAgent(message_client, reasoning_config())
+        output = message_agent.generate_messages(messages, object())
+        self.assertEqual(json.loads(output), {"answer": "done"})
+        self.assertEqual(messages, original)
+        self.assertTrue(
+            all(call["kind"] == "messages" for call in message_client.calls)
+        )
 
 
 if __name__ == "__main__":

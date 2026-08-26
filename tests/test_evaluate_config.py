@@ -99,14 +99,14 @@ class EvaluateConfigTests(unittest.TestCase):
             self.assertEqual(result["success"], 1)
             self.assertTrue((run_dir / "predictions.jsonl").exists())
             self.assertTrue((run_dir / "results.json").exists())
-            saved = json.loads(
-                (run_dir / "results.json").read_text(encoding="utf-8")
-            )
+            saved = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["puzzle_accuracy"], 1.0)
             self.assertIn("metrics", saved)
             self.assertEqual(saved["metrics"]["total"]["llm_calls"], 0)
             prediction = json.loads(
-                (run_dir / "predictions.jsonl").read_text(encoding="utf-8").splitlines()[0]
+                (run_dir / "predictions.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()[0]
             )
             self.assertIn("metrics", prediction)
             self.assertIn("task_elapsed_seconds", prediction["metrics"])
@@ -166,9 +166,7 @@ class EvaluateConfigTests(unittest.TestCase):
             rules_for_mode,
         )
 
-        task = load_one_stroke_tasks(
-            "data/one_stroke/a2_rule_condition.jsonl"
-        )[0]
+        task = load_one_stroke_tasks("data/one_stroke/a2_rule_condition.jsonl")[0]
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "runs"
             predictions_path = Path(tmpdir) / "predictions.jsonl"
@@ -205,9 +203,7 @@ class EvaluateConfigTests(unittest.TestCase):
                             "predictions": str(predictions_path),
                         },
                         "provider": {"name": "generic"},
-                        "evaluation": {
-                            "rule_modes": ["full", "conflicting_rule"]
-                        },
+                        "evaluation": {"rule_modes": ["full", "conflicting_rule"]},
                         "run": {
                             "output_dir": str(output_dir),
                             "run_name": "a2-unit-run",
@@ -221,9 +217,7 @@ class EvaluateConfigTests(unittest.TestCase):
 
             self.assertEqual(result["total"], 2)
             self.assertEqual(result["success"], 2)
-            self.assertEqual(
-                set(result["by_rule_mode"]), {"full", "conflicting_rule"}
-            )
+            self.assertEqual(set(result["by_rule_mode"]), {"full", "conflicting_rule"})
 
     def test_run_config_expands_one_stroke_a4_input_modes(self):
         from minibench.datasets.one_stroke.dataset import load_one_stroke_tasks
@@ -240,9 +234,7 @@ class EvaluateConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             predictions = Path(tmpdir) / "predictions.jsonl"
             predictions.write_text(
-                json.dumps(
-                    {"task_id": task.id, "raw_outputs": [raw_output] * 3}
-                )
+                json.dumps({"task_id": task.id, "raw_outputs": [raw_output] * 3})
                 + "\n",
                 encoding="utf-8",
             )
@@ -292,9 +284,7 @@ class EvaluateConfigTests(unittest.TestCase):
         one_stroke = build_parser().parse_args(
             ["evaluate-one-stroke", "--input-mode", "all"]
         )
-        mahjong = build_parser().parse_args(
-            ["evaluate-mahjong", "--input-mode", "all"]
-        )
+        mahjong = build_parser().parse_args(["evaluate-mahjong", "--input-mode", "all"])
         self.assertEqual(one_stroke.input_mode, "all")
         self.assertEqual(mahjong.input_mode, "all")
 
@@ -334,15 +324,12 @@ class EvaluateConfigTests(unittest.TestCase):
                         }
                     )
 
-    def test_reasoning_only_field_guard_is_narrowly_scoped(self):
-        for family, agent_name in (
-            ("zebra", "openai-compatible"),
-            ("one_stroke", "cot"),
-        ):
-            with self.subTest(family=family, agent_name=agent_name):
+    def test_samples_are_supported_only_by_sc_and_best_of_n(self):
+        for agent_name in ("self-consistency", "best-of-n"):
+            with self.subTest(agent_name=agent_name):
                 config = validate_experiment_config(
                     {
-                        "task": {"family": family},
+                        "task": {"family": "zebra"},
                         "agent": {
                             "name": agent_name,
                             "samples": 3,
@@ -355,6 +342,24 @@ class EvaluateConfigTests(unittest.TestCase):
                     }
                 )
                 self.assertEqual(config["agent"]["samples"], 3)
+
+        for agent_name in ("openai-compatible", "cot"):
+            with self.subTest(agent_name=agent_name):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"agent\.samples.*would be ignored",
+                ):
+                    validate_experiment_config(
+                        {
+                            "task": {"family": "zebra"},
+                            "agent": {
+                                "name": agent_name,
+                                "samples": 3,
+                            },
+                            "provider": {"name": "generic"},
+                            "run": {"output_dir": "runs"},
+                        }
+                    )
 
     def test_one_stroke_configs_are_canonical_and_retry_safe(self):
         unsupported_fields = {
@@ -380,9 +385,9 @@ class EvaluateConfigTests(unittest.TestCase):
                 )
 
         alias = load_experiment_config("config/experiments/one_stroke.yaml")
-        canonical = load_experiment_config(
-            "config/experiments/one_stroke_a1.yaml"
-        )
+        canonical = load_experiment_config("config/experiments/one_stroke_a1.yaml")
+        # Aliases may intentionally use a different archival run label.
+        alias["run"]["run_name"] = canonical["run"]["run_name"]
         self.assertEqual(alias, canonical)
         self.assertEqual(canonical["provider"]["max_tokens"], 1024)
 
@@ -424,9 +429,7 @@ class EvaluateConfigTests(unittest.TestCase):
             "provider": {"name": "generic"},
         }
         with self.assertRaisesRegex(ValueError, "run.run_name is required"):
-            validate_experiment_config(
-                {**base, "run": {"on_existing": "resume"}}
-            )
+            validate_experiment_config({**base, "run": {"on_existing": "resume"}})
         for run_name in ("../escape", "nested/run", "nested\\run", ".", ".."):
             with self.subTest(run_name=run_name):
                 with self.assertRaisesRegex(ValueError, "single directory name"):
@@ -483,7 +486,7 @@ class EvaluateConfigTests(unittest.TestCase):
         self.assertEqual(config["provider"]["max_retries"], 3)
         self.assertEqual(config["provider"]["retry_initial_backoff_seconds"], 1.0)
         self.assertEqual(config["provider"]["retry_max_backoff_seconds"], 30.0)
-        self.assertEqual(config["run"]["run_name"], "zebra-history-deepseek")
+        self.assertEqual(config["run"]["run_name"], "zebra-history-deferred_0823")
         self.assertEqual(config["run"]["on_existing"], "resume")
 
     def test_missing_section_reports_clear_error(self):
