@@ -4,11 +4,11 @@ from copy import deepcopy
 from typing import Callable, Sequence, cast
 
 from minibench.core.agent import (
-    ChatClient,
     ChatMessage,
     MessagePhase,
     ReasoningConfig,
 )
+from minibench.core.runtime import AgentRuntime
 
 
 def validate_message_phase(phase: MessagePhase | str) -> MessagePhase:
@@ -34,7 +34,7 @@ def visible_generation_options(
 
 
 def complete_intermediate_message(
-    client: ChatClient,
+    client: AgentRuntime,
     messages: Sequence[ChatMessage],
     config: ReasoningConfig,
     *,
@@ -50,19 +50,18 @@ def complete_intermediate_message(
             json_mode=json_mode,
         )
     )
-    kwargs = {
-        "system_prompt": None,
-        "temperature": resolved_temperature,
-        "max_tokens": resolved_max_tokens,
-        "json_mode": resolved_json_mode,
-    }
-    if bool(getattr(client, "_is_agent_runtime", False)):
-        kwargs["stage_name"] = "intermediate"
-    return client.complete_messages(deepcopy(list(messages)), **kwargs)
+    return client.complete_messages(
+        deepcopy(list(messages)),
+        system_prompt=None,
+        temperature=resolved_temperature,
+        max_tokens=resolved_max_tokens,
+        json_mode=resolved_json_mode,
+        stage_name="intermediate",
+    )
 
 
 def complete_transformed_messages(
-    client: ChatClient,
+    client: AgentRuntime,
     messages: Sequence[ChatMessage],
     *,
     transform: Callable[[str], str],
@@ -80,21 +79,16 @@ def complete_transformed_messages(
         prepared_messages,
         phase_system_prompt,
     )
-    kwargs = {
-        "system_prompt": system_prompt,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "json_mode": json_mode,
-    }
-    if bool(getattr(client, "_is_agent_runtime", False)):
-        kwargs.update(
-            {
-                "stage_name": stage_name,
-                "strict_json": strict_json,
-                "repair_format": repair_format,
-            }
-        )
-    return client.complete_messages(prepared_messages, **kwargs)
+    return client.complete_messages(
+        prepared_messages,
+        system_prompt=system_prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        json_mode=json_mode,
+        stage_name=stage_name,
+        strict_json=strict_json,
+        repair_format=repair_format,
+    )
 
 
 def transformed_messages(

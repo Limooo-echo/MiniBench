@@ -22,7 +22,7 @@ CRITIC_SYSTEM_PROMPT = (
 )
 
 
-def direct_prompt(task_prompt: str) -> str:
+def _v1_direct_prompt(task_prompt: str) -> str:
     return "\n\n".join(
         [
             task_prompt,
@@ -31,7 +31,7 @@ def direct_prompt(task_prompt: str) -> str:
     )
 
 
-def cot_prompt(task_prompt: str) -> str:
+def _v1_cot_prompt(task_prompt: str) -> str:
     return "\n\n".join(
         [
             task_prompt,
@@ -41,7 +41,7 @@ def cot_prompt(task_prompt: str) -> str:
     )
 
 
-def plan_prompt(task_prompt: str) -> str:
+def _v1_plan_prompt(task_prompt: str) -> str:
     return "\n\n".join(
         [
             task_prompt,
@@ -50,7 +50,7 @@ def plan_prompt(task_prompt: str) -> str:
     )
 
 
-def solve_with_plan_prompt(task_prompt: str, plan: str) -> str:
+def _v1_solve_with_plan_prompt(task_prompt: str, plan: str) -> str:
     return "\n\n".join(
         [
             task_prompt,
@@ -62,7 +62,7 @@ def solve_with_plan_prompt(task_prompt: str, plan: str) -> str:
     )
 
 
-def candidate_prompt(task_prompt: str, index: int) -> str:
+def _v1_candidate_prompt(task_prompt: str, index: int) -> str:
     return "\n\n".join(
         [
             task_prompt,
@@ -72,7 +72,7 @@ def candidate_prompt(task_prompt: str, index: int) -> str:
     )
 
 
-def judge_prompt(task_prompt: str, candidates: list[str]) -> str:
+def _v1_judge_prompt(task_prompt: str, candidates: list[str]) -> str:
     formatted = "\n\n".join(
         f"Candidate {index + 1}:\n{candidate}"
         for index, candidate in enumerate(candidates)
@@ -88,7 +88,7 @@ def judge_prompt(task_prompt: str, candidates: list[str]) -> str:
     )
 
 
-def finalize_prompt(task_prompt: str, reasoning: str) -> str:
+def _v1_finalize_prompt(task_prompt: str, reasoning: str) -> str:
     return "\n\n".join(
         [
             task_prompt,
@@ -100,7 +100,7 @@ def finalize_prompt(task_prompt: str, reasoning: str) -> str:
     )
 
 
-def critic_prompt(task_prompt: str, draft: str) -> str:
+def _v1_critic_prompt(task_prompt: str, draft: str) -> str:
     return "\n\n".join(
         [
             task_prompt,
@@ -112,7 +112,7 @@ def critic_prompt(task_prompt: str, draft: str) -> str:
     )
 
 
-def refine_prompt(task_prompt: str, draft: str, critique: str) -> str:
+def _v1_refine_prompt(task_prompt: str, draft: str, critique: str) -> str:
     return "\n\n".join(
         [
             task_prompt,
@@ -124,18 +124,6 @@ def refine_prompt(task_prompt: str, draft: str, critique: str) -> str:
         ]
     )
 
-
-# Preserve immutable references to the original template functions.  Public
-# helpers below dispatch by version; these references keep v1 byte-for-byte.
-_v1_direct_prompt = direct_prompt
-_v1_cot_prompt = cot_prompt
-_v1_plan_prompt = plan_prompt
-_v1_solve_with_plan_prompt = solve_with_plan_prompt
-_v1_candidate_prompt = candidate_prompt
-_v1_judge_prompt = judge_prompt
-_v1_finalize_prompt = finalize_prompt
-_v1_critic_prompt = critic_prompt
-_v1_refine_prompt = refine_prompt
 
 DEFAULT_PROMPT_VERSION = "v2"
 PROMPT_SECTION_NAMES = (
