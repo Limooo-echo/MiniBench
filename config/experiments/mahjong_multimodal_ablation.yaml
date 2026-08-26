@@ -24,6 +24,7 @@ provider:
 evaluation:
   input_modes:
     - image
+    - text
 
 run:
   output_dir: runs

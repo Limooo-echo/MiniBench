@@ -53,11 +53,15 @@ def _mahjong_text_boxes(task):
 
 
 class OracleMahjongVisualAgent:
-    def __init__(self, *, exact_transcription: bool = True):
+    def __init__(self, tasks, *, exact_transcription: bool = True):
+        self.tasks = {task.id: task for task in tasks}
         self.exact_transcription = exact_transcription
         self.image_calls = 0
+        self.contexts = []
 
-    def _answer(self, task):
+    def _answer(self, context):
+        self.contexts.append(context)
+        task = self.tasks[context.task_id]
         answer = expected_answer(task)
         payload = {
             "hand": list(task.hand) if self.exact_transcription else [],
@@ -104,7 +108,7 @@ class MahjongMultimodalTests(unittest.TestCase):
         self.assertIn('"visible_tiles"', visual)
 
     def test_visual_and_text_paired_evaluation(self):
-        agent = OracleMahjongVisualAgent()
+        agent = OracleMahjongVisualAgent(self.tasks[:2])
         results = evaluate_mahjong_tasks(
             self.tasks[:2],
             agent,
@@ -112,6 +116,18 @@ class MahjongMultimodalTests(unittest.TestCase):
         )
         self.assertEqual(len(results), 4)
         self.assertEqual(agent.image_calls, 2)
+        self.assertTrue(
+            all(
+                not hasattr(context, hidden_field)
+                for context in agent.contexts
+                for hidden_field in (
+                    "hand",
+                    "visible_tiles",
+                    "image",
+                    "expected_answer",
+                )
+            )
+        )
         self.assertTrue(all(result.success for result in results))
         self.assertTrue(
             all(
@@ -134,7 +150,7 @@ class MahjongMultimodalTests(unittest.TestCase):
     def test_visual_predictions_keep_multimodal_transcription_fields(self):
         results = evaluate_mahjong_tasks(
             [self.tasks[0]],
-            OracleMahjongVisualAgent(),
+            OracleMahjongVisualAgent([self.tasks[0]]),
             input_modes=("text", "image"),
         )
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -167,7 +183,7 @@ class MahjongMultimodalTests(unittest.TestCase):
     def test_transcription_summary_uses_image_mode_only(self):
         results = evaluate_mahjong_tasks(
             [self.tasks[0]],
-            OracleMahjongVisualAgent(),
+            OracleMahjongVisualAgent([self.tasks[0]]),
             input_modes=("text", "image"),
         )
         text_result = next(
@@ -203,7 +219,10 @@ class MahjongMultimodalTests(unittest.TestCase):
     def test_answer_score_is_separate_from_transcription(self):
         result = evaluate_mahjong_tasks(
             [self.tasks[0]],
-            OracleMahjongVisualAgent(exact_transcription=False),
+            OracleMahjongVisualAgent(
+                [self.tasks[0]],
+                exact_transcription=False,
+            ),
             input_modes=("image",),
         )[0]
         self.assertTrue(result.success)

@@ -11,14 +11,14 @@ from minibench.datasets.mahjong_rule_variants.dataset import MahjongRuleVariantT
 
 class OfflineMahjongAgent:
     def generate(self, prompt, task):
-        if isinstance(task, MahjongRuleVariantTask):
+        if task.family == "mahjong_rule_variants":
             return json.dumps({"action": "tsumo"})
         answer = {"winning_tiles": ["E"]}
-        if "visual" in task.tags or task.image is not None:
+        if task.task_id == "smoke-visual":
             answer.update(
                 {
-                    "hand": list(task.hand),
-                    "visible_tiles": list(task.visible_tiles),
+                    "hand": list(static_wait_task().hand),
+                    "visible_tiles": ["1p", "2p"],
                 }
             )
         return json.dumps(answer)

@@ -49,9 +49,11 @@ class SequenceAgent:
     def __init__(self, payloads):
         self.payloads = list(payloads)
         self.prompts = []
+        self.contexts = []
 
     def generate(self, prompt, task):
         self.prompts.append(prompt)
+        self.contexts.append(task)
         return json.dumps(self.payloads.pop(0))
 
 
@@ -59,6 +61,7 @@ class MessageSequenceAgent:
     def __init__(self, payloads):
         self.payloads = list(payloads)
         self.conversations = []
+        self.contexts = []
 
     def generate_messages(
         self,
@@ -70,6 +73,7 @@ class MessageSequenceAgent:
         json_mode=None,
     ):
         self.conversations.append(tuple(dict(message) for message in messages))
+        self.contexts.append(task)
         return json.dumps(self.payloads.pop(0))
 
 
@@ -354,15 +358,18 @@ class MahjongRuleVariantTests(unittest.TestCase):
             "1m 2m 3m 4p 5p 6p 7s 8s 9s E E E N".split(),
             ["N"],
         )
-        result = evaluate_mahjong_rule_variant_tasks(
-            [task], SequenceAgent([{"action": "tsumo"}])
-        )[0]
+        agent = SequenceAgent([{"action": "tsumo"}])
+        result = evaluate_mahjong_rule_variant_tasks([task], agent)[0]
 
         self.assertTrue(result.success)
         self.assertEqual(result.win_rule, STANDARD_RULES)
         self.assertFalse(result.variant_only_win)
         self.assertEqual(result.variant_only_tsumo_draws, [])
         self.assertEqual(result.blocked_standard_tsumo_draws, [])
+        context = agent.contexts[0]
+        self.assertEqual(context.family, "mahjong_rule_variants")
+        self.assertFalse(hasattr(context, "initial_hand"))
+        self.assertFalse(hasattr(context, "wall"))
 
     def test_history_only_runs_the_same_loop_without_showing_current_hand(self):
         task = make_task(
@@ -386,6 +393,13 @@ class MahjongRuleVariantTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.observation_mode, "history-only")
         self.assertEqual(len(agent.conversations), 2)
+        self.assertTrue(
+            all(
+                context.family == "mahjong_rule_variants"
+                for context in agent.contexts
+            )
+        )
+        self.assertTrue(all(not hasattr(context, "wall") for context in agent.contexts))
         second_call = agent.conversations[1]
         self.assertEqual(
             [message["role"] for message in second_call],
@@ -575,8 +589,14 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 "success",
                 "success_rate",
                 "illegal_tsumo_total",
+                "strict_first_attempt_success",
+                "illegal_tsumo_rate",
+                "illegal_discard_rate",
+                "retry_corrected_success",
+                "first_attempt_legal_action_rate",
                 "by_channel",
                 "by_reason",
+                "metrics",
             },
         )
         self.assertEqual(summary["total"], 1)
@@ -737,8 +757,14 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 "success",
                 "success_rate",
                 "illegal_tsumo_total",
+                "strict_first_attempt_success",
+                "illegal_tsumo_rate",
+                "illegal_discard_rate",
+                "retry_corrected_success",
+                "first_attempt_legal_action_rate",
                 "by_channel",
                 "by_reason",
+                "metrics",
             },
         )
         self.assertEqual(

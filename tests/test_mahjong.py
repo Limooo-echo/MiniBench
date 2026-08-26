@@ -24,7 +24,10 @@ from minibench.datasets.mahjong.evaluation import (
     write_mahjong_run,
 )
 from minibench.datasets.mahjong.generation import generate_mahjong_static_tasks
-from minibench.datasets.mahjong.prompting import build_mahjong_prompt
+from minibench.datasets.mahjong.prompting import (
+    MAHJONG_SYSTEM_PROMPT,
+    build_mahjong_prompt,
+)
 
 
 class FixedMahjongAgent:
@@ -313,6 +316,23 @@ class MahjongTests(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertEqual(reasons, ["valid_tenpai_discard"])
+
+    def test_rejects_undefined_discard_fields(self):
+        ok, reasons = validate_mahjong_answer(
+            discard_task(),
+            {"discard": "9s", "winning_tiles": ["E"]},
+        )
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["unexpected_fields:winning_tiles"])
+
+    def test_system_prompt_leaves_json_formatting_to_task_prompt(self):
+        self.assertNotIn("Return exactly one JSON", MAHJONG_SYSTEM_PROMPT)
+        self.assertNotIn("no markdown", MAHJONG_SYSTEM_PROMPT)
+        self.assertIn(
+            'Return only {"discard":"..."}.',
+            build_mahjong_prompt(discard_task()),
+        )
 
     def test_evaluates_agent_answer(self):
         result = evaluate_mahjong_tasks(

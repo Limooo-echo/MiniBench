@@ -6,7 +6,7 @@ task:
   task_ids: []
 
 agent:
-  name: 
+  name: cot
   samples: 1
   reasoning_temperature: 0.0
   final_temperature: 0.0
@@ -18,6 +18,7 @@ provider:
   json_mode: true
   max_tokens: 512
   timeout: 120
+  max_retries: 3
   extra_body:
     thinking:
       type: disabled
@@ -28,4 +29,4 @@ evaluation:
 
 run:
   output_dir: runs
-  run_name: mahjong-solo-cot-full-hand-v2
+  run_name: mahjong-solo-cot-full-hand-v3

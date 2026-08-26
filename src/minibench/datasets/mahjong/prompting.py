@@ -26,7 +26,6 @@ BENCHMARK_WINNING_SHAPE_RULES = " ".join(BENCHMARK_WINNING_SHAPE_RULE_LINES)
 MAHJONG_SYSTEM_PROMPT = (
     "You solve closed-hand Mahjong tile-shape problems for this benchmark. "
     + BENCHMARK_WINNING_SHAPE_RULES
-    + " Return exactly one JSON object and no markdown."
 )
 
 

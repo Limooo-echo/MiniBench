@@ -22,6 +22,7 @@ from minibench.datasets.mahjong.api import (
     score_closed_hand,
     tile_to_index,
 )
+from minibench.datasets.mahjong.evaluation import MahjongPublicTaskContext
 from minibench.datasets.mahjong_solo.dataset import MahjongSoloTask
 from minibench.datasets.mahjong_solo.prompting import (
     MAHJONG_SOLO_OBSERVATION_MODES,
@@ -56,7 +57,7 @@ class MahjongSoloInstanceResult:
 def generate_mahjong_history_action(
     agent: Agent,
     messages: tuple[ChatMessage, ...],
-    task: Any,
+    task_context: Any,
 ) -> str:
     """Generate one scored Mahjong action from a persistent chat history."""
 
@@ -64,7 +65,7 @@ def generate_mahjong_history_action(
     if callable(phase_generate):
         return phase_generate(
             messages,
-            task,
+            task_context,
             phase="final",
             json_mode=True,
         )
@@ -72,7 +73,7 @@ def generate_mahjong_history_action(
     if callable(generate_messages):
         return generate_messages(
             messages,
-            task,
+            task_context,
             json_mode=True,
         )
     raise ValueError(
@@ -130,6 +131,10 @@ def evaluate_mahjong_solo_task(
             + ", ".join(MAHJONG_SOLO_OBSERVATION_MODES)
         )
     metrics_start = start_task_metrics(agent)
+    public_context = MahjongPublicTaskContext(
+        task_id=task.id,
+        family="mahjong_solo",
+    )
     hand = list(task.initial_hand)
     draws: list[str] = []
     discards: list[str] = []
@@ -164,12 +169,6 @@ def evaluate_mahjong_solo_task(
                     action_feedback=tuple(action_feedback),
                 )
                 conversation.append({"role": "user", "content": prompt})
-                raw_output = generate_mahjong_history_action(
-                    agent,
-                    tuple(conversation),
-                    task,
-                )
-                conversation.append({"role": "assistant", "content": raw_output})
             else:
                 prompt = build_mahjong_solo_prompt(
                     task,
@@ -184,7 +183,43 @@ def evaluate_mahjong_solo_task(
                     max_attempts=MAX_ACTION_ATTEMPTS,
                     action_feedback=tuple(action_feedback),
                 )
-                raw_output = agent.generate(prompt, task)
+            try:
+                if observation_mode == "history-only":
+                    raw_output = generate_mahjong_history_action(
+                        agent,
+                        tuple(conversation),
+                        public_context,
+                    )
+                    conversation.append({"role": "assistant", "content": raw_output})
+                else:
+                    raw_output = agent.generate(prompt, public_context)
+            except RuntimeError as exc:
+                error_detail = str(exc)
+                action_errors.append(
+                    {
+                        "draw_number": draw_number,
+                        "attempt": attempt_number,
+                        "error": "agent_request_error",
+                        "feedback": error_detail,
+                    }
+                )
+                reasons.append(f"agent_request_error:{error_detail}")
+                return _make_result(
+                    task,
+                    observation_mode=observation_mode,
+                    success=False,
+                    draws=draws,
+                    discards=discards,
+                    raw_outputs=raw_outputs,
+                    reasoning_traces=reasoning_traces,
+                    conversation=conversation,
+                    agent_actions=agent_actions,
+                    action_errors=action_errors,
+                    final_hand=hand,
+                    win_score=win_score,
+                    reasons=reasons,
+                    metrics=finish_task_metrics(agent, metrics_start),
+                )
             raw_outputs.append(raw_output)
             reasoning_traces.append(_read_generation_trace(agent))
             action = extract_mahjong_solo_action(raw_output)
@@ -286,6 +321,72 @@ def extract_mahjong_solo_action(output: str) -> dict[str, Any] | None:
             parsed["tile"] = tile
     return parsed
 
+
+def _summarize_action_retry_metrics(results: list[Any]) -> dict[str, float]:
+    total = len(results)
+    action_attempt_total = sum(len(result.raw_outputs) for result in results)
+    illegal_tsumo_total = 0
+    illegal_discard_total = 0
+    returned_first_attempt_total = 0
+    legal_first_attempt_total = 0
+
+    for result in results:
+        request_error_draws = {
+            int(action_error["draw_number"])
+            for action_error in result.action_errors
+            if action_error.get("attempt") == 1
+            and action_error.get("error") == "agent_request_error"
+        }
+        first_attempt_errors = [
+            action_error
+            for action_error in result.action_errors
+            if action_error.get("attempt") == 1
+            and action_error.get("error") != "agent_request_error"
+        ]
+        returned_first_attempts = len(result.draws) - len(request_error_draws)
+        returned_first_attempt_total += returned_first_attempts
+        legal_first_attempt_total += returned_first_attempts - len(
+            first_attempt_errors
+        )
+
+        for action_error in result.action_errors:
+            error_name = str(action_error.get("error", ""))
+            if error_name.startswith("illegal_tsumo_at_draw_"):
+                illegal_tsumo_total += 1
+            if error_name in {"missing_discard_tile", "invalid_discard_tile"} or (
+                error_name.startswith("discard_not_in_hand:")
+            ):
+                illegal_discard_total += 1
+
+    strict_success = sum(
+        1 for result in results if result.success and not result.action_errors
+    )
+    retry_corrected_success = sum(
+        1 for result in results if result.success and result.action_errors
+    )
+    return {
+        "strict_first_attempt_success": strict_success / total if total else 0.0,
+        "illegal_tsumo_rate": (
+            illegal_tsumo_total / action_attempt_total
+            if action_attempt_total
+            else 0.0
+        ),
+        "illegal_discard_rate": (
+            illegal_discard_total / action_attempt_total
+            if action_attempt_total
+            else 0.0
+        ),
+        "retry_corrected_success": (
+            retry_corrected_success / total if total else 0.0
+        ),
+        "first_attempt_legal_action_rate": (
+            legal_first_attempt_total / returned_first_attempt_total
+            if returned_first_attempt_total
+            else 0.0
+        ),
+    }
+
+
 def summarize_mahjong_solo(
     results: list[MahjongSoloInstanceResult],
     *,
@@ -322,6 +423,7 @@ def summarize_mahjong_solo(
         "success": success_count,
         "success_rate": success_count / total if total else 0.0,
         "illegal_tsumo_total": illegal_tsumo_total,
+        **_summarize_action_retry_metrics(results),
         "metrics": summarize_metrics(results),
     }
     if error is not None:

@@ -14,6 +14,7 @@ from minibench.datasets.mahjong_solo.evaluation import (
     evaluate_mahjong_solo_task,
     evaluate_mahjong_solo_tasks,
     extract_mahjong_solo_action,
+    summarize_mahjong_solo,
 )
 from minibench.datasets.mahjong_solo.generation import generate_mahjong_solo_tasks
 from minibench.datasets.mahjong_solo.prompting import (
@@ -27,9 +28,11 @@ class SequenceMahjongAgent:
     def __init__(self, payloads):
         self.payloads = list(payloads)
         self.prompts = []
+        self.contexts = []
 
     def generate(self, prompt, task):
         self.prompts.append(prompt)
+        self.contexts.append(task)
         if self.payloads:
             return json.dumps(self.payloads.pop(0))
         hand_line = next(line for line in prompt.splitlines() if line.startswith("Current hand"))
@@ -60,6 +63,7 @@ class MessageSequenceMahjongAgent:
     def __init__(self, payloads):
         self.payloads = list(payloads)
         self.conversations = []
+        self.contexts = []
 
     def generate_messages(
         self,
@@ -71,6 +75,7 @@ class MessageSequenceMahjongAgent:
         json_mode=None,
     ):
         self.conversations.append(tuple(dict(message) for message in messages))
+        self.contexts.append(task)
         return json.dumps(self.payloads.pop(0))
 
 
@@ -172,13 +177,16 @@ class MahjongSoloTests(unittest.TestCase):
         )
 
     def test_tsumo_success(self):
-        result = evaluate_mahjong_solo_tasks(
-            [tsumo_task()],
-            SequenceMahjongAgent([{"action": "tsumo"}]),
-        )[0]
+        agent = SequenceMahjongAgent([{"action": "tsumo"}])
+        result = evaluate_mahjong_solo_tasks([tsumo_task()], agent)[0]
 
         self.assertTrue(result.success)
         self.assertEqual(result.reasons, ["agent_tsumo:E"])
+        context = agent.contexts[0]
+        self.assertEqual(context.task_id, "solo-tsumo")
+        self.assertEqual(context.family, "mahjong_solo")
+        self.assertFalse(hasattr(context, "initial_hand"))
+        self.assertFalse(hasattr(context, "wall"))
 
     def test_solo_result_saves_reasoning_trace_for_each_action(self):
         result = evaluate_mahjong_solo_task(
@@ -348,6 +356,24 @@ class MahjongSoloTests(unittest.TestCase):
         self.assertIn("The previous action was rejected.", agent.prompts[1])
         self.assertIn("Attempt 2 of 3", agent.prompts[1])
 
+    def test_summary_reports_strict_and_retry_action_metrics(self):
+        agent = SequenceMahjongAgent(
+            [
+                {"action": "tsumo"},
+                {"action": "discard", "tile": "C"},
+                {"action": "discard", "tile": "9s"},
+                {"action": "tsumo"},
+            ]
+        )
+        result = evaluate_mahjong_solo_task(delayed_tsumo_task(), agent)
+        summary = summarize_mahjong_solo([result])
+
+        self.assertEqual(summary["strict_first_attempt_success"], 0.0)
+        self.assertEqual(summary["illegal_tsumo_rate"], 0.25)
+        self.assertEqual(summary["illegal_discard_rate"], 0.25)
+        self.assertEqual(summary["retry_corrected_success"], 1.0)
+        self.assertEqual(summary["first_attempt_legal_action_rate"], 0.5)
+
     def test_history_only_runs_the_same_draw_discard_loop(self):
         agent = MessageSequenceMahjongAgent(
             [
@@ -364,6 +390,8 @@ class MahjongSoloTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.observation_mode, "history-only")
         self.assertEqual(len(agent.conversations), 2)
+        self.assertTrue(all(context.family == "mahjong_solo" for context in agent.contexts))
+        self.assertTrue(all(not hasattr(context, "wall") for context in agent.contexts))
         second_call = agent.conversations[1]
         self.assertEqual(
             [message["role"] for message in second_call],

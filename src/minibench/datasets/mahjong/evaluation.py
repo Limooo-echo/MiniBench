@@ -53,6 +53,17 @@ class MahjongInstanceResult:
     metrics: dict[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class MahjongPublicTaskContext:
+    task_id: str
+    family: str
+    input_mode: str | None = None
+
+    @property
+    def id(self) -> str:
+        return self.task_id
+
+
 _TRANSCRIPTION_PREDICTION_FIELDS = (
     "expected_transcription",
     "hand_transcription_accuracy",
@@ -117,6 +128,11 @@ def evaluate_mahjong_tasks(
         for input_mode in modes:
             metrics_start = start_task_metrics(agent)
             prompt = build_mahjong_prompt(task, input_mode=input_mode)
+            public_context = MahjongPublicTaskContext(
+                task_id=task.id,
+                family="mahjong",
+                input_mode=input_mode,
+            )
             if input_mode == "image":
                 if task.image_path is None:
                     raise ValueError(f"{task.id}: image mode requires a resolved image")
@@ -125,11 +141,11 @@ def evaluate_mahjong_tasks(
                     raise ValueError("Mahjong image evaluation requires generate_multimodal()")
                 raw_output = generate_multimodal(
                     prompt,
-                    task,
+                    public_context,
                     images=[ImageAttachment(path=task.image_path)],
                 )
             else:
-                raw_output = agent.generate(prompt, task)
+                raw_output = agent.generate(prompt, public_context)
             parsed = extract_mahjong_answer(raw_output)
             if parsed is None:
                 parsed = {}
@@ -156,6 +172,13 @@ def validate_mahjong_answer(
     parsed_answer: dict[str, Any],
 ) -> tuple[bool, list[str]]:
     if task.goal in {"tenpai_discard", "max_wait_discard", "max_ukeire_discard"}:
+        allowed_fields = {"discard"}
+        if "visual" in task.tags or task.image is not None:
+            allowed_fields.update(("hand", "visible_tiles"))
+        unexpected_fields = sorted(set(parsed_answer) - allowed_fields)
+        if unexpected_fields:
+            return False, [f"unexpected_fields:{','.join(unexpected_fields)}"]
+
         expected = set(
             tenpai_discards(task.hand)
             if task.goal == "tenpai_discard"

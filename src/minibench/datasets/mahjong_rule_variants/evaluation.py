@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
@@ -8,8 +9,16 @@ from time import strftime
 from typing import Any
 
 from minibench.core.agent import Agent, ChatMessage
+from minibench.core.metrics import (
+    finish_task_metrics,
+    start_task_metrics,
+    summarize_metrics,
+)
 from minibench.datasets.mahjong.api import normalize_tile
+from minibench.datasets.mahjong.evaluation import MahjongPublicTaskContext
 from minibench.datasets.mahjong_solo.evaluation import (
+    _read_generation_trace,
+    _summarize_action_retry_metrics,
     extract_mahjong_solo_action,
     generate_mahjong_history_action,
 )
@@ -48,12 +57,14 @@ class MahjongRuleVariantInstanceResult:
     draws: list[str]
     discards: list[str]
     raw_outputs: list[str]
+    reasoning_traces: list[dict[str, Any] | None]
     conversation: list[ChatMessage]
     agent_actions: list[dict[str, Any]]
     action_errors: list[dict[str, Any]]
     final_hand: list[str]
     reasons: list[str]
     tags: tuple[str, ...]
+    metrics: dict[str, object]
 
 
 def evaluate_mahjong_rule_variant_tasks(
@@ -95,10 +106,16 @@ def evaluate_mahjong_rule_variant_task(
     observation_mode: str = "full-hand",
 ) -> MahjongRuleVariantInstanceResult:
     _validate_observation_mode(observation_mode)
+    metrics_start = start_task_metrics(agent)
+    public_context = MahjongPublicTaskContext(
+        task_id=task.id,
+        family="mahjong_rule_variants",
+    )
     hand = list(task.initial_hand)
     draws: list[str] = []
     discards: list[str] = []
     raw_outputs: list[str] = []
+    reasoning_traces: list[dict[str, Any] | None] = []
     conversation: list[ChatMessage] = []
     agent_actions: list[dict[str, Any]] = []
     action_errors: list[dict[str, Any]] = []
@@ -153,11 +170,11 @@ def evaluate_mahjong_rule_variant_task(
                     raw_output = generate_mahjong_history_action(
                         agent,
                         tuple(conversation),
-                        task,
+                        public_context,
                     )
                     conversation.append({"role": "assistant", "content": raw_output})
                 else:
-                    raw_output = agent.generate(prompt, task)
+                    raw_output = agent.generate(prompt, public_context)
             except RuntimeError as exc:
                 error_detail = str(exc)
                 action_errors.append(
@@ -179,13 +196,16 @@ def evaluate_mahjong_rule_variant_task(
                     draws=draws,
                     discards=discards,
                     raw_outputs=raw_outputs,
+                    reasoning_traces=reasoning_traces,
                     conversation=conversation,
                     agent_actions=agent_actions,
                     action_errors=action_errors,
                     final_hand=hand,
                     reasons=reasons,
+                    metrics=finish_task_metrics(agent, metrics_start),
                 )
             raw_outputs.append(raw_output)
+            reasoning_traces.append(_read_generation_trace(agent))
             action = extract_mahjong_rule_variant_action(raw_output)
 
             if action is None:
@@ -207,11 +227,13 @@ def evaluate_mahjong_rule_variant_task(
                             draws=draws,
                             discards=discards,
                             raw_outputs=raw_outputs,
+                            reasoning_traces=reasoning_traces,
                             conversation=conversation,
                             agent_actions=agent_actions,
                             action_errors=action_errors,
                             final_hand=hand,
                             reasons=reasons,
+                            metrics=finish_task_metrics(agent, metrics_start),
                         )
                     last_error = f"illegal_tsumo_at_draw_{draw_number}"
                 elif action_name != "discard":
@@ -262,11 +284,13 @@ def evaluate_mahjong_rule_variant_task(
         draws=draws,
         discards=discards,
         raw_outputs=raw_outputs,
+        reasoning_traces=reasoning_traces,
         conversation=conversation,
         agent_actions=agent_actions,
         action_errors=action_errors,
         final_hand=hand,
         reasons=reasons,
+        metrics=finish_task_metrics(agent, metrics_start),
     )
 
 
@@ -325,10 +349,15 @@ def summarize_mahjong_rule_variants(
             result.blocked_standard_tsumo_draws
         )
 
-    for channel_summary in by_channel.values():
+    for channel, channel_summary in by_channel.items():
         channel_total = channel_summary["total"]
         channel_summary["success_rate"] = (
             channel_summary["success"] / channel_total if channel_total else 0.0
+        )
+        channel_summary.update(
+            _summarize_action_retry_metrics(
+                [result for result in results if result.channel == channel]
+            )
         )
 
     summary = {
@@ -336,8 +365,10 @@ def summarize_mahjong_rule_variants(
         "success": success,
         "success_rate": success / total if total else 0.0,
         "illegal_tsumo_total": illegal_tsumo_total,
+        **_summarize_action_retry_metrics(results),
         "by_channel": by_channel,
         "by_reason": by_reason,
+        "metrics": summarize_metrics(results),
     }
     if planned_total is not None or run_status != "completed" or error is not None:
         summary.update(
@@ -378,11 +409,13 @@ def write_mahjong_rule_variant_run(
                         "active_rules": result.active_rules,
                         "observation_mode": result.observation_mode,
                         "raw_outputs": result.raw_outputs,
+                        "reasoning_traces": result.reasoning_traces,
                         "conversation": result.conversation,
                         "agent_actions": result.agent_actions,
                         "action_errors": result.action_errors,
                         "win_rule": result.win_rule,
                         "variant_only_win": result.variant_only_win,
+                        "metrics": result.metrics,
                     },
                     ensure_ascii=False,
                 )
@@ -415,11 +448,13 @@ def _make_result(
     draws: list[str],
     discards: list[str],
     raw_outputs: list[str],
+    reasoning_traces: list[dict[str, Any] | None],
     conversation: list[ChatMessage],
     agent_actions: list[dict[str, Any]],
     action_errors: list[dict[str, Any]],
     final_hand: list[str],
     reasons: list[str],
+    metrics: dict[str, object],
 ) -> MahjongRuleVariantInstanceResult:
     return MahjongRuleVariantInstanceResult(
         task_id=task.id,
@@ -438,12 +473,14 @@ def _make_result(
         draws=list(draws),
         discards=list(discards),
         raw_outputs=list(raw_outputs),
+        reasoning_traces=deepcopy(reasoning_traces),
         conversation=list(conversation),
         agent_actions=list(agent_actions),
         action_errors=list(action_errors),
         final_hand=list(final_hand),
         reasons=list(reasons),
         tags=task.tags,
+        metrics=metrics,
     )
 
 
