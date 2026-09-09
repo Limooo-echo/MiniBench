@@ -837,9 +837,26 @@ def _add_xiangqi_run_overrides(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-name", default=None)
 
 
+def _cmd_score_suite(args: argparse.Namespace) -> int:
+    from minibench.scoring.report import score_suite
+    try:
+        result = score_suite(args.manifest, args.output, args.weights)
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"score-suite: {exc}") from exc
+    print(f"Offline scoring complete: {args.output.resolve() / 'report.md'}")
+    print(f"suite={result['suite_id']} scoring_version={result['scoring_version']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="minibench")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    score_suite = subparsers.add_parser("score-suite", help="Score existing results offline; never call models.")
+    score_suite.add_argument("--manifest", type=Path, required=True)
+    score_suite.add_argument("--weights", type=Path, default=None)
+    score_suite.add_argument("--output", type=Path, required=True)
+    score_suite.set_defaults(func=_cmd_score_suite)
 
     run_config_parser = subparsers.add_parser(
         "run-config",

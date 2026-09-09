@@ -1,0 +1,24 @@
+weights:
+  zebra:
+    D: 0.35
+    R: 0.4
+    H: 0.35
+    V: 0.0
+  one_stroke:
+    D: 0.3
+    R: 0.0
+    H: 0.35
+    V: 0.4
+  xiangqi:
+    D: 0.2
+    R: 0.35
+    H: 0.2
+    V: 0.35
+  mahjong:
+    D: 0.15
+    R: 0.25
+    H: 0.1
+    V: 0.25
+partial_credit_cap: 0.25
+bootstrap_samples: 2000
+seed: 20260909

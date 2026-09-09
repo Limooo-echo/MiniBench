@@ -6,6 +6,18 @@ MiniBench 是一个用统一 YAML、统一 agent/provider 接口和统一结果�
 
 > 先记住两条：文本任务默认使用 DeepSeek V4；带图片的任务必须使用支持视觉输入的模型，仓库默认使用 Qwen。不要用 DeepSeek 跑 `image`、`chinese-piece-image` 或 `latin-piece-image`。
 
+## 离线四维评分
+
+已有实验结果可以离线汇总为直接解题、规则变化、历史信息、图像输入四个分数，不会重新调用模型。
+
+```bash
+minibench score-suite --manifest config/scoring/manifest.example.yaml --weights config/scoring/weights.yaml --output outputs/my-scoring-report
+```
+
+示例清单固定了原题文件及 SHA-256，`runs` 留空，运行后会如实报告缺失覆盖。填入已保存的逐题结果及其原始配置来源后再发布正式比较；不要用当前配置推断旧实验。输出目录须为空或尚不存在。
+
+完整公式、权重理由、逐题评分与清单字段见 [评分设计说明](docs/scoring-design.md)，实施和验收记录见 [评分实施记录](docs/scoring-plan.md)。
+
 ## 1. 在 WSL Ubuntu 中安装
 
 如果 WSL 尚未安装，先在 Windows 管理员 PowerShell 中执行一次 `wsl --install -d Ubuntu-22.04` 并重启。之后打开 Ubuntu，确认仓库的 Windows 路径映射正确：
