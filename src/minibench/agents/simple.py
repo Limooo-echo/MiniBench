@@ -40,7 +40,9 @@ class PredictionFileAgent(Agent):
         return outputs
 
     def generate(self, prompt: str, task: Any) -> str:
-        task_id = getattr(task, "id", None)
+        task_id = (
+            task.get("id") if isinstance(task, dict) else getattr(task, "id", None)
+        )
         if not isinstance(task_id, str):
             raise ValueError("prediction-file agent requires task.id")
         if task_id not in self.outputs:

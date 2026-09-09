@@ -20,6 +20,11 @@ dependencies = [
     "Pillow>=10.0",
 ]
 
+[project.optional-dependencies]
+xiangqi-generation = [
+    "cchess==1.25.5",
+]
+
 [project.scripts]
 minibench = "minibench.cli:main"
 

@@ -27,14 +27,18 @@ from minibench.datasets.xiangqi.engines.pikafish import (
     board_to_pikafish_fen,
     resolve_pikafish_executable,
 )
-from minibench.datasets.xiangqi.evaluation import extract_action
+from minibench.datasets.xiangqi.text_encoding import BOARD_ENCODING, board_state_text
 from minibench.datasets.xiangqi.variants.board import Move, VariantBoard
+
+
+CP_LOSS_REPORT_CAP = 500.0
+MATE_SCALE_LOSS_THRESHOLD = 5_000.0
 
 
 @dataclass(frozen=True)
 class MateInOneResult:
-    task_id: st
-    difficulty: st
+    task_id: str
+    difficulty: str
     is_legal: bool
     is_optimal: bool
     goal_achieved: bool
@@ -43,9 +47,9 @@ class MateInOneResult:
     cp_loss: float
     agent_action: int
     optimal_action: int
-    agent_uci: st
-    optimal_uci: st
-    raw_output: st
+    agent_uci: str
+    optimal_uci: str
+    raw_output: str
     tags: list
     legality_score: float
     correctness_score: float
@@ -53,75 +57,106 @@ class MateInOneResult:
     normalized_score: float
 
 
-MATE_IN_ONE_SYSTEM_PROMPT = """You are solving a Xiangqi (Chinese Chess) mate-in-one puzzle.
-You must choose exactly one legal action from the provided numbered list.
-Return exactly one JSON object with schema {"action": <number>}.
+MATE_IN_ONE_SYSTEM_PROMPT = """You are the direct agent in a Xiangqi
+(Chinese Chess) mate-in-one benchmark. Solve only the current board and
+generate exactly one legal UCI move yourself. Return one JSON object and no
+explanation, markdown, or candidate list."""
+
+
+UCI_MOVE_PATTERN = re.compile(r"[a-i][0-9][a-i][0-9]", re.IGNORECASE)
+
+
+def _build_mate_in_one_prompt(task: XiangqiTask, vb: VariantBoard) -> str:
+    """Prompt D3 as free move generation, not candidate selection."""
+    return f"""{MATE_IN_ONE_SYSTEM_PROMPT}
+
+Objective: Red must CHECKMATE Black immediately with this one move.
+A move that only gives check, captures material, improves the position, or begins
+a longer combination is incorrect.
+
+Use this silent decision procedure:
+1. Look first for moves that attack the Black general immediately.
+2. For each candidate, visualize the board after the move.
+3. Reject it if Black can answer by moving the general, capturing the checking
+   piece, blocking the checking line, or otherwise escaping check.
+4. Choose only a move for which the Black general is in check and Black has zero
+   legal replies. Do not print this analysis.
+
+Before answering, silently perform a final legality check:
+- the origin contains the stated Red piece and the destination is not Red-occupied;
+- the piece geometry is correct;
+- every chariot/cannon intermediate square and cannon screen count is correct;
+- the move neither leaves Red's general in check nor exposes facing generals.
+
+Side to move: {task.side_to_move} (uppercase pieces are Red; lowercase pieces are Black).
+{BOARD_ENCODING}
+
+Current board:
+{board_state_text(vb.board)}
+
+Return exactly one JSON object with schema {{"move": "<uci_move>"}}.
 Do not include markdown fences or explanations."""
 
 
-def _board_to_text(board: list[list[int]]) -> str:
-    lines = []
-    for r, row in enumerate(board):
-        lines.append(f"row {r}: " + " ".join(f"{int(x):>3}" for x in row))
-    return "\n".join(lines)
-
-
-def _build_mate_in_one_prompt(
-    task: XiangqiTask,
-    legal: list[Move],
-    vb: VariantBoard,
-) -> str:
-    """Build the numbered UCI-action prompt for a static mate-in-one."""
-    action_lines = "\n".join(
-        f"{i+1}: {mv.to_uci()}" for i, mv in enumerate(legal)
-    )
-    return f"""{MATE_IN_ONE_SYSTEM_PROMPT}
-
-Task ID: {task.id}
-Goal: {task.goal} (find the best move - ideally a mate-in-one)
-Side to move: {task.side_to_move} (positive pieces are yours)
-
-Current board (10 rows x 9 cols, 0=empty, positive=red/ally, negative=black/enemy):
-{_board_to_text(vb.board)}
-
-Legal moves (UCI notation, choose by number):
-{action_lines}
-
-Choose the best move.
-Return exactly:
-{{"action": one_number_from_the_list_above}}
-"""
-
-
-def _extract_mate_in_one_action(raw_output: str) -> int | None:
-    """Extract action (1-N move index) from LLM output with progressive fallback.
-
-    1. Standard {"action": N} via extract_action
-    2. Any integer value in a JSON object
-    3. Any 1-3 digit number in the raw text (move indices are small, 1-N)
-    """
-    action = extract_action(raw_output)
-    if action is not None:
-        return action
-
-    # Fallback 1: any integer value in JSON
+def _extract_mate_in_one_uci(raw_output: str) -> str | None:
+    """Extract a free UCI move; never reinterpret a candidate-list index as a move."""
+    if not raw_output:
+        return None
+    candidates: list[object] = []
     try:
-        obj = json.loads(raw_output)
-        for v in obj.values():
-            if isinstance(v, int):
-                return v
-            if isinstance(v, str) and v.isdigit():
-                return int(v)
-    except (json.JSONDecodeError, AttributeError):
+        payload = json.loads(raw_output)
+        if isinstance(payload, dict):
+            candidates.append(payload.get("move"))
+            candidates.extend(payload.values())
+        elif isinstance(payload, str):
+            candidates.append(payload)
+    except (json.JSONDecodeError, TypeError):
         pass
-
-    # Fallback 2: any 1-3 digit number (move index is small, 1-N)
-    m = re.search(r"\b(\d{1,3})\b", raw_output)
-    if m:
-        return int(m.group(1))
-
+    candidates.append(raw_output)
+    for value in candidates:
+        if not isinstance(value, str):
+            continue
+        match = UCI_MOVE_PATTERN.search(value)
+        if match:
+            return match.group(0).lower()
     return None
 
+
+def enumerate_mate_in_one_moves(board: list[list[int]], side: int) -> list[str]:
+    """Return every legal immediate checkmate, not only an engine-preferred move."""
+    position = VariantBoard(board, [])
+    mates: list[str] = []
+    for move in position.legal_moves(side):
+        trial = position.copy()
+        trial.apply(move)
+        opponent = -side
+        if trial.find_general(opponent) is None or (
+            trial._is_in_check(opponent) and not trial.legal_moves(opponent)
+        ):
+            mates.append(move.to_uci())
+    return sorted(mates)
+
+
+def d3_position_features(board: list[list[int]], side: int) -> dict[str, object]:
+    """Deterministic structural features used for D3 difficulty annotation."""
+    position = VariantBoard(board, [])
+    legal = position.legal_moves(side)
+    mate_moves = enumerate_mate_in_one_moves(board, side)
+    non_mating_checks = 0
+    for move in legal:
+        if move.to_uci() in mate_moves:
+            continue
+        trial = position.copy()
+        trial.apply(move)
+        if trial._is_in_check(-side):
+            non_mating_checks += 1
+    return {
+        "legal_move_count": len(legal),
+        "mate_moves_uci": mate_moves,
+        "mate_move_count": len(mate_moves),
+        "non_mating_check_count": non_mating_checks,
+        "piece_count": sum(cell != 0 for row in board for cell in row),
+    }
 
 def _parse_cp_from_info(info_lines) -> float:
     """Parse centipawn score from Pikafish info lines.
@@ -193,184 +228,125 @@ def evaluate_mate_in_one_tasks(
     pikafish_depth: int = 15,
     pikafish_timeout: float = 60.0,
 ) -> list[MateInOneResult]:
-    """Run mate-in-one static-position evaluation for all tasks.
+    """Evaluate free UCI generation; every immediate mate is a correct answer.
 
-    Pikafish serves as oracle (optimal move + position eval).
-    *agent* is the LLM whose moves are scored against the oracle.
-
-    Uses VariantBoard + UCI着法 + 1-N编号, 不依赖 gym env:
-      - prompt: UCI 着法 + 1-N 编号 (模型选编号)
-      - oracle: Pikafish bestmove_for_fen 直接给 UCI (不经 env/action)
-      - goal: VariantBoard.apply + find_general(-side) / checkmate 判定
-      - cp: Pikafish info "score cp" 解析
+    Pikafish remains a diagnostic oracle for a preferred move and CP deltas.
+    It never defines D3 correctness: the rules engine enumerates the complete
+    set of legal mate-in-one moves for every position.
     """
     results: list[MateInOneResult] = []
     executable = resolve_pikafish_executable(pikafish_path, start_dir=Path.cwd())
     engine = PikafishEngine(executable, timeout=pikafish_timeout)
     engine.start()
+    print(f"\nStarting free-UCI mate-in-one evaluation on {len(tasks)} tasks...")
 
-    print(f"\nStarting mate-in-one evaluation on {len(tasks)} tasks...")
+    try:
+        for i, task in enumerate(tasks):
+            tid = task.id or f"xiangqi-mate-in-one-{i+1:04d}"
+            diff = task.difficulty
+            vb = VariantBoard(task.board, [])
+            side = 1 if task.side_to_move == "ally" else -1
+            opp_side_str = "enemy" if task.side_to_move == "ally" else "ally"
+            legal = vb.legal_moves(side)
+            legal_by_uci = {move.to_uci(): move for move in legal}
+            mate_moves = enumerate_mate_in_one_moves(task.board, side)
+            if not mate_moves:
+                raise ValueError(f"{tid}: dataset position has no legal mate-in-one")
 
-    for i, task in enumerate(tasks):
-        tid = task.id or f"xiangqi-mate-in-one-{i+1:04d}"
-        diff = task.difficulty
-
-        # Mate-in-one uses the standard ruleset.
-        vb = VariantBoard(task.board, [])
-        side = 1 if task.side_to_move == "ally" else -1
-        opp_side_str = "enemy" if task.side_to_move == "ally" else "ally"
-        legal = vb.legal_moves(side)
-
-        try:
-            _ensure_engine_alive(engine)
-
-            # 1. Oracle: Pikafish 直接给 UCI (不经 env/action 转换)
-            fen = board_to_pikafish_fen(
-                vb.board, side_to_move=task.side_to_move
-            )
             try:
-                optimal_uci, info_lines = engine.bestmove_for_fen(
-                    fen, depth=pikafish_depth
-                )
+                _ensure_engine_alive(engine)
+                fen = board_to_pikafish_fen(vb.board, side_to_move=task.side_to_move)
+                optimal_uci, info_lines = engine.bestmove_for_fen(fen, depth=pikafish_depth)
+                cp_before = _parse_cp_from_info(info_lines)
             except (PikafishError, Exception) as exc:
-                msg = str(exc)
-                if "King can be captured" in msg or "Unsupported position" in msg:
-                    print(f"      [SKIP] Illegal position: {fen}")
-                else:
-                    print(f"      [ERROR] Pikafish: {msg[:120]}")
-                results.append(MateInOneResult(
-                    tid, diff, False, False, False,
-                    0, 0, 999999, -1, -1, "SKIP", "SKIP",
-                    "illegal_position", list(task.tags),
-                    0.0, 0.0, 0.0, 0.0,
-                ))
-                print(f"  [{i+1:3d}/{len(tasks)}] {tid:25s} SKIPPED (illegal)")
-                continue
+                # The core D3 label is exact-rule based, so preserve evaluation
+                # instead of converting a transient diagnostic-engine failure
+                # into a model failure.
+                optimal_uci, cp_before = "", 0.0
+                print(f"      [WARN] Pikafish diagnostic unavailable: {str(exc)[:100]}")
 
-            cp_before = _parse_cp_from_info(info_lines)
-
-            # 2. Agent: LLM generates a move (UCI + 1-N 编号 prompt)
-            prompt = _build_mate_in_one_prompt(task, legal, vb)
+            prompt = _build_mate_in_one_prompt(task, vb)
             try:
                 raw_output = agent.generate(prompt, task)
             except Exception as exc:
                 raw_output = ""
                 print(f"      [LLM_ERROR] {str(exc)[:120]}")
 
-            idx = _extract_mate_in_one_action(raw_output)
-            if idx is not None and 1 <= idx <= len(legal):
-                agent_mv = legal[idx - 1]
-                agent_uci = agent_mv.to_uci()
-                agent_action = idx
-            else:
-                agent_mv = None
-                agent_uci = "PARSE_FAIL"
-                agent_action = -1
-
-            # 3. Legality check (trivially true if agent_mv is not None)
+            agent_uci = _extract_mate_in_one_uci(raw_output)
+            agent_mv = legal_by_uci.get(agent_uci or "")
             is_legal = agent_mv is not None
-
-            # 4. Optimal check (UCI comparison, no env/action conversion)
-            is_optimal = is_legal and agent_uci == optimal_uci
-
-            # optimal_action: find 1-N index of optimal_uci in legal list
+            goal_achieved = bool(agent_uci and agent_uci in mate_moves)
+            # Legacy field: exact agreement with Pikafish's single preferred PV.
+            # It is diagnostic only and is deliberately not used for correctness.
+            is_optimal = bool(agent_uci and optimal_uci and agent_uci == optimal_uci)
+            agent_action = -1
             optimal_action = -1
-            for j, mv in enumerate(legal):
-                if mv.to_uci() == optimal_uci:
-                    optimal_action = j + 1
-                    break
-
-            # 5. Goal check: VariantBoard.apply + find_general / checkmate
-            #    cp_after: apply 后再 eval (Pikafish eval, side=opp, 取负)
             cp_after = cp_before
-            goal_achieved = False
 
-            if is_legal:
+            if is_legal and not goal_achieved:
                 trial_vb = VariantBoard(task.board, [])
                 trial_vb.apply(agent_mv)
-
-                # 吃将 = 直接获胜
-                if trial_vb.find_general(-side) is None:
-                    goal_achieved = True
-                    cp_after = 10000.0
-                # 将死: 对方无合法走法且被将军
-                elif (
-                    not trial_vb.legal_moves(-side)
-                    and trial_vb._is_in_check(-side)
-                ):
-                    goal_achieved = True
-                    cp_after = 10000.0
-                else:
-                    # cp_after: eval from opponent's perspective, negate
+                try:
                     _ensure_engine_alive(engine)
-                    fen_after = board_to_pikafish_fen(
-                        trial_vb.board, side_to_move=opp_side_str
-                    )
-                    try:
-                        _, info_after = engine.bestmove_for_fen(
-                            fen_after, depth=pikafish_depth
-                        )
-                        cp_after_raw = _parse_cp_from_info(info_after)
-                        cp_after = -cp_after_raw
-                    except (PikafishError, Exception) as exc:
-                        print(
-                            f"      [WARN] cp_after eval failed: "
-                            f"{str(exc)[:80]}"
-                        )
-                        cp_after = cp_before
+                    fen_after = board_to_pikafish_fen(trial_vb.board, side_to_move=opp_side_str)
+                    _, info_after = engine.bestmove_for_fen(fen_after, depth=pikafish_depth)
+                    cp_after = -_parse_cp_from_info(info_after)
+                except (PikafishError, Exception) as exc:
+                    print(f"      [WARN] CP-after diagnostic unavailable: {str(exc)[:80]}")
+            elif goal_achieved:
+                cp_after = 10_000.0
 
             cp_loss = max(0.0, cp_before - cp_after)
-
-            # 6. Sub-scores (一步杀: correctness 只认 is_optimal/goal_achieved;
-            #    不用 cp_loss==0 等价最优, 因 mate 局面 cp_before==cp_after==10000 无区分度)
             legality_score = 1.0 if is_legal else 0.0
-            if is_optimal or goal_achieved:
-                correctness_score = 1.0
-            elif is_legal:
-                correctness_score = 0.5
-            else:
-                correctness_score = 0.0
-            quality_score = max(0.0, 1.0 - cp_loss / 500.0) if is_legal else 0.0
-
-            # 7. Final score: correctness 70% + quality 20% + legality 10%
+            correctness_score = 1.0 if goal_achieved else (0.5 if is_legal else 0.0)
+            quality_score = max(0.0, 1.0 - cp_loss / CP_LOSS_REPORT_CAP) if is_legal else 0.0
             normalized_score = (
-                correctness_score * 0.70
-                + quality_score * 0.20
-                + legality_score * 0.10
+                correctness_score * 0.70 + quality_score * 0.20 + legality_score * 0.10
             ) * 100.0
 
             results.append(MateInOneResult(
                 tid, diff, is_legal, is_optimal, goal_achieved,
                 round(cp_before, 1), round(cp_after, 1), round(cp_loss, 1),
-                agent_action, optimal_action,
-                agent_uci, optimal_uci,
-                (raw_output or "EMPTY")[:200],
-                list(task.tags),
-                legality_score, correctness_score, quality_score,
-                round(normalized_score, 1),
+                agent_action, optimal_action, agent_uci or "PARSE_FAIL", optimal_uci or "",
+                (raw_output or "EMPTY")[:200], list(task.tags),
+                legality_score, correctness_score, quality_score, round(normalized_score, 1),
             ))
             print(
-                f"  [{i+1:3d}/{len(tasks)}] {tid:25s} score={normalized_score:.1f} "
-                f"legal={is_legal} optimal={is_optimal} cp_loss={cp_loss:.0f} "
-                f"agent_uci={agent_uci}"
+                f"  [{i+1:3d}/{len(tasks)}] {tid:25s} mate@1={goal_achieved} "
+                f"legal={is_legal} oracle_preferred={is_optimal} "
+                f"mate_solutions={len(mate_moves)} agent_uci={agent_uci or 'PARSE_FAIL'}"
             )
-
-        except Exception as exc:
-            print(f"    ERROR: {exc}")
-            results.append(MateInOneResult(
-                tid, diff, False, False, False,
-                0, 0, 999999, -1, -1, "ERROR", "ERROR",
-                str(exc)[:200], list(task.tags),
-                0.0, 0.0, 0.0, 0.0,
-            ))
-
-    engine.close()
+    finally:
+        engine.close()
     return results
+
+def _mate_loss_diagnostics(losses: list[float]) -> dict[str, float]:
+    """Report raw loss only as a diagnostic: mate scores use a 10,000 sentinel."""
+    if not losses:
+        return {
+            "raw_avg_cp_loss": 0.0,
+            "median_cp_loss": 0.0,
+            "mean_capped_cp_loss": 0.0,
+            "mate_scale_loss_event_rate": 0.0,
+        }
+    valid = [float(loss) for loss in losses]
+    return {
+        "raw_avg_cp_loss": round(statistics.mean(valid), 1),
+        "median_cp_loss": round(statistics.median(valid), 1),
+        "mean_capped_cp_loss": round(
+            statistics.mean(min(loss, CP_LOSS_REPORT_CAP) for loss in valid), 1
+        ),
+        "mate_scale_loss_event_rate": round(
+            sum(loss >= MATE_SCALE_LOSS_THRESHOLD for loss in valid) / len(valid), 3
+        ),
+    }
 
 
 def summarize_mate_in_one(results: list[MateInOneResult]) -> dict[str, Any]:
-    """Compute aggregate mate-in-one metrics."""
+    """Mate@1 is primary; CP deltas are secondary because mate is sentinel-coded."""
     total = len(results)
+    if total == 0:
+        return {"total": 0}
     by_diff: dict[str, dict[str, Any]] = {}
 
     for r in results:
@@ -390,33 +366,36 @@ def summarize_mate_in_one(results: list[MateInOneResult]) -> dict[str, Any]:
         d["correctness_scores"].append(r.correctness_score)
         d["quality_scores"].append(r.quality_score)
 
-    for diff, d in by_diff.items():
+    for d in by_diff.values():
         n = d["total"]
         d["score"] = round(statistics.mean(d["scores"]), 1)
         d["legality_rate"] = d["legal"] / n
-        d["optimal_hit_rate"] = d["optimal"] / n
-        d["goal_rate"] = d["goal"] / n
-        d["avg_cp_loss"] = round(statistics.mean(d["cp_losses"]), 1)
+        d["oracle_preferred_hit_rate"] = d["optimal"] / n
+        d["mate_at_one_rate"] = d["goal"] / n
+        d["goal_rate"] = d["mate_at_one_rate"]  # legacy alias
+        d["avg_cp_loss"] = round(statistics.mean(d["cp_losses"]), 1)  # legacy raw alias
+        d.update(_mate_loss_diagnostics(d["cp_losses"]))
         d["avg_legality"] = round(statistics.mean(d["legality_scores"]), 2)
         d["avg_correctness"] = round(statistics.mean(d["correctness_scores"]), 2)
         d["avg_quality"] = round(statistics.mean(d["quality_scores"]), 2)
 
-    all_scores = [r.normalized_score for r in results]
+    losses = [r.cp_loss if r.cp_loss < 999999 else 999999 for r in results]
     return {
         "total": total,
-        "overall_score": round(statistics.mean(all_scores), 1),
+        "primary_metric": "mate_at_one_rate",
+        "mate_at_one_rate": sum(r.goal_achieved for r in results) / total,
         "legality_rate": sum(r.is_legal for r in results) / total,
-        "optimal_hit_rate": sum(r.is_optimal for r in results) / total,
-        "goal_rate": sum(r.goal_achieved for r in results) / total,
-        "avg_cp_loss": round(
-            statistics.mean(
-                [r.cp_loss if r.cp_loss < 999999 else 999999 for r in results]
-            ),
-            1,
-        ),
+        "oracle_preferred_hit_rate": sum(r.is_optimal for r in results) / total,
+        "goal_rate": sum(r.goal_achieved for r in results) / total,  # legacy alias
+        "overall_score": round(statistics.mean(r.normalized_score for r in results), 1),
+        "avg_cp_loss": round(statistics.mean(losses), 1),  # legacy raw alias
+        "cp_loss_diagnostics": {
+            "unit": "Pikafish centipawns; mate scores are represented by a 10,000 sentinel",
+            "cap_for_reporting": CP_LOSS_REPORT_CAP,
+            **_mate_loss_diagnostics(losses),
+        },
         "by_difficulty": by_diff,
     }
-
 
 def write_mate_in_one_run(
     results: list[MateInOneResult],
@@ -441,11 +420,13 @@ def write_mate_in_one_run(
     lines = [
         "Xiangqi Mate-in-One Evaluation",
         f"Total tasks: {summary['total']}",
-        f"Overall score: {summary['overall_score']:.1f}/100",
+        f"Primary Mate@1: {summary['mate_at_one_rate']:.1%}",
         f"Legality rate: {summary['legality_rate']:.1%}",
-        f"Optimal hit rate: {summary['optimal_hit_rate']:.1%}",
-        f"Goal achievement: {summary['goal_rate']:.1%}",
-        f"Average cp loss: {summary['avg_cp_loss']:.1f}",
+        f"Pikafish-preferred hit rate (diagnostic): {summary['oracle_preferred_hit_rate']:.1%}",
+        f"Composite score (legacy diagnostic): {summary['overall_score']:.1f}/100",
+        f"Median CP loss (diagnostic): {summary['cp_loss_diagnostics']['median_cp_loss']:.1f}",
+        f"Mean capped CP loss @ {CP_LOSS_REPORT_CAP:.0f}: {summary['cp_loss_diagnostics']['mean_capped_cp_loss']:.1f}",
+        f"Mate-scale loss events: {summary['cp_loss_diagnostics']['mate_scale_loss_event_rate']:.1%}",
         "",
     ]
     for diff in ("easy", "medium", "hard"):
@@ -454,8 +435,8 @@ def write_mate_in_one_run(
             lines.append(
                 f"  {diff:8s}: score={d['score']:.1f} "
                 f"legal={d['legality_rate']:.1%} "
-                f"optimal={d['optimal_hit_rate']:.1%} "
-                f"cp_loss={d['avg_cp_loss']:.1f}"
+                f"oracle_preferred={d['oracle_preferred_hit_rate']:.1%} "
+                f"mate@1={d['mate_at_one_rate']:.1%} capped_cp={d['mean_capped_cp_loss']:.1f}"
             )
     (run_dir / "summary.txt").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"

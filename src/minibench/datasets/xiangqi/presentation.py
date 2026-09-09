@@ -131,7 +131,7 @@ def build_gallery(output: str | Path) -> Path:
     document = _gallery_document(payload=payload, regular=regular, bold=bold)
     destination = Path(output)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(document, encoding="utf-8", newline="\n")
+    destination.write_text(document, encoding="utf-8")
     return destination
 
 

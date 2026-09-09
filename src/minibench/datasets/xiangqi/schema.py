@@ -32,7 +32,7 @@ RULESETS = (
     "chariot-no-center",
     "soldier-free-retreat",
 )
-HISTORY_MODES = ("full-state", "move-history-only")
+HISTORY_MODES = ("paired", "full-state", "move-history-only")
 MULTIMODAL_INPUT_MODES = (
     "text",
     "chinese-piece-image",
@@ -142,8 +142,13 @@ def validate_record(record: dict[str, Any], *, expected_family: str | None = Non
         raise ValueError(f"{task_id}: FEN is not in canonical MiniBench form")
     if record.get("agent_color") != side_to_move:
         raise ValueError(f"{task_id}: FEN active color and agent_color disagree")
-    if record.get("goal") != "checkmate":
-        raise ValueError(f"{task_id}: goal must be checkmate")
+    expected_goal = (
+        "best-move-under-rule"
+        if family == "xiangqi-rule-variants"
+        else "checkmate"
+    )
+    if record.get("goal") != expected_goal:
+        raise ValueError(f"{task_id}: goal must be {expected_goal}")
     max_plies = record.get("max_plies")
     if not isinstance(max_plies, int) or max_plies < 1:
         raise ValueError(f"{task_id}: max_plies must be a positive integer")
@@ -174,9 +179,45 @@ def validate_record(record: dict[str, Any], *, expected_family: str | None = Non
     evaluation_cp = oracle["evaluation_cp"]
     if evaluation_cp is not None and not isinstance(evaluation_cp, (int, float)):
         raise ValueError(f"{task_id}: oracle.evaluation_cp is invalid")
+    if family == "xiangqi-mate-in-one":
+        _validate_mate_in_one_record(record)
     if family == "xiangqi-rule-variants":
         _validate_rule_record(record)
     return record
+
+
+def _validate_mate_in_one_record(record: dict[str, Any]) -> None:
+    analysis = record.get("d3_analysis")
+    if not isinstance(analysis, dict):
+        raise ValueError(f"{record['id']}: missing d3_analysis")
+    expected = {
+        "version", "legal_move_count", "mate_moves_uci", "mate_move_count",
+        "non_mating_check_count", "piece_count", "difficulty_score",
+        "difficulty_factors",
+    }
+    if set(analysis) != expected or analysis.get("version") != "d3-structural-v2":
+        raise ValueError(f"{record['id']}: invalid d3_analysis schema")
+    for key in ("legal_move_count", "mate_move_count", "non_mating_check_count", "piece_count"):
+        if not isinstance(analysis[key], int) or analysis[key] < 0:
+            raise ValueError(f"{record['id']}: invalid d3_analysis.{key}")
+    moves = analysis["mate_moves_uci"]
+    if (not isinstance(moves, list) or not moves or moves != sorted(set(moves))
+            or any(not isinstance(move, str) or re.fullmatch(r"[a-i][0-9][a-i][0-9]", move) is None for move in moves)):
+        raise ValueError(f"{record['id']}: invalid d3_analysis.mate_moves_uci")
+    if analysis["mate_move_count"] != len(moves) or analysis["piece_count"] != record["piece_count"]:
+        raise ValueError(f"{record['id']}: inconsistent d3_analysis counts")
+    if not isinstance(analysis["difficulty_score"], (int, float)):
+        raise ValueError(f"{record['id']}: invalid d3_analysis.difficulty_score")
+    factors = analysis["difficulty_factors"]
+    factor_keys = {
+        "choice_pressure", "near_miss_rate", "state_load",
+        "choice_pressure_percentile", "near_miss_rate_percentile",
+        "state_load_percentile",
+    }
+    if not isinstance(factors, dict) or set(factors) != factor_keys:
+        raise ValueError(f"{record['id']}: invalid d3_analysis.difficulty_factors")
+    if any(not isinstance(factors[key], (int, float)) for key in factor_keys):
+        raise ValueError(f"{record['id']}: non-numeric D3 difficulty factor")
 
 
 def _validate_rule_record(record: dict[str, Any]) -> None:
@@ -264,6 +305,7 @@ def sample_records(
     *,
     count: int,
     seed: int,
+    strategy: str = "family-default",
 ) -> list[dict[str, Any]]:
     if count < 1:
         raise ValueError("sample count must be positive")
@@ -274,42 +316,110 @@ def sample_records(
     family = records[0]["family"]
     if any(record["family"] != family for record in records):
         raise ValueError("cannot sample records from multiple families")
+    supported = {
+        "family-default", "random", "stratified", "paired-random",
+        "paired-stratified",
+    }
+    if strategy not in supported:
+        raise ValueError(f"unsupported Xiangqi sampling strategy {strategy!r}")
+    if strategy == "family-default":
+        strategy = {
+            "xiangqi-mate-in-one": "stratified",
+            "xiangqi-history": "stratified",
+            "xiangqi-rule-variants": "paired-stratified",
+            "xiangqi-multimodal": "stratified",
+        }[family]
+    if strategy.startswith("paired-") and family != "xiangqi-rule-variants":
+        raise ValueError("paired sampling is only defined for C2 scenarios")
+    if strategy == "stratified" and family == "xiangqi-rule-variants":
+        raise ValueError("C2 requires paired-stratified sampling")
     rng = random.Random(seed)
-    if family == "xiangqi-mate-in-one":
-        buckets = {name: [] for name in ("easy", "medium", "hard")}
+    if strategy == "random":
+        ordered_records = sorted(records, key=lambda item: item["id"])
+        return sorted(rng.sample(ordered_records, count), key=lambda item: item["id"])
+    if strategy == "stratified":
+        preferred = {
+            "xiangqi-mate-in-one": ("easy", "medium", "hard"),
+            "xiangqi-history": ("short", "medium", "long"),
+            "xiangqi-multimodal": ("easy", "medium", "hard"),
+        }.get(family, ())
+        buckets: dict[str, list[dict[str, Any]]] = {}
         for record in sorted(records, key=lambda item: item["id"]):
             buckets.setdefault(record["difficulty"], []).append(record)
-        ordered = [name for name in ("easy", "medium", "hard") if buckets[name]]
+        ordered = [name for name in preferred if buckets.get(name)]
         if not ordered:
             ordered = sorted(name for name, items in buckets.items() if items)
+        if not ordered:
+            raise ValueError(f"{family} dataset has no difficulty buckets")
         base, remainder = divmod(count, len(ordered))
-        allocations = {
-            name: base + int(index < remainder) for index, name in enumerate(ordered)
-        }
         selected: list[dict[str, Any]] = []
-        for name in ordered:
-            if allocations[name] > len(buckets[name]):
-                raise ValueError(f"not enough {name} records for stratified sampling")
-            selected.extend(rng.sample(buckets[name], allocations[name]))
+        remaining = count
+        for index, name in enumerate(ordered):
+            take = min(base + int(index < remainder), len(buckets[name]))
+            selected.extend(rng.sample(buckets[name], take))
+            remaining -= take
+        for name in sorted(ordered, key=lambda label: (-len(buckets[label]), label)):
+            if remaining == 0:
+                break
+            chosen_ids = {record["id"] for record in selected}
+            available = [record for record in buckets[name] if record["id"] not in chosen_ids]
+            take = min(remaining, len(available))
+            selected.extend(rng.sample(available, take))
+            remaining -= take
+        if remaining:
+            raise ValueError(
+                f"sample count {count} exceeds available stratified records for {family}"
+            )
         return sorted(selected, key=lambda item: item["id"])
     if family == "xiangqi-rule-variants":
-        buckets = {name: [] for name in RULESETS}
-        for record in sorted(records, key=lambda item: item["id"]):
-            buckets[record["ruleset"]].append(record)
-        exact = {
-            name: count * len(items) / len(records) for name, items in buckets.items()
+        # C2 is a paired comparison. Do not mix standard-only control records
+        # into a sampled rule-comparison run.
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for record in records:
+            groups.setdefault(record.get("scenario_id") or record["id"], []).append(record)
+        expected_rulesets = set(RULESETS)
+        paired = {
+            scenario_id: group
+            for scenario_id, group in groups.items()
+            if {record.get("ruleset") for record in group} == expected_rulesets
+            and len(group) == len(expected_rulesets)
+            and len({record["fen"] for record in group}) == 1
         }
-        allocations = {name: int(value) for name, value in exact.items()}
-        remaining = count - sum(allocations.values())
-        order = sorted(
-            RULESETS,
-            key=lambda name: (-(exact[name] - allocations[name]), RULESETS.index(name)),
-        )
-        for name in order[:remaining]:
-            allocations[name] += 1
-        selected = []
-        for name in RULESETS:
-            selected.extend(rng.sample(buckets[name], allocations[name]))
+        scenarios = sorted(paired)
+        if count > len(scenarios):
+            raise ValueError(
+                f"sample count {count} exceeds available complete C2 scenarios {len(scenarios)}"
+            )
+        if strategy == "paired-stratified":
+            strata: dict[str, list[str]] = {}
+            for scenario_id in scenarios:
+                labels = {
+                    str(record.get("design_stratum", "unspecified"))
+                    for record in paired[scenario_id]
+                }
+                if len(labels) != 1:
+                    raise ValueError(f"C2 scenario {scenario_id} has inconsistent design strata")
+                strata.setdefault(labels.pop(), []).append(scenario_id)
+            labels = sorted(strata)
+            base, remainder = divmod(count, len(labels))
+            chosen = []
+            remaining = count
+            for index, label in enumerate(labels):
+                take = min(base + int(index < remainder), len(strata[label]))
+                chosen.extend(rng.sample(strata[label], take))
+                remaining -= take
+            for label in sorted(labels, key=lambda key: (-len(strata[key]), key)):
+                if not remaining:
+                    break
+                available = [item for item in strata[label] if item not in chosen]
+                take = min(remaining, len(available))
+                chosen.extend(rng.sample(available, take))
+                remaining -= take
+            if remaining:
+                raise ValueError(f"sample count {count} exceeds stratified C2 scenarios")
+        else:
+            chosen = rng.sample(scenarios, count)
+        selected = [record for scenario_id in chosen for record in paired[scenario_id]]
         return sorted(selected, key=lambda item: item["id"])
     ordered_records = sorted(records, key=lambda item: item["id"])
     return sorted(rng.sample(ordered_records, count), key=lambda item: item["id"])

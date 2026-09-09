@@ -827,7 +827,11 @@ def _add_xiangqi_run_overrides(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--sample-seed", type=int, default=None)
     parser.add_argument("--sample-count", type=int, default=None)
     parser.add_argument("--task-id", action="append", default=None)
-    parser.add_argument("--history-mode", choices=("full-state", "move-history-only"), default=None)
+    parser.add_argument(
+        "--history-mode",
+        choices=("paired", "full-state", "move-history-only"),
+        default=None,
+    )
     parser.add_argument("--input-modes", default=None)
     parser.add_argument("--pikafish-depth", type=int, default=None)
     parser.add_argument("--pikafish-timeout", type=float, default=None)

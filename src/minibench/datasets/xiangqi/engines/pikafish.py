@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from queue import Empty, Queue
 import os
@@ -211,9 +212,15 @@ def find_pikafish_executable(start_dir: str | Path | None = None) -> Path | None
         root / "pikafish",
         root / "pikafish" / "src",
         root / "pikafish" / "Pikafish-master" / "src",
+        root / "Pikafish",
+        root / "Pikafish" / "src",
+        root / "Pikafish" / "Pikafish-master" / "src",
         root.parent / "pikafish",
         root.parent / "pikafish" / "src",
         root.parent / "pikafish" / "Pikafish-master" / "src",
+        root.parent / "Pikafish",
+        root.parent / "Pikafish" / "src",
+        root.parent / "Pikafish" / "Pikafish-master" / "src",
     ]
     candidates = [
         candidate_dir / name
@@ -244,6 +251,34 @@ def resolve_pikafish_executable(
         )
 
     return found
+
+
+def pikafish_fingerprint(executable: str | Path) -> dict[str, object]:
+    """Return immutable identifiers for the exact engine binary and NNUE file."""
+    binary = Path(executable).resolve()
+    if not binary.is_file():
+        raise ValueError(f"Pikafish executable does not exist: {binary}")
+
+    def digest(path: Path) -> str:
+        hasher = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    payload: dict[str, object] = {
+        "executable": str(binary),
+        "binary_sha256": digest(binary),
+        "binary_size_bytes": binary.stat().st_size,
+    }
+    eval_file = binary.parent / "pikafish.nnue"
+    if eval_file.is_file():
+        payload["eval_file"] = str(eval_file.resolve())
+        payload["eval_file_sha256"] = digest(eval_file)
+    else:
+        payload["eval_file"] = None
+        payload["eval_file_sha256"] = None
+    return payload
 
 
 class PikafishEngine:

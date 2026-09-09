@@ -10,7 +10,7 @@ import warnings
 
 from minibench.datasets.xiangqi.multimodal import (
     _build_multimodal_prompt,
-    _extract_index,
+    _extract_uci,
     board_to_compact,
     evaluate_xiangqi_multimodal_tasks,
     render_board,
@@ -25,14 +25,17 @@ class FirstMoveAgent:
         self.text_calls = 0
         self.image_calls = 0
 
+    def _first_legal_uci(self, task):
+        return VariantBoard(task["board"], []).legal_moves(1)[0].to_uci()
+
     def generate(self, prompt, task):
         self.text_calls += 1
-        return json.dumps({"action": 1})
+        return json.dumps({"move": self._first_legal_uci(task)})
 
     def generate_multimodal(self, prompt, task, *, images):
         self.image_calls += 1
         self.last_images = images
-        return json.dumps({"action": 1})
+        return json.dumps({"move": self._first_legal_uci(task)})
 
 
 def sample_multimodal_task():
@@ -54,15 +57,17 @@ def sample_multimodal_task():
 
 
 class XiangqiMultimodalTests(unittest.TestCase):
-    def test_prompt_requires_json_action_object(self):
+    def test_prompt_requires_free_uci_and_no_candidate_list(self):
         board = VariantBoard(sample_multimodal_task()["board"], [])
-        prompt = _build_multimodal_prompt(
-            board.legal_moves(1), board, "text", ""
-        )
-        self.assertIn('{"action": <', prompt)
-        self.assertIn('{"action": 3}', prompt)
-        self.assertNotIn("只输出一个阿拉伯数字", prompt)
-        self.assertEqual(_extract_index('{"action": 3}'), 3)
+        prompt = _build_multimodal_prompt(board, "text", "")
+        self.assertIn('{"move": "<uci_move>"}', prompt)
+        self.assertIn("rank 0 is the bottom row", prompt)
+        self.assertIn("    a b c d e f g h i", prompt)
+        self.assertIn("Black pieces: k@d9", prompt)
+        self.assertIn("Red pieces:", prompt)
+        self.assertNotIn("Candidate moves", prompt)
+        self.assertEqual(_extract_uci('{"move": "H5H9"}'), "h5h9")
+        self.assertIsNone(_extract_uci('{"action": 3}'))
 
     def test_renderer_supports_bytes_and_legacy_base64(self):
         board = sample_multimodal_task()["board"]
@@ -77,6 +82,9 @@ class XiangqiMultimodalTests(unittest.TestCase):
             self.assertEqual(base64.b64decode(render_board(board, mode)), png)
         compact = board_to_compact(board)
         self.assertEqual(len(compact.splitlines()), 10)
+        self.assertEqual(compact.splitlines()[0], "...k.....")
+        self.assertIn("R", compact)
+        self.assertIn("p", compact)
 
     @patch("minibench.datasets.xiangqi.multimodal.score_moves", return_value=[])
     def test_three_modes_use_shared_agent_and_write_step_images(self, _score_moves):
@@ -87,6 +95,7 @@ class XiangqiMultimodalTests(unittest.TestCase):
                 agent,
                 modes=("text", "chinese-piece-image", "latin-piece-image"),
                 max_steps=1,
+                verify_with_pikafish=False,
                 step_dir=directory,
             )
             written = list(Path(directory).rglob("*.png"))

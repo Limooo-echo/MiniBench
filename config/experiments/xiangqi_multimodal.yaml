@@ -1,14 +1,17 @@
 task:
+  prompt_version: xiangqi-v4-free-uci-paired-mate-in-one
   family: xiangqi-multimodal
   path: data/xiangqi/multimodal/tasks.jsonl
   sampling:
-    enabled: false
+    enabled: true
     seed: 42
-    count: 10
-    strategy: random
+    count: 30
+    # Sample equal numbers of easy / medium / hard source positions; each
+    # selected position is still evaluated in all three modalities.
+    strategy: stratified
 
 agent:
-  name: passthrough
+  name: direct
   max_tokens: 512
 
 provider:
@@ -16,6 +19,7 @@ provider:
   model: qwen3.8-max
   api_key_env: DASHSCOPE_API_KEY
   json_mode: true
+  max_retries: 3
   timeout: 120
   extra_body:
     enable_thinking: false
@@ -25,10 +29,13 @@ evaluation:
     - text
     - chinese-piece-image
     - latin-piece-image
-  opponent_depth: 4
-  optimal_depth: 3
-  max_plies: 20
+  max_plies: 1
+  # Exact rules accept every mating move; Pikafish independently confirms the
+  # position is mate-in-one and supplies preferred-move / CP diagnostics.
+  verify_with_pikafish: true
+  pikafish_depth: 8
+  pikafish_timeout: 60.0
 
 run:
   output_dir: runs
-  run_name: null
+  run_name: xiangqi_m2_direct_qwen38max_free_uci_v3

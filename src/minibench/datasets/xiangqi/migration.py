@@ -102,7 +102,7 @@ def _migrate_file(
     report["files"].append({"path": source.name, "status": "converted"})
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(serialized, encoding="utf-8", newline="\n")
+        destination.write_text(serialized, encoding="utf-8")
 
 
 def _rewrite_value(

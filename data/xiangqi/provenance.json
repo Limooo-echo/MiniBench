@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "corpus_name": "MiniBench Xiangqi 2026-08-31 rebuild",
+  "source_repository": {
+    "ccpd": "https://github.com/Yvonne761/Chinese-Chess-Practical-Dataset",
+    "minibench": "https://github.com/Limooo-echo/MiniBench",
+    "pikafish": "https://github.com/official-pikafish/Pikafish"
+  },
+  "source_revision": {
+    "ccpd": "368a47a947773dd8692c026e286dd19b6277b993",
+    "minibench_base": "d59ce880ba295472e719ad04641ef0c79a51390f",
+    "pikafish_binary_sha256": "be284d9532bb2cf3515a1a9c61395268d437a5c625a920f01be9fb2107f81c11",
+    "pikafish_nnue_sha256": "a2f41d4d0b9f59c5b5ecb3ca129fe24e3a722ea2f00ee252ae14d5dc08899f6a"
+  },
+  "source_license": {
+    "ccpd": "CC-BY-4.0",
+    "pikafish": "GPL-3.0",
+    "minibench_dataset_and_code": "UNRESOLVED: repository has no top-level licence file"
+  },
+  "generation_command": {
+    "d3": "python scripts/annotate_xiangqi_d3.py --in-place",
+    "h2": "python scripts/build_xiangqi_h2.py (see history/validation_report.json for inputs and engine hashes)",
+    "c2": "python scripts/build_xiangqi_c2.py --candidates data/xiangqi/rule_variants/candidates.json --output data/xiangqi/rule_variants/tasks.jsonl",
+    "m2": "python scripts/build_xiangqi_m2_from_d3.py --d3 data/xiangqi/mate_in_one/tasks.jsonl --output data/xiangqi/multimodal/tasks.jsonl"
+  },
+  "generator_seed": {
+    "d3": "deterministic quantiles",
+    "h2": 20260831,
+    "c2": 20260831,
+    "m2": "inherits D3"
+  },
+  "model_service_snapshot": "Evaluation configuration records model name, thinking flag and provider settings per run; no API key is persisted.",
+  "contamination_policy": "CCPD is public. Exact training-data contamination cannot be established locally; disclose this limitation and the provider policy for every model.",
+  "intentional_overlap": {
+    "D3_M2": "All 250 FENs are intentionally shared to isolate modality.",
+    "C2": "Each of 60 paired scenarios intentionally repeats one FEN across four rule cards."
+  }
+}

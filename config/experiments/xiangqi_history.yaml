@@ -1,27 +1,34 @@
 task:
+  prompt_version: xiangqi-v3-paired-free-uci-history
   family: xiangqi-history
   path: data/xiangqi/history/tasks.jsonl
   sampling:
-    enabled: false
+    enabled: true
     seed: 42
-    count: 10
-    strategy: random
+    count: 30
+    # 10 tasks each from mate-in-2/3, mate-in-4/5, and mate-in-6+.
+    strategy: stratified
 
 agent:
-  name: passthrough
+  name: direct
   max_tokens: 512
 
 provider:
-  name: deepseek
-  model: deepseek-v4-flash
-  api_key_env: DEEPSEEK_API_KEY
+  name: qwen
+  model: qwen3.8-max
+  api_key_env: DASHSCOPE_API_KEY
+  max_retries: 3
+  json_mode: true
+  extra_body:
+    enable_thinking: false
 
 evaluation:
-  history_mode: full-state
-  pikafish_depth: 8
+  history_mode: paired
+  # Formal H2 runs use the corpus verification depth.  The sampled smoke
+  # runner intentionally overrides this to its explicit --pikafish-depth.
+  pikafish_depth: 16
   pikafish_timeout: 60.0
-  max_plies: 20
 
 run:
   output_dir: runs
-  run_name: null
+  run_name: xiangqi_h2_direct_qwen38max_paired_free_uci_v3

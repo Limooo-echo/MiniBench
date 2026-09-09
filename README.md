@@ -240,14 +240,36 @@ minibench run-config config/experiments/zebra_history.yaml
 
 `zebra_history.yaml` 默认使用 `agent.name: passthrough`；所有实现 phase-aware 消息接口的推理 Agent 也可运行该多轮评测。
 
+发布象棋结果前，先执行来源、结构和复现信息审计：
+
+```bash
+python scripts/audit_xiangqi_release.py --strict
+```
+
+M2 会在运行时逐题用 Pikafish 复核初始局面确为一步杀。正式全量运行前，
+可先跑四任务小规模验收，并保存本次实际抽中的题目：
+
+```bash
+export DASHSCOPE_API_KEY
+python scripts/run_xiangqi_smoke.py
+```
+
+默认抽取 D3/H2/M2 各 6 个位置（每层 2 个），C2 抽取 3 个配对场景
+（每种规则焦点 1 个，展开为 12 条规则条件）。若要把同一批题交给网页版模型，
+再由本地代码执行合法性检查、Pikafish 应着和评分，可运行：
+
+```bash
+python scripts/xiangqi_web_test.py --suite-dir runs/xiangqi-smoke-<时间戳>
+```
+
 ### 4.2 象棋 schema v2
 
 | 配置 | 公开 family | 内容 |
 | --- | --- | --- |
 | `xiangqi_mate_in_one.yaml` | `xiangqi-mate-in-one` | 一步杀 |
-| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 标准规则与三个规则变体 |
-| `xiangqi_history.yaml` | `xiangqi-history` | `full-state` / `move-history-only` |
-| `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 文本、中文棋子图、拉丁棋子图；默认 Qwen |
+| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 同局面四规则卡的配对规则推理；自由 UCI 走法 |
+| `xiangqi_history.yaml` | `xiangqi-history` | 按将杀步数分层抽样，配对 `full-state` / `move-history-only`，由 Pikafish 应战 |
+| `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 同一步杀局面的文本、中文棋子图、拉丁棋子图配对比较，并由 Pikafish 外部复核 |
 
 直接运行 YAML：
 
@@ -269,9 +291,9 @@ minibench run-task xiangqi-mate-in-one \
   --sample-count 10
 
 minibench run-task xiangqi-history \
-  --history-mode full-state \
+  --history-mode paired \
   --sample-count 10 \
-  --pikafish-depth 8
+  --pikafish-depth 16
 
 minibench run-suite \
   --tasks xiangqi-mate-in-one,xiangqi-rule-variants \
@@ -682,7 +704,7 @@ minibench run-task xiangqi-multimodal \
 - `predictions.jsonl`：原始输出与逐题结果。
 - `results.json`：汇总指标。
 - `summary.txt`：人类可读摘要。
-- 象棋 v2 额外保存 `resolved_config.yaml` 与 `run_metadata.json`，记录数据哈希、schema、renderer 和依赖版本。
+- 象棋 v2 额外保存 `selected_tasks.jsonl`、`resolved_config.yaml` 与 `run_metadata.json`，记录精确抽样、数据与配置哈希、schema、renderer、运行环境和 Pikafish 指纹。
 
 在 WSL 中查看最近产生的文件：
 

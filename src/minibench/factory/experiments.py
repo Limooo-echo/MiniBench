@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import platform
+import subprocess
+import sys
 from importlib.metadata import PackageNotFoundError, version
 import json
 from pathlib import Path
@@ -100,11 +103,11 @@ def _xiangqi_rule_variants_spec() -> TaskFamilySpec:
 
 def _xiangqi_history_spec() -> TaskFamilySpec:
     from minibench.datasets.xiangqi.history import (
+        HISTORY_SYSTEM_PROMPT,
         evaluate_history_tasks,
         summarize_history,
         write_history_run,
     )
-    from minibench.datasets.xiangqi.prompting import XIANGQI_SYSTEM_PROMPT
 
     family = "xiangqi-history"
     return TaskFamilySpec(
@@ -113,7 +116,7 @@ def _xiangqi_history_spec() -> TaskFamilySpec:
         evaluate_tasks=evaluate_history_tasks,
         summarize=summarize_history,
         write_run=write_history_run,
-        system_prompt=XIANGQI_SYSTEM_PROMPT,
+        system_prompt=HISTORY_SYSTEM_PROMPT,
     )
 
 
@@ -291,6 +294,7 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
             family=family,
             count=int(sampling["count"]),
             seed=int(sampling["seed"]),
+            strategy=str(sampling.get("strategy", "family-default")),
         )
     evaluation_config = dict(config.get("evaluation") or {})
     if family == "mahjong_rule_variants":
@@ -350,17 +354,29 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
         run_config.get("run_name"),
     )
     if family.startswith("xiangqi-"):
+        selected_tasks_path = _write_xiangqi_selected_tasks(
+            run_dir,
+            tasks=tasks,
+            data_path=Path(task_path),
+            family=family,
+        )
         _write_xiangqi_run_metadata(
             run_dir,
             config=config,
             data_path=Path(task_path),
             family=family,
+            selected_tasks_path=selected_tasks_path,
         )
     return run_dir, spec.summarize(results)
 
 
 def _sample_xiangqi_tasks(
-    tasks: list[Any], *, family: str, count: int, seed: int
+    tasks: list[Any],
+    *,
+    family: str,
+    count: int,
+    seed: int,
+    strategy: str = "family-default",
 ) -> list[Any]:
     if not family.startswith("xiangqi-"):
         return tasks[:count]
@@ -387,7 +403,7 @@ def _sample_xiangqi_tasks(
             }
         indexed[record["id"]] = task
         records.append(record)
-    selected = sample_records(records, count=count, seed=seed)
+    selected = sample_records(records, count=count, seed=seed, strategy=strategy)
     return [indexed[record["id"]] for record in selected]
 
 
@@ -397,6 +413,7 @@ def _write_xiangqi_run_metadata(
     config: dict[str, Any],
     data_path: Path,
     family: str,
+    selected_tasks_path: Path,
 ) -> None:
     from minibench.datasets.xiangqi.multimodal import XIANGQI_RENDERER_VERSION
     from minibench.datasets.xiangqi.schema import SCHEMA_VERSION
@@ -411,14 +428,55 @@ def _write_xiangqi_run_metadata(
             dependencies[distribution] = version(distribution)
         except PackageNotFoundError:
             dependencies[distribution] = "not-installed"
+    resolved_config = yaml.safe_dump(
+        _plain_config(config), sort_keys=False, allow_unicode=True
+    ).encode("utf-8")
     metadata = {
         "family": family,
         "schema_version": SCHEMA_VERSION,
         "renderer_version": XIANGQI_RENDERER_VERSION,
         "data_file": data_path.as_posix(),
         "data_sha256": hashlib.sha256(data_bytes).hexdigest(),
+        "selected_tasks_file": selected_tasks_path.name,
+        "selected_tasks_sha256": sha256_file(selected_tasks_path),
+        "selected_record_count": sum(
+            1
+            for line in selected_tasks_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ),
+        "resolved_config_sha256": hashlib.sha256(resolved_config).hexdigest(),
         "dependencies": dependencies,
+        "runtime": {
+            "python": sys.version,
+            "platform": platform.platform(),
+            "git_commit": _git_revision(Path.cwd()),
+            "git_dirty": _git_is_dirty(Path.cwd()),
+        },
+        "model_request": _model_request_metadata(config.get("provider", {})),
     }
+    evaluation = config.get("evaluation") or {}
+    pikafish_path = evaluation.get("pikafish_path")
+    uses_pikafish = family in {
+        "xiangqi-mate-in-one",
+        "xiangqi-history",
+        "xiangqi-multimodal",
+    } and bool(evaluation.get("verify_with_pikafish", True))
+    if pikafish_path or uses_pikafish:
+        from minibench.datasets.xiangqi.engines.pikafish import (
+            pikafish_fingerprint,
+            resolve_pikafish_executable,
+        )
+
+        try:
+            executable = resolve_pikafish_executable(
+                pikafish_path, start_dir=Path.cwd()
+            )
+            metadata["pikafish"] = pikafish_fingerprint(executable)
+        except (FileNotFoundError, RuntimeError, ValueError):
+            # Static/prediction-only tests may intentionally skip engine setup.
+            metadata["pikafish"] = None
+    else:
+        metadata["pikafish"] = None
     (run_dir / "resolved_config.yaml").write_text(
         yaml.safe_dump(_plain_config(config), sort_keys=False, allow_unicode=True),
         encoding="utf-8",
@@ -426,6 +484,78 @@ def _write_xiangqi_run_metadata(
     (run_dir / "run_metadata.json").write_text(
         json.dumps(metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
+
+
+def _write_xiangqi_selected_tasks(
+    run_dir: Path,
+    *,
+    tasks: list[Any],
+    data_path: Path,
+    family: str,
+) -> Path:
+    """Persist the exact sampled records used by a Xiangqi run."""
+    from minibench.datasets.xiangqi.schema import load_records
+
+    selected_ids = [
+        str(task["id"] if isinstance(task, dict) else task.id) for task in tasks
+    ]
+    records = load_records(data_path, expected_family=family)
+    by_id = {record["id"]: record for record in records}
+    missing = [task_id for task_id in selected_ids if task_id not in by_id]
+    if missing:
+        raise ValueError(
+            "selected Xiangqi tasks are absent from the source dataset: "
+            + ", ".join(missing)
+        )
+    path = run_dir / "selected_tasks.jsonl"
+    path.write_text(
+        "".join(
+            json.dumps(by_id[task_id], ensure_ascii=False, sort_keys=True) + "\n"
+            for task_id in selected_ids
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _git_revision(path: Path) -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def _git_is_dirty(path: Path) -> bool | None:
+    try:
+        return bool(
+            subprocess.check_output(
+                ["git", "-C", str(path), "status", "--porcelain"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def _model_request_metadata(provider: dict[str, Any]) -> dict[str, Any]:
+    """Preserve request identity without capturing credentials or environment values."""
+    return {
+        key: provider[key]
+        for key in (
+            "name",
+            "model",
+            "base_url",
+            "api_version",
+            "json_mode",
+            "extra_body",
+        )
+        if key in provider
+    }
 
 
 def _plain_config(value: Any) -> Any:
@@ -442,8 +572,11 @@ def _select_tasks(tasks: list[Any], task_ids: list[str]) -> list[Any]:
     if not task_ids:
         return tasks
     wanted = set(task_ids)
-    selected = [task for task in tasks if getattr(task, "id", None) in wanted]
-    missing = wanted - {getattr(task, "id", None) for task in selected}
+    def task_id(task: Any) -> Any:
+        return task.get("id") if isinstance(task, dict) else getattr(task, "id", None)
+
+    selected = [task for task in tasks if task_id(task) in wanted]
+    missing = wanted - {task_id(task) for task in selected}
     if missing:
         raise ValueError(f"unknown task id(s): {', '.join(sorted(missing))}")
     return selected
@@ -501,13 +634,18 @@ def _evaluate(
             tasks,
             agent,
             max_steps=int(evaluation_config.get("max_plies", 12)),
-            search_depth=int(evaluation_config.get("search_depth", 3)),
+            opponent_depth=int(evaluation_config.get("opponent_depth", 2)),
+            oracle_depth=int(
+                evaluation_config.get(
+                    "oracle_depth", evaluation_config.get("search_depth", 3)
+                )
+            ),
         )
     if family == "xiangqi-history":
         return spec.evaluate_tasks(
             tasks,
             agent,
-            history_mode=evaluation_config.get("history_mode", "full-state"),
+            history_mode=evaluation_config.get("history_mode", "move-history-only"),
             pikafish_path=evaluation_config.get("pikafish_path"),
             pikafish_depth=int(evaluation_config.get("pikafish_depth", 8)),
             pikafish_timeout=float(evaluation_config.get("pikafish_timeout", 60.0)),
@@ -526,6 +664,14 @@ def _evaluate(
             opponent_depth=int(evaluation_config.get("opponent_depth", 4)),
             optimal_depth=int(evaluation_config.get("optimal_depth", 3)),
             max_steps=int(evaluation_config.get("max_plies", 20)),
+            pikafish_path=evaluation_config.get("pikafish_path"),
+            pikafish_depth=int(evaluation_config.get("pikafish_depth", 8)),
+            pikafish_timeout=float(
+                evaluation_config.get("pikafish_timeout", 60.0)
+            ),
+            verify_with_pikafish=bool(
+                evaluation_config.get("verify_with_pikafish", True)
+            ),
             step_dir=evaluation_config.get("step_dir"),
         )
     if family == "one_stroke":

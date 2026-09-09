@@ -1,26 +1,33 @@
 task:
+  prompt_version: xiangqi-v4-free-uci-mate-verification
   family: xiangqi-mate-in-one
   path: data/xiangqi/mate_in_one/tasks.jsonl
   sampling:
-    enabled: false
+    enabled: true
     seed: 42
-    count: 10
+    count: 30
+    # count is the total number of tasks: 10 each from easy / medium / hard.
     strategy: stratified
 
 agent:
-  name: cot
+  name: direct
   max_tokens: 1024
 
 provider:
-  name: deepseek
-  model: deepseek-v4-flash
-  api_key_env: DEEPSEEK_API_KEY
+  name: qwen
+  model: qwen3.8-max
+  api_key_env: DASHSCOPE_API_KEY
+  json_mode: true
+  extra_body:
+    enable_thinking: false
+  max_retries: 3
+  timeout: 300
 
 evaluation:
   pikafish_depth: 8
   pikafish_timeout: 60.0
-  max_plies: 4
+  max_plies: 1
 
 run:
   output_dir: runs
-  run_name: xiangqi_mate_in_one_cot
+  run_name: xiangqi_d3_direct_qwen38max_free_uci_v3

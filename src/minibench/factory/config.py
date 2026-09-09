@@ -238,10 +238,16 @@ def validate_experiment_config(
             raise ValueError(f"{source}: task.sampling.seed must be an integer")
         if not isinstance(sampling["count"], int) or sampling["count"] < 1:
             raise ValueError(f"{source}: task.sampling.count must be positive")
-        if sampling["strategy"] not in {"random", "stratified", "proportional"}:
+        if sampling["strategy"] not in {
+            "random",
+            "stratified",
+            "proportional",
+            "paired-random",
+            "paired-stratified",
+        }:
             raise ValueError(
                 f"{source}: task.sampling.strategy must be random, stratified, "
-                "or proportional"
+                "proportional, paired-random, or paired-stratified"
             )
 
     agent = raw["agent"]

@@ -6,6 +6,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 import re
+import statistics
 from time import strftime
 from typing import Any, Callable, Sequence
 
@@ -23,6 +24,17 @@ from minibench.core.metrics import (
     summarize_metrics,
 )
 from minibench.core.multimodal import ImageAttachment, summarize_paired_modes
+from minibench.datasets.xiangqi.engines.pikafish import (
+    PikafishAnalysis,
+    PikafishEngine,
+    board_to_pikafish_fen,
+    resolve_pikafish_executable,
+)
+from minibench.datasets.xiangqi.text_encoding import (
+    BOARD_ENCODING,
+    board_state_text,
+    piece_symbol,
+)
 from minibench.datasets.xiangqi.variants.board import Move, VariantBoard
 from minibench.datasets.xiangqi.variants.search import score_moves
 
@@ -48,6 +60,10 @@ XIANGQI_MULTIMODAL_INPUT_MODES = (
     "latin-piece-image",
 )
 XIANGQI_RENDERER_VERSION = 2
+VALUE_LOSS_CAP = 10_000.0
+M2_CP_LOSS_REPORT_CAP = 500.0
+UCI_MOVE_PATTERN = re.compile(r"\b([a-i][0-9][a-i][0-9])\b", re.IGNORECASE)
+COORDINATE_CONVENTION = "UCI a0a1 uses file a-i and rank 0-9; rank 0 is the bottom row."
 
 
 def _piece_base(piece: int) -> int:
@@ -59,7 +75,7 @@ def _piece_base(piece: int) -> int:
 
 def board_to_compact(board: Sequence[Sequence[int]]) -> str:
     return "\n".join(
-        "".join(PIECE_AB[_piece_base(value)] if value else "." for value in row)
+        "".join(piece_symbol(value) for value in row)
         for row in board
     )
 
@@ -140,6 +156,10 @@ def evaluate_xiangqi_multimodal_tasks(
     opponent_depth: int = 4,
     optimal_depth: int = 3,
     max_steps: int = 20,
+    pikafish_path: str | Path | None = None,
+    pikafish_depth: int = 8,
+    pikafish_timeout: float = 60.0,
+    verify_with_pikafish: bool = True,
     step_dir: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> list[dict[str, Any]]:
@@ -150,42 +170,111 @@ def evaluate_xiangqi_multimodal_tasks(
         )
     step_root = Path(step_dir) if step_dir is not None else None
     results: list[dict[str, Any]] = []
-    for task in tasks:
-        for mode in modes:
-            metrics_start = start_task_metrics(agent)
-            steps, success, reasons = _run_multimodal_game(
-                task,
-                agent,
-                mode,
-                opponent_depth=opponent_depth,
-                optimal_depth=optimal_depth,
-                max_steps=max_steps,
-                step_root=step_root,
-            )
-            agent_steps = [step for step in steps if step["actor"] == "agent"]
-            count = len(agent_steps)
-            legal_rate = sum(int(step["is_legal"]) for step in agent_steps) / count if count else 0.0
-            optimal_rate = sum(int(step["is_opt"]) for step in agent_steps) / count if count else 0.0
-            score = 0.3 * legal_rate + 0.4 * optimal_rate + 0.3 * float(success)
-            result = {
-                "task_id": task["id"],
-                "source_task_id": task["id"],
-                "mode": mode,
-                "input_mode": mode,
-                "success": success,
-                "legality_rate": round(legal_rate, 3),
-                "opt_rate": round(optimal_rate, 3),
-                "score": round(score, 2),
-                "reasons": reasons,
-                "steps": steps,
-                "metrics": finish_task_metrics(agent, metrics_start),
-            }
-            results.append(result)
-            if progress is not None:
-                progress(
-                    f"[{mode:6s}] {task['id']:20s} success={success} score={score:.2f}"
+    engine: PikafishEngine | None = None
+    if verify_with_pikafish:
+        executable = resolve_pikafish_executable(pikafish_path, start_dir=Path.cwd())
+        engine = PikafishEngine(executable, timeout=pikafish_timeout)
+        engine.start()
+    try:
+        for task in tasks:
+            initial_analysis = _verify_m2_oracle(
+                task, engine, depth=pikafish_depth
+            ) if engine is not None else None
+            for mode in modes:
+                metrics_start = start_task_metrics(agent)
+                steps, success, reasons = _run_multimodal_game(
+                    task,
+                    agent,
+                    mode,
+                    opponent_depth=opponent_depth,
+                    optimal_depth=optimal_depth,
+                    max_steps=max_steps,
+                    step_root=step_root,
+                    pikafish=engine,
+                    pikafish_depth=pikafish_depth,
+                    initial_analysis=initial_analysis,
                 )
+                agent_steps = [step for step in steps if step["actor"] == "agent"]
+                count = len(agent_steps)
+                legal_rate = sum(int(step["is_legal"]) for step in agent_steps) / count if count else 0.0
+                optimal_rate = sum(int(step["is_opt"]) for step in agent_steps) / count if count else 0.0
+                # Exact checkmate remains the primary label and accepts every
+                # mating move. Pikafish independently verifies the starting
+                # mate-in-one and supplies preferred-move/CP diagnostics.
+                score = float(success)
+                step = agent_steps[0] if agent_steps else {}
+                result = {
+                    "task_id": task["id"],
+                    "source_task_id": task.get("source_task_id", task["id"]),
+                    "mode": mode,
+                    "input_mode": mode,
+                    "success": success,
+                    "legality_rate": round(legal_rate, 3),
+                    "opt_rate": round(optimal_rate, 3),
+                    "score": round(score, 3),
+                    "pikafish_verified_mate_in_one": bool(initial_analysis),
+                    "pikafish_preferred_uci": (
+                        initial_analysis.bestmove if initial_analysis else None
+                    ),
+                    "pikafish_preferred_match": bool(
+                        initial_analysis and step.get("uci") == initial_analysis.bestmove
+                    ),
+                    "engine_cp_loss": float(step.get("engine_cp_loss", VALUE_LOSS_CAP)),
+                    "reasons": reasons,
+                    "steps": steps,
+                    "metrics": finish_task_metrics(agent, metrics_start),
+                }
+                results.append(result)
+                if progress is not None:
+                    progress(
+                        f"[{mode:6s}] {task['id']:20s} success={success} "
+                        f"score={score:.2f} cp_loss={result['engine_cp_loss']:.0f}"
+                    )
+    finally:
+        if engine is not None:
+            engine.close()
     return results
+
+
+def _analysis_value_cp(analysis: PikafishAnalysis) -> float:
+    if analysis.score_kind == "cp":
+        return float(analysis.score)
+    return 10_000.0 if analysis.score > 0 else -10_000.0
+
+
+def _verified_mate_moves(task: dict[str, Any]) -> set[str]:
+    return {
+        move
+        for move in (
+            task.get("m2_analysis", {}).get("mate_moves_uci")
+            or task.get("d3_analysis", {}).get("mate_moves_uci")
+            or [task.get("oracle", {}).get("best_move_uci")]
+        )
+        if isinstance(move, str) and move
+    }
+
+
+def _verify_m2_oracle(
+    task: dict[str, Any],
+    engine: PikafishEngine,
+    *,
+    depth: int,
+) -> PikafishAnalysis:
+    """Require Pikafish to independently confirm the stored mate-in-one label."""
+    fen = board_to_pikafish_fen(task["board"], side_to_move="ally")
+    analysis = engine.analyze_fen(fen, depth=depth)
+    verified_mates = _verified_mate_moves(task)
+    if analysis.score_kind != "mate" or analysis.score != 1:
+        raise ValueError(
+            f"{task['id']}: Pikafish depth {depth} did not confirm mate in one "
+            f"(score={analysis.score_kind} {analysis.score})"
+        )
+    if analysis.bestmove not in verified_mates:
+        raise ValueError(
+            f"{task['id']}: Pikafish best move {analysis.bestmove} is absent from "
+            "the exact verified mate set"
+        )
+    return analysis
 
 
 def summarize_xiangqi_multimodal(
@@ -197,12 +286,26 @@ def summarize_xiangqi_multimodal(
     paired = summarize_paired_modes(results, baseline_mode="text")
     return {
         "total": len(results),
+        "unique_tasks": len({item["source_task_id"] for item in results}),
+        "primary_metric": "paired_mate_in_one_success",
+        "oracle_policy": (
+            "exact checkmate is the correctness label; Pikafish independently "
+            "verifies mate-in-one and supplies CP/preferred-move diagnostics"
+        ),
+        "difficulty_policy": "same structural D3 strata are used in every input mode",
         "by_input_mode": {
             mode: {
                 **paired["by_input_mode"][mode],
                 "mean_legality_rate": sum(item["legality_rate"] for item in items) / len(items),
                 "mean_opt_rate": sum(item["opt_rate"] for item in items) / len(items),
                 "mean_score": sum(item["score"] for item in items) / len(items),
+                "mean_raw_engine_cp_loss": sum(item["engine_cp_loss"] for item in items) / len(items),
+                "mean_capped_engine_cp_loss": sum(
+                    min(item["engine_cp_loss"], M2_CP_LOSS_REPORT_CAP) for item in items
+                ) / len(items),
+                "pikafish_preferred_match_rate": sum(
+                    int(item["pikafish_preferred_match"]) for item in items
+                ) / len(items),
             }
             for mode, items in sorted(by_mode.items())
         },
@@ -235,7 +338,9 @@ def write_xiangqi_multimodal_run(
     for mode, values in summary["by_input_mode"].items():
         lines.append(
             f"{mode}: success={values['success_rate']:.1%} "
-            f"score={values['mean_score']:.3f}"
+            f"score={values['mean_score']:.3f} "
+            f"legal={values['mean_legality_rate']:.1%} "
+            f"capped_cp_loss={values['mean_capped_engine_cp_loss']:.1f}"
         )
     (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return run_dir
@@ -250,140 +355,139 @@ def _run_multimodal_game(
     optimal_depth: int,
     max_steps: int,
     step_root: Path | None,
+    pikafish: PikafishEngine | None,
+    pikafish_depth: int,
+    initial_analysis: PikafishAnalysis | None,
 ) -> tuple[list[dict[str, Any]], bool, list[str]]:
     board = VariantBoard(task["board"], [])
     steps: list[dict[str, Any]] = []
     reasons: list[str] = []
-    history: list[str] = []
     success = False
     task_step_dir = step_root / task["id"] if step_root is not None else None
     if task_step_dir is not None:
         task_step_dir.mkdir(parents=True, exist_ok=True)
-    for step_index in range(max_steps):
-        side = 1 if step_index % 2 == 0 else -1
-        legal_moves = board.legal_moves(side)
-        if not legal_moves:
-            if side == -1:
-                success = True
-                reasons.append("agent_checkmated_opponent" if board._is_in_check(-1) else "agent_stalemated_opponent")
-            else:
-                reasons.append("agent_has_no_moves")
-            break
-        if side == 1:
-            prompt = _build_multimodal_prompt(
-                legal_moves, board, mode, "\n".join(history)
+    legal_moves = board.legal_moves(1)
+    if not legal_moves:
+        return [], False, ["agent_has_no_moves"]
+    prompt = _build_multimodal_prompt(board, mode, "")
+    if mode == "text":
+        raw = agent.generate(prompt, task)
+    else:
+        png = render_board_png(board.board, mode)
+        if task_step_dir is not None:
+            (task_step_dir / f"{mode}_step00.png").write_bytes(png)
+        generate_multimodal = getattr(agent, "generate_multimodal", None)
+        if not callable(generate_multimodal):
+            raise ValueError("Xiangqi image modes require generate_multimodal()")
+        raw = generate_multimodal(
+            prompt,
+            task,
+            images=[ImageAttachment(data=png, mime_type="image/png")],
+        )
+        if _extract_uci(raw) is None:
+            raw = generate_multimodal(
+                prompt,
+                task,
+                images=[ImageAttachment(data=png, mime_type="image/png")],
             )
-            if mode == "text":
-                raw = agent.generate(prompt, task)
-            else:
-                png = render_board_png(board.board, mode)
-                if task_step_dir is not None:
-                    (task_step_dir / f"{mode}_step{step_index:02d}.png").write_bytes(png)
-                generate_multimodal = getattr(agent, "generate_multimodal", None)
-                if not callable(generate_multimodal):
-                    raise ValueError(
-                        "Xiangqi image modes require generate_multimodal()"
-                    )
-                raw = generate_multimodal(
-                    prompt,
-                    task,
-                    images=[ImageAttachment(data=png, mime_type="image/png")],
-                )
-                selected = _extract_index(raw)
-                if selected is None or not 1 <= selected <= len(legal_moves):
-                    raw = generate_multimodal(
-                        prompt,
-                        task,
-                        images=[ImageAttachment(data=png, mime_type="image/png")],
-                    )
-            selected = _extract_index(raw)
-            move = legal_moves[selected - 1] if selected and 1 <= selected <= len(legal_moves) else None
-            scored = score_moves(board, 1, optimal_depth, 1)
-            best_uci = scored[0][0].to_uci() if scored else None
-            is_optimal = bool(move and best_uci and move.to_uci() == best_uci)
-            if move is None:
-                steps.append({"step": step_index, "actor": "agent", "uci": "PARSE_FAIL", "raw": (raw or "")[:80], "is_legal": False, "is_opt": False})
-                reasons.append("illegal_or_parse_fail")
-                break
-            steps.append({"step": step_index, "actor": "agent", "uci": move.to_uci(), "raw": (raw or "")[:80], "is_legal": True, "is_opt": is_optimal, "best_uci": best_uci or ""})
-            history.append(f"step {step_index // 2 + 1}: You {move.to_uci()}")
-            board.apply(move)
-            if board.find_general(-1) is None:
-                success = True
-                reasons.append("agent_captured_general")
-                break
-        else:
-            scored = score_moves(board, -1, opponent_depth, 1)
-            if not scored:
-                success = True
-                reasons.append("agent_checkmated_opponent" if board._is_in_check(-1) else "agent_stalemated_opponent")
-                break
-            move = scored[0][0]
-            steps.append({"step": step_index, "actor": "opp", "uci": move.to_uci(), "is_legal": True, "is_opt": False})
-            history.append(f"step {step_index // 2 + 1}: Opp {move.to_uci()}")
-            board.apply(move)
-            if board.find_general(1) is None:
-                reasons.append("agent_lost_general")
-                break
-    if not reasons:
-        reasons.append("max_steps_reached")
+    generated_uci = _extract_uci(raw)
+    move = _move_by_uci(legal_moves, generated_uci)
+    verified_mates = _verified_mate_moves(task)
+    if move is None:
+        steps.append({
+            "step": 0, "actor": "agent", "uci": generated_uci or "PARSE_FAIL",
+            "raw": raw or "", "is_legal": False, "is_opt": False,
+            "engine_cp_before": (
+                _analysis_value_cp(initial_analysis) if initial_analysis else None
+            ),
+            "engine_cp_after": None,
+            "engine_cp_loss": VALUE_LOSS_CAP,
+        })
+        reasons.append("invalid_or_illegal_uci")
+        return steps, False, reasons
+    uci = move.to_uci()
+    board.apply(move)
+    success = board.is_checkmate(-1)
+    cp_before = _analysis_value_cp(initial_analysis) if initial_analysis else 10_000.0
+    cp_after = 10_000.0 if success else cp_before
+    if not success and pikafish is not None:
+        fen_after = board_to_pikafish_fen(board.board, side_to_move="enemy")
+        reply_analysis = pikafish.analyze_fen(fen_after, depth=pikafish_depth)
+        cp_after = -_analysis_value_cp(reply_analysis)
+    cp_loss = max(0.0, cp_before - cp_after)
+    steps.append({
+        "step": 0, "actor": "agent", "uci": uci, "raw": raw or "",
+        "is_legal": True, "is_opt": uci in verified_mates,
+        "verified_mate_moves_uci": sorted(move for move in verified_mates if move),
+        "engine_cp_before": round(cp_before, 1),
+        "engine_cp_after": round(cp_after, 1),
+        "engine_cp_loss": round(cp_loss, 1),
+    })
+    reasons.append("agent_checkmated_opponent" if success else "not_mate_in_one")
     return steps, success, reasons
 
 
 def _build_multimodal_prompt(
-    legal_moves: Sequence[Move],
     board: VariantBoard,
     mode: str,
     history: str,
 ) -> str:
-    action_lines = "\n".join(
-        f"{index}: {_format_move(move, board)}"
-        for index, move in enumerate(legal_moves, start=1)
-    )
-    goal = (
-        "红方先走。请在下列合法着法中选择最佳一步（目标是击败黑方）。"
-        "在当前状况下，请选择一步可以将军的棋，并尽可能实现必杀，或者有助于后续实现必杀；"
-        "而不是只让它将军。"
-    )
+    """Keep task language constant while withholding legal-move candidates."""
     board_part = (
-        f"当前棋盘 (.空, 大写红/小写黑):\n{board_to_compact(board.board)}"
+        f"{BOARD_ENCODING}\nCurrent board:\n{board_state_text(board.board)}"
         if mode == "text"
-        else "(见当前局面图片)"
+        else "Current board: see the attached board image."
     )
-    return f"""你是中国象棋残局玩家。
-{goal}
+    return f"""You are choosing one move in a Chinese Xiangqi multimodal benchmark.
+Objective: checkmate Black in exactly this one Red move.
+{COORDINATE_CONVENTION}
 {board_part}
 
-历史走法:
-{history or '(开局)'}
+Move history:
+{history or '(initial position)'}
 
-当前合法着法列表:
-{action_lines}
+No legal-move list is provided. Generate one legal UCI move yourself.
+Before emitting your JSON, silently verify that the origin square contains one of your pieces, the destination is not occupied by your own piece, the move obeys that piece's movement and path rules, and your own general is not left in check or facing the opposing general.
+Return exactly one JSON object:
+{{"move": "<uci_move>"}}
+Do not include markdown, explanations, or any other text."""
 
-【严格要求】只输出一个 JSON 对象，格式为 {{"action": <你选择的编号>}}。
-例如，只有当你选择第 3 项时，才输出 {{"action": 3}}。
-禁止输出 Markdown 代码块、解释或其他文字。"""
 
+def _extract_uci(raw: str) -> str | None:
+    if not raw:
+        return None
+    values: list[str] = []
+    try:
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            move = payload.get("move")
+            if isinstance(move, str):
+                values.append(move)
+            values.extend(value for value in payload.values() if isinstance(value, str))
+    except (json.JSONDecodeError, TypeError):
+        pass
+    values.append(raw)
+    for value in values:
+        match = UCI_MOVE_PATTERN.search(value)
+        if match:
+            return match.group(1).lower()
+    return None
+
+
+def _move_by_uci(moves: Sequence[Move], uci: str | None) -> Move | None:
+    return next((move for move in moves if move.to_uci() == uci), None)
 
 def _format_move(move: Move, board: VariantBoard) -> str:
     piece = board.board[move.fr][move.fc]
     return f"{PIECE_NAME.get(abs(_piece_base(piece)), '?')} {move.to_uci()}"
 
 
-def _extract_index(raw: str) -> int | None:
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-        if isinstance(payload, int):
-            return payload
-        if isinstance(payload, dict):
-            for value in payload.values():
-                if isinstance(value, int):
-                    return value
-                if isinstance(value, str) and value.isdigit():
-                    return int(value)
-    except json.JSONDecodeError:
-        pass
-    numbers = re.findall(r"(?<!\d)(\d{1,2})(?!\d)", raw)
-    return int(numbers[-1]) if numbers else None
+def board_to_compact_with_coordinates(board: Sequence[Sequence[int]]) -> str:
+    """Render the text condition with the same coordinate labels as images."""
+    rows = [
+        f"{9 - row_index} | " + " ".join(
+            piece_symbol(value) for value in row
+        )
+        for row_index, row in enumerate(board)
+    ]
+    return "    a b c d e f g h i\n" + "\n".join(rows)
