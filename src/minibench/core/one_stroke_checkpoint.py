@@ -437,12 +437,6 @@ class OneStrokeCheckpointRun:
             f"total={summary['total']} success={summary['success']} "
             f"success_rate={summary['success_rate']:.3f}\n"
         )
-        if summary.get("rule_ignore_rate") is not None:
-            text += (
-                f"rule_ignore_rate={summary['rule_ignore_rate']:.3f} "
-                f"({summary['rule_ignore_count']}/"
-                f"{summary['rule_ignore_denominator']})\n"
-            )
         text += summary_metrics_line(metrics)
         if error is not None:
             text += f"status=interrupted error={error}\n"
@@ -486,7 +480,6 @@ def one_stroke_result_from_dict(raw: dict[str, Any]) -> Any:
 
     payload = dict(raw)
     for field in (
-        "rule_types",
         "conversation",
         "tags",
         "history_protocol_reasons",

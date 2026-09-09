@@ -4,7 +4,7 @@ MiniBench 是一个用统一 YAML、统一 agent/provider 接口和统一结果�
 
 本 README 以 **WSL 2 + Ubuntu 22.04 + Python 3.10** 为标准环境。进入 Ubuntu 后，下面所有安装、配置、运行和排错命令都在 WSL 终端执行。
 
-> 先记住两条：文本任务默认使用 DeepSeek V4；带图片的任务必须使用支持视觉输入的模型，仓库默认使用 Qwen。不要用 DeepSeek 跑 `image`、`challenge_image`、`chinese-piece-image` 或 `latin-piece-image`。
+> 先记住两条：文本任务默认使用 DeepSeek V4；带图片的任务必须使用支持视觉输入的模型，仓库默认使用 Qwen。不要用 DeepSeek 跑 `image`、`chinese-piece-image` 或 `latin-piece-image`。
 
 ## 1. 在 WSL Ubuntu 中安装
 
@@ -305,33 +305,36 @@ minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 
 ### 4.3 一笔画
 
+正式数据为 `data/one_stroke/direct.jsonl`、`history.jsonl` 和 `multimodal.jsonl`，
+任务 ID 分别使用 `direct-`、`history-`、`multimodal-` 前缀。每组保留 easy/medium/hard 各 10 题；
+多模态每题只有一张清晰图片，主实验 30 项，text/image 配对消融 60 项。
+
 | 配置 | 内容 |
 | --- | --- |
-| `one_stroke_a1.yaml` | A1 直接求解，无欧拉定理提示 |
-| `one_stroke.yaml` | 与正式 A1 相同的兼容入口；通常不必与 A1 重复运行 |
-| `one_stroke_a2.yaml` | A2 临时规则条件 |
-| `one_stroke_a2_ablation.yaml` | A2 full/standard/drop/conflicting 消融 |
-| `one_stroke_a3_history.yaml` | A3 增量状态与仅历史对照 |
-| `one_stroke_a4.yaml` | A4 挑战图片，默认 Qwen |
-| `one_stroke_a4_ablation.yaml` | A4 text/clear image/challenge image 配对消融 |
-| `one_stroke_euler_theorem.yaml` | 与正式 A1 同题的欧拉定理提示消融 |
+| `one_stroke_direct.yaml` | 直接求解，无欧拉定理提示 |
+| `one_stroke.yaml` | 与正式 direct 相同的兼容入口；通常不必与 direct 重复运行 |
+| `one_stroke_history.yaml` | 历史记忆：增量状态与仅历史对照 |
+| `one_stroke_multimodal.yaml` | 多模态图片，默认 Qwen |
+| `one_stroke_multimodal_ablation.yaml` | 多模态 text/image 配对消融 |
+| `one_stroke_euler_theorem.yaml` | 与正式 direct 同题的欧拉定理提示消融 |
 | `one_stroke_generated.yaml` | 生成数据，baseline prompt |
 | `one_stroke_generated_euler_theorem.yaml` | 生成数据，Euler prompt |
 
 ```bash
-minibench run-config config/experiments/one_stroke_a1.yaml
+minibench run-config config/experiments/one_stroke_direct.yaml
 minibench run-config config/experiments/one_stroke.yaml
-minibench run-config config/experiments/one_stroke_a2.yaml
-minibench run-config config/experiments/one_stroke_a2_ablation.yaml
-minibench run-config config/experiments/one_stroke_a3_history.yaml
-minibench run-config config/experiments/one_stroke_a4.yaml
-minibench run-config config/experiments/one_stroke_a4_ablation.yaml
+minibench run-config config/experiments/one_stroke_history.yaml
+minibench run-config config/experiments/one_stroke_multimodal.yaml
+minibench run-config config/experiments/one_stroke_multimodal_ablation.yaml
 minibench run-config config/experiments/one_stroke_euler_theorem.yaml
 minibench run-config config/experiments/one_stroke_generated.yaml
 minibench run-config config/experiments/one_stroke_generated_euler_theorem.yaml
 ```
 
-一笔画 A3 会区分 `intermediate` 与 `final` 阶段。`passthrough` 可直接运行；
+规则限定推理子任务已移除。旧编号路径、旧评分字段和旧图片模式不再兼容；已有 `runs/` 结果保留，
+新配置默认新建运行目录，不跨版本续跑。评分字段采用 `direct_score`、`history_*` 和 `multimodal_*`。
+
+一笔画 history 会区分 `intermediate` 与 `final` 阶段。`passthrough` 可直接运行；
 CoT/ToT 等 phase-aware 包装器会在中间轮使用轻量消息调用，只在最终轮执行其完整推理流程。
 
 ### 4.4 麻将
@@ -558,7 +561,7 @@ minibench run-config tmp/configs/mahjong-agent.yaml
 - 先用 `passthrough` 做一题连接和 provider 响应 smoke test。
 - 再用 `direct` 或 `cot` 建立可比较基线。
 - 只有在预算允许时再用 `self-consistency`、`best-of-n`、`tot`、`least-to-most`、`plan-then-solve` 或 `critic-refine`。
-- Zebra history 和一笔画 A3 支持 `passthrough` 以及实现 phase-aware 消息接口的推理 Agent。
+- Zebra history 和一笔画 history 支持 `passthrough` 以及实现 phase-aware 消息接口的推理 Agent。
 - 象棋 history 可以切换 Agent，但会在多步对局中产生很多模型调用。
 
 ## 6. 多模态：DeepSeek 文本 + Qwen 图片的正确跑法
@@ -571,8 +574,8 @@ minibench run-config tmp/configs/mahjong-agent.yaml
 export DASHSCOPE_API_KEY
 
 minibench run-config config/experiments/xiangqi_multimodal.yaml
-minibench run-config config/experiments/one_stroke_a4.yaml
-minibench run-config config/experiments/one_stroke_a4_ablation.yaml
+minibench run-config config/experiments/one_stroke_multimodal.yaml
+minibench run-config config/experiments/one_stroke_multimodal_ablation.yaml
 minibench run-config config/experiments/mahjong_multimodal.yaml
 minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
 ```
@@ -580,7 +583,7 @@ minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
 其中：
 
 - 象棋运行 `text`、`chinese-piece-image`、`latin-piece-image`。
-- 一笔画 A4 正式运行 `challenge_image`，消融运行 `text`、`clear_image`、`challenge_image`。
+- 一笔画 multimodal 正式运行 `image`，消融运行 `text`、`image`。
 - 麻将正式运行 `image`，消融运行 `text`、`image`。
 
 配对消融应让同一个 Qwen 模型同时跑文本和图片，才能把差异主要归因于输入模态，而不是模型能力差异。

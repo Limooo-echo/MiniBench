@@ -15,8 +15,8 @@ class EvaluateConfigTests(unittest.TestCase):
         visual_configs = (
             "mahjong_multimodal.yaml",
             "mahjong_multimodal_ablation.yaml",
-            "one_stroke_a4.yaml",
-            "one_stroke_a4_ablation.yaml",
+            "one_stroke_multimodal.yaml",
+            "one_stroke_multimodal_ablation.yaml",
             "xiangqi_multimodal.yaml",
         )
 
@@ -159,70 +159,30 @@ class EvaluateConfigTests(unittest.TestCase):
             self.assertEqual(result["success"], 1)
             self.assertEqual(saved_prediction["prompt_variant"], "euler_theorem")
 
-    def test_run_config_expands_one_stroke_rule_modes(self):
-        from minibench.datasets.one_stroke.dataset import load_one_stroke_tasks
-        from minibench.datasets.one_stroke.rules import (
-            find_constrained_one_stroke_path,
-            rules_for_mode,
+    def test_one_stroke_rejects_removed_rule_and_image_modes(self):
+        evaluations = (
+            {"rule_mode": "full"},
+            {"rule_modes": ["full"]},
+            {"input_modes": ["clear_image"]},
+            {"input_modes": ["challenge_image"]},
         )
+        for evaluation in evaluations:
+            with self.subTest(evaluation=evaluation):
+                with self.assertRaises(ValueError):
+                    validate_experiment_config(
+                        {
+                            "task": {"family": "one_stroke"},
+                            "agent": {"name": "passthrough"},
+                            "provider": {"name": "generic"},
+                            "evaluation": evaluation,
+                            "run": {"output_dir": "runs"},
+                        }
+                    )
 
-        task = load_one_stroke_tasks("data/one_stroke/a2_rule_condition.jsonl")[0]
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = Path(tmpdir) / "runs"
-            predictions_path = Path(tmpdir) / "predictions.jsonl"
-            raw_outputs = []
-            for mode in ("full", "conflicting_rule"):
-                constraints = rules_for_mode(
-                    task.rule_constraints,
-                    task.key_rule_id,
-                    task.conflicting_rule,
-                    mode,
-                )
-                oracle = find_constrained_one_stroke_path(
-                    task.vertices, task.edges, constraints=constraints
-                )
-                raw_outputs.append(
-                    json.dumps({"path": oracle[0], "edge_path": oracle[1]})
-                )
-            predictions_path.write_text(
-                json.dumps({"task_id": task.id, "raw_outputs": raw_outputs}) + "\n",
-                encoding="utf-8",
-            )
-            config_path = Path(tmpdir) / "a2.yaml"
-            config_path.write_text(
-                yaml.safe_dump(
-                    {
-                        "task": {
-                            "family": "one_stroke",
-                            "path": "data/one_stroke/a2_rule_condition.jsonl",
-                            "limit": 1,
-                            "task_ids": [],
-                        },
-                        "agent": {
-                            "name": "openai-compatible",
-                            "predictions": str(predictions_path),
-                        },
-                        "provider": {"name": "generic"},
-                        "evaluation": {"rule_modes": ["full", "conflicting_rule"]},
-                        "run": {
-                            "output_dir": str(output_dir),
-                            "run_name": "a2-unit-run",
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            result = run_config(config_path)
-
-            self.assertEqual(result["total"], 2)
-            self.assertEqual(result["success"], 2)
-            self.assertEqual(set(result["by_rule_mode"]), {"full", "conflicting_rule"})
-
-    def test_run_config_expands_one_stroke_a4_input_modes(self):
+    def test_run_config_expands_one_stroke_multimodal_input_modes(self):
         from minibench.datasets.one_stroke.dataset import load_one_stroke_tasks
 
-        task = load_one_stroke_tasks("data/one_stroke/a4_multimodal.jsonl")[0]
+        task = load_one_stroke_tasks("data/one_stroke/multimodal.jsonl")[0]
         raw_output = json.dumps(
             {
                 "recognized_vertices": list(task.vertices),
@@ -234,17 +194,17 @@ class EvaluateConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             predictions = Path(tmpdir) / "predictions.jsonl"
             predictions.write_text(
-                json.dumps({"task_id": task.id, "raw_outputs": [raw_output] * 3})
+                json.dumps({"task_id": task.id, "raw_outputs": [raw_output] * 2})
                 + "\n",
                 encoding="utf-8",
             )
-            config = Path(tmpdir) / "a4.yaml"
+            config = Path(tmpdir) / "multimodal.yaml"
             config.write_text(
                 yaml.safe_dump(
                     {
                         "task": {
                             "family": "one_stroke",
-                            "path": "data/one_stroke/a4_multimodal.jsonl",
+                            "path": "data/one_stroke/multimodal.jsonl",
                             "limit": 1,
                             "task_ids": [],
                         },
@@ -256,13 +216,12 @@ class EvaluateConfigTests(unittest.TestCase):
                         "evaluation": {
                             "input_modes": [
                                 "text",
-                                "clear_image",
-                                "challenge_image",
+                                "image",
                             ]
                         },
                         "run": {
                             "output_dir": str(Path(tmpdir) / "runs"),
-                            "run_name": "a4-unit-run",
+                            "run_name": "multimodal-unit-run",
                         },
                     }
                 ),
@@ -271,11 +230,11 @@ class EvaluateConfigTests(unittest.TestCase):
 
             result = run_config(config)
 
-        self.assertEqual(result["total"], 3)
-        self.assertEqual(result["success"], 3)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["success"], 2)
         self.assertEqual(
             set(result["by_input_mode"]),
-            {"text", "clear_image", "challenge_image"},
+            {"text", "image"},
         )
 
     def test_cli_accepts_multimodal_all_modes(self):
@@ -288,14 +247,14 @@ class EvaluateConfigTests(unittest.TestCase):
         self.assertEqual(one_stroke.input_mode, "all")
         self.assertEqual(mahjong.input_mode, "all")
 
-    def test_cli_one_stroke_defaults_to_canonical_a1(self):
+    def test_cli_one_stroke_defaults_to_canonical_direct(self):
         from minibench.cli import build_parser
 
         args = build_parser().parse_args(["evaluate-one-stroke"])
 
         self.assertEqual(
             args.one_stroke_tasks,
-            Path("data/one_stroke/a1_direct.jsonl"),
+            Path("data/one_stroke/direct.jsonl"),
         )
         self.assertEqual(args.max_tokens, 1024)
 
@@ -385,11 +344,11 @@ class EvaluateConfigTests(unittest.TestCase):
                 )
 
         alias = load_experiment_config("config/experiments/one_stroke.yaml")
-        canonical = load_experiment_config("config/experiments/one_stroke_a1.yaml")
-        # Aliases may intentionally use a different archival run label.
-        alias["run"]["run_name"] = canonical["run"]["run_name"]
+        canonical = load_experiment_config("config/experiments/one_stroke_direct.yaml")
         self.assertEqual(alias, canonical)
         self.assertEqual(canonical["provider"]["max_tokens"], 1024)
+        self.assertIsNone(canonical["run"]["run_name"])
+        self.assertEqual(canonical["run"]["on_existing"], "error")
 
         theorem = load_experiment_config(
             "config/experiments/one_stroke_euler_theorem.yaml"

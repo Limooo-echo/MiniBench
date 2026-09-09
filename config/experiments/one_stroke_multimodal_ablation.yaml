@@ -1,7 +1,6 @@
-# Compatibility alias for the canonical direct config: one_stroke_direct.yaml.
 task:
   family: one_stroke
-  path: data/one_stroke/direct.jsonl
+  path: data/one_stroke/multimodal.jsonl
   limit: null
   task_ids: []
 
@@ -9,8 +8,8 @@ agent:
   name: passthrough
 
 provider:
-  name: deepseek
-  model: deepseek-v4-flash
+  name: qwen
+  model: qwen3.8-max
   json_mode: true
   max_tokens: 1024
   max_retries: 3
@@ -18,12 +17,12 @@ provider:
   retry_max_backoff_seconds: 30.0
   timeout: 120
   extra_body:
-    thinking:
-      type: disabled
+    enable_thinking: false
 
 evaluation:
-  # MiniBench 2.0 direct deliberately provides no Euler-theorem hint.
-  prompt_variant: baseline
+  input_modes:
+    - text
+    - image
   show_progress: true
 
 run:

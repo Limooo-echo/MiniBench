@@ -144,7 +144,7 @@ def _one_stroke_spec() -> TaskFamilySpec:
     from minibench.datasets.one_stroke.prompting import ONE_STROKE_SYSTEM_PROMPT
 
     return TaskFamilySpec(
-        default_path=Path("data/one_stroke/a1_direct.jsonl"),
+        default_path=Path("data/one_stroke/direct.jsonl"),
         load_tasks=load_one_stroke_tasks,
         evaluate_tasks=evaluate_one_stroke_tasks,
         summarize=summarize_one_stroke,
@@ -529,25 +529,13 @@ def _evaluate(
             step_dir=evaluation_config.get("step_dir"),
         )
     if family == "one_stroke":
-        memory_modes = evaluation_config.get(
-            "memory_modes",
-            ("incremental_state", "step_history_only"),
-        )
-        if isinstance(memory_modes, str):
-            memory_modes = (memory_modes,)
-        rule_modes = evaluation_config.get("rule_modes", ("full",))
-        if isinstance(rule_modes, str):
-            rule_modes = (rule_modes,)
-        input_modes = evaluation_config.get("input_modes", ("challenge_image",))
-        if isinstance(input_modes, str):
-            input_modes = (input_modes,)
+        memory_modes, input_modes = _one_stroke_selected_modes(evaluation_config)
         final_max_tokens = evaluation_config.get("final_max_tokens")
         return spec.evaluate_tasks(
             tasks,
             agent,
             prompt_variant=evaluation_config.get("prompt_variant", "baseline"),
             memory_modes=tuple(memory_modes),
-            rule_modes=tuple(rule_modes),
             input_modes=tuple(input_modes),
             state_max_tokens=int(evaluation_config.get("state_max_tokens", 512)),
             ack_max_tokens=int(evaluation_config.get("ack_max_tokens", 32)),
@@ -623,22 +611,37 @@ def _evaluate(
 
 def _one_stroke_selected_modes(
     evaluation_config: dict[str, Any],
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    from minibench.datasets.one_stroke.prompting import ONE_STROKE_INPUT_MODES
+
+    removed_fields = sorted({"rule_mode", "rule_modes"} & evaluation_config.keys())
+    if removed_fields:
+        fields = ", ".join(f"evaluation.{field}" for field in removed_fields)
+        raise ValueError(f"one-stroke rule evaluation was removed; unsupported: {fields}")
+
     def normalized(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
         configured = evaluation_config.get(name, default)
         if isinstance(configured, str):
             configured = tuple(
                 part.strip() for part in configured.split(",") if part.strip()
             )
+        if not isinstance(configured, (list, tuple)):
+            raise ValueError(f"evaluation.{name} must be a list or comma-separated string")
         return tuple(str(item) for item in configured)
+
+    input_modes = normalized("input_modes", ("image",))
+    if not input_modes or set(input_modes) - set(ONE_STROKE_INPUT_MODES):
+        raise ValueError(
+            "one-stroke input_modes must contain only text or image; "
+            f"received {input_modes!r}"
+        )
 
     return (
         normalized(
             "memory_modes",
             ("incremental_state", "step_history_only"),
         ),
-        normalized("rule_modes", ("full",)),
-        normalized("input_modes", ("challenge_image",)),
+        input_modes,
     )
 
 
@@ -661,14 +664,13 @@ def _run_checkpointed_one_stroke_experiment(
         plan_one_stroke_work_items,
     )
 
-    memory_modes, rule_modes, input_modes = _one_stroke_selected_modes(
+    memory_modes, input_modes = _one_stroke_selected_modes(
         evaluation_config
     )
     work_plan = tuple(
         plan_one_stroke_work_items(
             tasks,
             memory_modes=memory_modes,
-            rule_modes=rule_modes,
             input_modes=input_modes,
         )
     )
@@ -694,7 +696,6 @@ def _run_checkpointed_one_stroke_experiment(
         tasks,
         work_plan=work_plan,
         input_modes=input_modes,
-        input_assets=input_assets,
     )
     fingerprint_inputs = _one_stroke_fingerprint_inputs(
         config,
@@ -747,7 +748,6 @@ def _run_checkpointed_one_stroke_experiment(
                     "prompt_variant", "baseline"
                 ),
                 memory_modes=memory_modes,
-                rule_modes=rule_modes,
                 input_modes=input_modes,
                 state_max_tokens=int(
                     evaluation_config.get("state_max_tokens", 512)
@@ -844,7 +844,6 @@ def _one_stroke_fingerprint_inputs(
         "input_asset_hashes": [
             {
                 "task_id": asset["task_id"],
-                "variant": asset["variant"],
                 "sha256": asset["sha256"],
             }
             for asset in input_assets
@@ -857,21 +856,17 @@ def _one_stroke_fingerprint_inputs(
 
 
 def _one_stroke_input_assets(tasks: list[Any]) -> list[dict[str, str]]:
-    """Hash every declared A4 image, independent of selected input modes."""
-
-    assets = [
-        {
-            "task_id": task.id,
-            "variant": str(variant),
-            "path": str(Path(path).resolve()),
-            "sha256": sha256_file(Path(path)),
-        }
-        for task in tasks
-        if task.capability == "multimodal"
-        for variant, path in task.image_variants.items()
-    ]
-    assets.sort(key=lambda asset: (asset["task_id"], asset["variant"]))
-    return assets
+    assets: list[dict[str, str]] = []
+    for task in tasks:
+        if task.capability != "multimodal":
+            continue
+        if task.image_path is None:
+            raise ValueError(f"{task.id}: multimodal tasks require an image")
+        path = Path(task.image_path).resolve()
+        assets.append(
+            {"task_id": task.id, "path": str(path), "sha256": sha256_file(path)}
+        )
+    return sorted(assets, key=lambda asset: asset["task_id"])
 
 
 def _one_stroke_dataset_profile(
@@ -879,16 +874,11 @@ def _one_stroke_dataset_profile(
     *,
     work_plan: tuple[tuple[str, str], ...],
     input_modes: tuple[str, ...],
-    input_assets: list[dict[str, str]] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     from minibench.datasets.one_stroke.dataset import (
         has_one_stroke_solution,
         one_stroke_edge_ids,
         simulate_one_stroke_history,
-    )
-    from minibench.datasets.one_stroke.rules import (
-        find_constrained_one_stroke_path,
-        rules_for_mode,
     )
 
     def counts(field: str) -> dict[str, int]:
@@ -899,7 +889,6 @@ def _one_stroke_dataset_profile(
         return dict(sorted(result.items()))
 
     history_tasks = [task for task in tasks if task.capability == "history_memory"]
-    rule_tasks = [task for task in tasks if task.capability == "rule_condition"]
     multimodal_tasks = [task for task in tasks if task.capability == "multimodal"]
     tasks_by_id = {task.id: task for task in tasks}
     protocol_generation_total = sum(
@@ -934,67 +923,10 @@ def _one_stroke_dataset_profile(
                 end=task.end,
             )
         )
-    negative_history_count = sum(
-        int(not value) for value in history_completion_flags
-    )
-    equivalent_standard_drop = sum(
-        rules_for_mode(
-            task.rule_constraints,
-            task.key_rule_id,
-            task.conflicting_rule,
-            "standard",
-        )
-        == rules_for_mode(
-            task.rule_constraints,
-            task.key_rule_id,
-            task.conflicting_rule,
-            "drop_key_rule",
-        )
-        for task in rule_tasks
-    )
-    only_challenge_image = bool(multimodal_tasks) and set(input_modes) == {
-        "challenge_image"
-    }
-    asset_hashes = {
-        (asset["task_id"], asset["variant"]): asset["sha256"]
-        for asset in (input_assets or [])
-    }
-    identical_clear_challenge_count = sum(
-        asset_hashes.get((task.id, "clear")) is not None
-        and asset_hashes.get((task.id, "clear"))
-        == asset_hashes.get((task.id, "challenge"))
-        for task in multimodal_tasks
-    )
-    selected_rule_modes = tuple(
-        dict.fromkeys(
-            mode.removeprefix("rule:")
-            for _, mode in work_plan
-            if mode.startswith("rule:")
-        )
-    )
-    constrained_by_mode: dict[str, dict[str, int]] = {}
-    for mode in selected_rule_modes:
-        solvable = sum(
-            find_constrained_one_stroke_path(
-                task.vertices,
-                task.edges,
-                start=task.start,
-                end=task.end,
-                constraints=rules_for_mode(
-                    task.rule_constraints,
-                    task.key_rule_id,
-                    task.conflicting_rule,
-                    mode,
-                ),
-            )
-            is not None
-            for task in rule_tasks
-        )
-        constrained_by_mode[mode] = {
-            "task_total": len(rule_tasks),
-            "constrained_solvable": solvable,
-            "constrained_unsolvable": len(rule_tasks) - solvable,
-        }
+    negative_history_count = sum(int(not value) for value in history_completion_flags)
+    visual_gap_not_estimable = bool(multimodal_tasks) and not {
+        "text", "image"
+    }.issubset(input_modes)
     profile = {
         "task_total": len(tasks),
         "work_item_total": len(work_plan),
@@ -1019,18 +951,10 @@ def _one_stroke_dataset_profile(
                 negative_history_count == 0 if history_tasks else None
             ),
         },
-        "rule_condition": {
-            "task_total": len(rule_tasks),
-            "standard_drop_key_rule_same_task_count": equivalent_standard_drop,
-            "by_selected_mode": constrained_by_mode,
-        },
         "multimodal": {
             "task_total": len(multimodal_tasks),
             "selected_input_modes": list(input_modes),
-            "visual_gap_not_estimable": only_challenge_image,
-            "clear_challenge_identical_task_count": (
-                identical_clear_challenge_count
-            ),
+            "visual_gap_not_estimable": visual_gap_not_estimable,
         },
     }
 
@@ -1038,7 +962,7 @@ def _one_stroke_dataset_profile(
         {
             "code": "cross_track_raw_scores_not_attributable",
             "category": "interpretation",
-            "applies_to": ["A1", "A2", "A3", "A4"],
+            "applies_to": ["direct", "history", "multimodal"],
             "condition": "model_identity_or_task_fingerprint_differs",
             "comparison_keys": [
                 "model_identity",
@@ -1046,88 +970,64 @@ def _one_stroke_dataset_profile(
                 "fingerprint_inputs.input_asset_hashes",
             ],
             "message": (
-                "Do not attribute raw score differences across A1-A4 to the "
-                "capability alone when model identity or dataset fingerprint differs."
+                "Do not attribute raw score differences across direct, history, "
+                "and multimodal tracks to the capability alone when model "
+                "identity or dataset fingerprint differs."
             ),
         }
     ]
     if history_tasks:
         warnings.append(
             {
-                "code": "a3_transcript_context_not_persistent_memory",
+                "code": "history_transcript_context_not_persistent_memory",
                 "category": "design",
-                "applies_to": ["A3"],
+                "applies_to": ["history"],
                 "message": (
-                    "A3 measures state tracking inside the supplied conversation "
-                    "transcript, not persistent memory across separate sessions."
+                    "History tasks measure state tracking inside the supplied "
+                    "conversation transcript, not persistent memory across sessions."
                 ),
             }
         )
         if negative_history_count == 0:
             warnings.append(
                 {
-                    "code": "a3_no_negative_history_cases",
+                    "code": "history_no_negative_history_cases",
                     "category": "design",
-                    "applies_to": ["A3"],
+                    "applies_to": ["history"],
                     "message": (
                         "All loaded history tasks are structurally completable; "
                         "there are no negative history cases."
                     ),
                 }
             )
-    if equivalent_standard_drop:
-        warnings.append(
-            {
-                "code": "a2_standard_drop_key_rule_equivalent",
-                "category": "design",
-                "applies_to": ["A2"],
-                "task_count": equivalent_standard_drop,
-                "message": (
-                    "For these tasks, standard and drop_key_rule produce the same "
-                    "active rule set and are not independent ablation worlds."
-                ),
-            }
-        )
     if multimodal_tasks:
         warnings.append(
             {
-                "code": "a4_report_path_transcription_and_joint",
+                "code": "multimodal_report_path_transcription_and_joint",
                 "category": "interpretation",
-                "applies_to": ["A4"],
+                "applies_to": ["multimodal"],
                 "required_score_views": [
-                    "a4_path_score",
-                    "a4_transcription_score",
-                    "a4_joint_score",
+                    "multimodal_path_score",
+                    "multimodal_transcription_score",
+                    "multimodal_joint_score",
                 ],
                 "message": (
-                    "Interpret A4 using separate path, graph-transcription, and "
-                    "joint scores; no single component is a substitute for all three."
+                    "Interpret multimodal tasks using separate path, "
+                    "graph-transcription, and joint scores; no single "
+                    "component is a substitute for all three."
                 ),
             }
         )
-    if only_challenge_image:
+    if visual_gap_not_estimable:
         warnings.append(
             {
-                "code": "a4_visual_gap_not_estimable",
+                "code": "multimodal_visual_gap_not_estimable",
                 "category": "design",
-                "applies_to": ["A4"],
+                "applies_to": ["multimodal"],
                 "selected_input_modes": list(input_modes),
                 "message": (
-                    "Only challenge_image is selected, so a paired text/clear/image "
-                    "visual gap cannot be estimated from this run."
-                ),
-            }
-        )
-    if identical_clear_challenge_count:
-        warnings.append(
-            {
-                "code": "a4_clear_challenge_identical_assets",
-                "category": "design",
-                "applies_to": ["A4"],
-                "task_count": identical_clear_challenge_count,
-                "message": (
-                    "These clear/challenge image pairs have identical bytes and "
-                    "therefore provide no degradation contrast."
+                    "A paired text/image visual gap requires both text "
+                    "and image results from this run."
                 ),
             }
         )
@@ -1149,7 +1049,6 @@ def _one_stroke_code_sha256() -> str:
         package_root / "datasets" / "one_stroke" / "evaluation.py",
         package_root / "datasets" / "one_stroke" / "multimodal.py",
         package_root / "datasets" / "one_stroke" / "prompting.py",
-        package_root / "datasets" / "one_stroke" / "rules.py",
         *sorted((package_root / "agents").glob("*.py")),
     ]
     file_hashes = {

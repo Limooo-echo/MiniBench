@@ -1,6 +1,6 @@
 task:
   family: one_stroke
-  path: data/one_stroke/a1_direct.jsonl
+  path: data/one_stroke/direct.jsonl
   limit: null
   task_ids: []
 
@@ -27,3 +27,4 @@ evaluation:
 run:
   output_dir: runs
   run_name: null
+  on_existing: error

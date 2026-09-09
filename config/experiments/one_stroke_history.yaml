@@ -1,7 +1,6 @@
-# Compatibility alias for the canonical direct config: one_stroke_direct.yaml.
 task:
   family: one_stroke
-  path: data/one_stroke/direct.jsonl
+  path: data/one_stroke/history.jsonl
   limit: null
   task_ids: []
 
@@ -22,8 +21,12 @@ provider:
       type: disabled
 
 evaluation:
-  # MiniBench 2.0 direct deliberately provides no Euler-theorem hint.
-  prompt_variant: baseline
+  memory_modes:
+    - incremental_state
+    - step_history_only
+  state_max_tokens: 512
+  ack_max_tokens: 32
+  final_max_tokens: 1024
   show_progress: true
 
 run:

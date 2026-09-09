@@ -31,13 +31,6 @@ from minibench.datasets.one_stroke.prompting import (
     history_final_prompt,
     history_system_prompt,
 )
-from minibench.datasets.one_stroke.rules import (
-    ONE_STROKE_RULE_MODES,
-    OneStrokeRule,
-    find_constrained_one_stroke_path,
-    rules_for_mode,
-    validate_edge_path,
-)
 
 
 @dataclass(frozen=True)
@@ -49,16 +42,10 @@ class OneStrokeInstanceResult:
     score: float
     raw_output: str
     path: list[str]
-    edge_path: list[str]
     reasons: list[str]
-    constraint_reasons: list[str]
     capability: str
     difficulty: str
     memory_mode: str | None
-    rule_mode: str | None
-    rule_types: tuple[str, ...]
-    standard_path_valid: bool
-    rule_ignored: bool
     source_task_id: str
     input_mode: str | None
     recognized_vertices: list[str]
@@ -124,18 +111,6 @@ def extract_no_solution(output: str) -> bool:
     if payload.get("no_solution") is True:
         return True
     return False
-
-
-def extract_edge_path(output: str) -> list[str] | None:
-    payload = _parse_json_object(output)
-    if payload is None:
-        return None
-    edge_path = payload.get("edge_path")
-    if not isinstance(edge_path, list) or not all(
-        isinstance(item, str) for item in edge_path
-    ):
-        return None
-    return edge_path
 
 
 def extract_graph_transcription(
@@ -263,22 +238,19 @@ def validate_one_stroke_completion(
 def plan_one_stroke_work_items(
     tasks: Sequence[OneStrokeTask],
     memory_modes: Sequence[str] = ONE_STROKE_MEMORY_MODES,
-    rule_modes: Sequence[str] = ("full",),
-    input_modes: Sequence[str] = ("challenge_image",),
+    input_modes: Sequence[str] = ("image",),
 ) -> tuple[OneStrokeWorkKey, ...]:
     """Return the stable task/mode keys used for checkpoints and resume."""
-    selected_modes, selected_rule_modes, selected_input_modes = _validate_work_modes(
+    selected_modes, selected_input_modes = _validate_work_modes(
         memory_modes,
-        rule_modes,
         input_modes,
     )
     keys = tuple(
-        _work_item_key(task, memory_mode, rule_mode, input_mode)
+        _work_item_key(task, memory_mode, input_mode)
         for task in tasks
-        for memory_mode, rule_mode, input_mode in _work_modes_for_task(
+        for memory_mode, input_mode in _work_modes_for_task(
             task,
             selected_modes,
-            selected_rule_modes,
             selected_input_modes,
         )
     )
@@ -298,16 +270,14 @@ def one_stroke_result_key(result: OneStrokeInstanceResult) -> OneStrokeWorkKey:
     return _work_item_key(
         result,
         result.memory_mode,
-        result.rule_mode,
         result.input_mode,
     )
 
 
 def _validate_work_modes(
     memory_modes: Sequence[str],
-    rule_modes: Sequence[str],
     input_modes: Sequence[str],
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     selected_modes = tuple(memory_modes)
     duplicate_modes = sorted(
         mode for mode, count in Counter(selected_modes).items() if count > 1
@@ -326,24 +296,6 @@ def _validate_work_modes(
     if not selected_modes:
         raise ValueError("memory_modes must not be empty")
 
-    selected_rule_modes = tuple(rule_modes)
-    duplicate_rule_modes = sorted(
-        mode for mode, count in Counter(selected_rule_modes).items() if count > 1
-    )
-    if duplicate_rule_modes:
-        raise ValueError(
-            "duplicate one-stroke rule mode(s): "
-            + ", ".join(duplicate_rule_modes)
-        )
-    unknown_rule_modes = set(selected_rule_modes) - set(ONE_STROKE_RULE_MODES)
-    if unknown_rule_modes:
-        raise ValueError(
-            "unknown one-stroke rule mode(s): "
-            + ", ".join(sorted(unknown_rule_modes))
-        )
-    if not selected_rule_modes:
-        raise ValueError("rule_modes must not be empty")
-
     selected_input_modes = tuple(input_modes)
     duplicate_input_modes = sorted(
         mode for mode, count in Counter(selected_input_modes).items() if count > 1
@@ -361,34 +313,28 @@ def _validate_work_modes(
         )
     if not selected_input_modes:
         raise ValueError("input_modes must not be empty")
-    return selected_modes, selected_rule_modes, selected_input_modes
+    return selected_modes, selected_input_modes
 
 
 def _work_modes_for_task(
     task: OneStrokeTask,
     memory_modes: tuple[str, ...],
-    rule_modes: tuple[str, ...],
     input_modes: tuple[str, ...],
-) -> tuple[tuple[str | None, str | None, str | None], ...]:
+) -> tuple[tuple[str | None, str | None], ...]:
     if task.capability == "history_memory":
-        return tuple((mode, None, None) for mode in memory_modes)
-    if task.capability == "rule_condition":
-        return tuple((None, mode, None) for mode in rule_modes)
+        return tuple((mode, None) for mode in memory_modes)
     if task.capability == "multimodal":
-        return tuple((None, None, mode) for mode in input_modes)
-    return ((None, None, None),)
+        return tuple((None, mode) for mode in input_modes)
+    return ((None, None),)
 
 
 def _work_item_key(
     task_or_result: OneStrokeTask | OneStrokeInstanceResult,
     memory_mode: str | None,
-    rule_mode: str | None,
     input_mode: str | None,
 ) -> OneStrokeWorkKey:
     if memory_mode is not None:
         mode_key = f"memory:{memory_mode}"
-    elif rule_mode is not None:
-        mode_key = f"rule:{rule_mode}"
     elif input_mode is not None:
         mode_key = f"input:{input_mode}"
     else:
@@ -407,8 +353,7 @@ def evaluate_one_stroke_tasks(
     *,
     prompt_variant: str = "baseline",
     memory_modes: Sequence[str] = ONE_STROKE_MEMORY_MODES,
-    rule_modes: Sequence[str] = ("full",),
-    input_modes: Sequence[str] = ("challenge_image",),
+    input_modes: Sequence[str] = ("image",),
     state_max_tokens: int = 512,
     ack_max_tokens: int = 32,
     final_max_tokens: int | None = None,
@@ -418,9 +363,8 @@ def evaluate_one_stroke_tasks(
     on_work_item_start: OneStrokeWorkItemCallback | None = None,
     on_result: OneStrokeResultCallback | None = None,
 ) -> list[OneStrokeInstanceResult]:
-    selected_modes, selected_rule_modes, selected_input_modes = _validate_work_modes(
+    selected_modes, selected_input_modes = _validate_work_modes(
         memory_modes,
-        rule_modes,
         input_modes,
     )
     if state_max_tokens < 1 or ack_max_tokens < 1:
@@ -435,7 +379,6 @@ def evaluate_one_stroke_tasks(
         for key in plan_one_stroke_work_items(
             tasks,
             memory_modes=selected_modes,
-            rule_modes=selected_rule_modes,
             input_modes=selected_input_modes,
         )
     )
@@ -444,16 +387,15 @@ def evaluate_one_stroke_tasks(
         work_modes = _work_modes_for_task(
             task,
             selected_modes,
-            selected_rule_modes,
             selected_input_modes,
         )
-        for memory_mode, rule_mode, input_mode in work_modes:
-            work_key = _work_item_key(task, memory_mode, rule_mode, input_mode)
+        for memory_mode, input_mode in work_modes:
+            work_key = _work_item_key(task, memory_mode, input_mode)
             if work_key in skipped:
                 continue
             completed += 1
             if show_progress and progress_stream is not None:
-                suffix = memory_mode or rule_mode or input_mode
+                suffix = memory_mode or input_mode
                 label = task.id if suffix is None else f"{task.id}:{suffix}"
                 _write_progress(progress_stream, completed, total, label)
 
@@ -477,11 +419,12 @@ def evaluate_one_stroke_tasks(
                             "one-stroke image evaluation requires an agent with "
                             "generate_multimodal()"
                         )
-                    variant = "clear" if input_mode == "clear_image" else "challenge"
+                    if task.image_path is None:
+                        raise ValueError(f"{task.id}: multimodal task is missing image")
                     raw_output = generate_multimodal(
                         prompt,
                         task,
-                        images=[ImageAttachment(path=task.image_variants[variant])],
+                        images=[ImageAttachment(path=task.image_path)],
                     )
                 scored = _score_multimodal_output(task, raw_output)
                 conversation = ()
@@ -490,27 +433,17 @@ def evaluate_one_stroke_tasks(
                 prompt = build_one_stroke_prompt(
                     task,
                     prompt_variant=prompt_variant,
-                    rule_mode=rule_mode or "full",
                 )
                 raw_output = agent.generate(prompt, task)
                 conversation: tuple[ChatMessage, ...] = ()
-                if task.capability == "rule_condition":
-                    assert rule_mode is not None
-                    scored = _score_rule_output(task, raw_output, rule_mode)
-                else:
-                    path, success, score, reasons = _score_direct_output(task, raw_output)
-                    scored = {
-                        "path": path,
-                        "edge_path": [],
-                        "success": success,
-                        "score": score,
-                        "reasons": reasons,
-                        "constraint_reasons": [],
-                        "solution_exists": task.solution_exists,
-                        "rule_types": (),
-                        "standard_path_valid": False,
-                        "rule_ignored": False,
-                    }
+                path, success, score, reasons = _score_direct_output(task, raw_output)
+                scored = {
+                    "path": path,
+                    "success": success,
+                    "score": score,
+                    "reasons": reasons,
+                    "solution_exists": task.solution_exists,
+                }
                 result_prompt_variant = prompt_variant
             else:
                 history_outcome = _run_history_protocol(
@@ -531,15 +464,10 @@ def evaluate_one_stroke_tasks(
                 history_protocol_reasons = history_outcome.reasons
                 scored = {
                     "path": path,
-                    "edge_path": [],
                     "success": success,
                     "score": score,
                     "reasons": reasons,
-                    "constraint_reasons": [],
                     "solution_exists": task.solution_exists,
-                    "rule_types": (),
-                    "standard_path_valid": False,
-                    "rule_ignored": False,
                 }
                 result_prompt_variant = "history"
             json_format_valid = _parse_exact_json_object(raw_output) is not None
@@ -571,16 +499,10 @@ def evaluate_one_stroke_tasks(
                 score=float(scored["score"]),
                 raw_output=raw_output,
                 path=list(scored["path"]),
-                edge_path=list(scored["edge_path"]),
                 reasons=list(scored["reasons"]),
-                constraint_reasons=list(scored["constraint_reasons"]),
                 capability=task.capability,
                 difficulty=task.difficulty,
                 memory_mode=memory_mode,
-                rule_mode=rule_mode,
-                rule_types=tuple(scored["rule_types"]),
-                standard_path_valid=bool(scored["standard_path_valid"]),
-                rule_ignored=bool(scored["rule_ignored"]),
                 source_task_id=task.source_task_id or task.id,
                 input_mode=input_mode,
                 recognized_vertices=list(scored.get("recognized_vertices", [])),
@@ -666,15 +588,10 @@ def _score_multimodal_output(
     )
     return {
         "path": path,
-        "edge_path": [],
         "success": task_success,
         "score": score,
         "reasons": reasons,
-        "constraint_reasons": [],
         "solution_exists": task.solution_exists,
-        "rule_types": (),
-        "standard_path_valid": False,
-        "rule_ignored": False,
         "recognized_vertices": predicted_vertices,
         "recognized_edges": predicted_edges,
         "vertex_precision": vertex_precision,
@@ -701,98 +618,6 @@ def _counter_metrics(
     recall = true_positive / expected_total if expected_total else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     return precision, recall, f1, predicted == expected
-
-
-def _score_rule_output(
-    task: OneStrokeTask,
-    raw_output: str,
-    rule_mode: str,
-) -> dict[str, object]:
-    constraints = rules_for_mode(
-        task.rule_constraints,
-        task.key_rule_id,
-        task.conflicting_rule,
-        rule_mode,
-    )
-    oracle = find_constrained_one_stroke_path(
-        task.vertices,
-        task.edges,
-        start=task.start,
-        end=task.end,
-        constraints=constraints,
-    )
-    solution_exists = oracle is not None
-    no_solution = extract_no_solution(raw_output)
-    path = extract_path(raw_output)
-    edge_path = extract_edge_path(raw_output)
-
-    standard_path_valid = False
-    constrained_valid = False
-    reasons: list[str] = []
-    constraint_reasons: list[str] = []
-    if path is not None and edge_path is not None:
-        standard_path_valid, standard_reasons = validate_edge_path(
-            task.vertices,
-            task.edges,
-            path,
-            edge_path,
-            start=task.start,
-            end=task.end,
-        )
-        constrained_valid, constrained_reasons = validate_edge_path(
-            task.vertices,
-            task.edges,
-            path,
-            edge_path,
-            start=task.start,
-            end=task.end,
-            constraints=constraints,
-        )
-        constraint_reasons = [
-            reason for reason in constrained_reasons if reason.startswith("rule_violation:")
-        ]
-        reasons = constrained_reasons
-        if not standard_path_valid and not reasons:
-            reasons = standard_reasons
-
-    rule_ignored = bool(constraints) and standard_path_valid and not constrained_valid
-    if not solution_exists:
-        if no_solution:
-            success = True
-            reasons = ["correct_no_solution"]
-        elif path is None or edge_path is None:
-            success = False
-            reasons = ["no_path_edge_path_or_no_solution_extracted"]
-        else:
-            success = False
-            if not reasons:
-                reasons = ["claimed_path_for_rule_unsolvable"]
-    elif no_solution:
-        success = False
-        reasons = ["incorrect_no_solution_claim"]
-    elif path is None:
-        success = False
-        reasons = ["no_path_extracted"]
-    elif edge_path is None:
-        success = False
-        reasons = ["no_edge_path_extracted"]
-    else:
-        success = constrained_valid
-        if success:
-            reasons = ["valid_constrained_one_stroke_path"]
-
-    return {
-        "path": path or [],
-        "edge_path": edge_path or [],
-        "success": success,
-        "score": 1.0 if success else 0.0,
-        "reasons": reasons,
-        "constraint_reasons": constraint_reasons,
-        "solution_exists": solution_exists,
-        "rule_types": tuple(sorted({rule.type for rule in constraints})),
-        "standard_path_valid": standard_path_valid,
-        "rule_ignored": rule_ignored,
-    }
 
 
 def _score_direct_output(
@@ -1022,23 +847,6 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
             item["success"] = int(item["success"]) + int(result.success)
     for item in by_tag.values():
         item["success_rate"] = int(item["success"]) / int(item["total"])
-    rule_results = [result for result in results if result.rule_mode is not None]
-    rule_denominator = sum(
-        int(result.standard_path_valid and bool(result.rule_types))
-        for result in rule_results
-    )
-    rule_ignored_count = sum(int(result.rule_ignored) for result in rule_results)
-    by_rule_mode = _group_results(rule_results, "rule_mode")
-    for mode, group in by_rule_mode.items():
-        selected = [result for result in rule_results if result.rule_mode == mode]
-        denominator = sum(
-            int(result.standard_path_valid and bool(result.rule_types))
-            for result in selected
-        )
-        ignored = sum(int(result.rule_ignored) for result in selected)
-        group["rule_ignore_count"] = ignored
-        group["rule_ignore_denominator"] = denominator
-        group["rule_ignore_rate"] = ignored / denominator if denominator else None
     history_results = [result for result in results if result.memory_mode is not None]
     by_memory_mode = _group_results(history_results, "memory_mode")
     for mode, group in by_memory_mode.items():
@@ -1195,20 +1003,20 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
         for result in history_results
         if result.history_joint_success is not None
     ]
-    challenge_summary = by_input_mode.get("challenge_image")
-    a4_path_score = (
-        challenge_summary["difficulty_macro_accuracy"]
-        if challenge_summary is not None
+    image_summary = by_input_mode.get("image")
+    multimodal_path_score = (
+        image_summary["difficulty_macro_accuracy"]
+        if image_summary is not None
         else None
     )
-    a4_transcription_score = (
-        challenge_summary["difficulty_macro_graph_transcription_exact_rate"]
-        if challenge_summary is not None
+    multimodal_transcription_score = (
+        image_summary["difficulty_macro_graph_transcription_exact_rate"]
+        if image_summary is not None
         else None
     )
-    a4_joint_score = (
-        challenge_summary["difficulty_macro_joint_success_rate"]
-        if challenge_summary is not None
+    multimodal_joint_score = (
+        image_summary["difficulty_macro_joint_success_rate"]
+        if image_summary is not None
         else None
     )
     history_task_ids = {result.task_id for result in history_results}
@@ -1224,56 +1032,49 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
         "by_capability": _group_results(results, "capability"),
         "by_solution_exists": _group_results(results, "solution_exists"),
         "by_memory_mode": by_memory_mode,
-        "by_rule_mode": by_rule_mode,
-        "by_rule_type": _group_rule_types(rule_results),
         "by_input_mode": by_input_mode,
         "visual_gap": paired_summary.get("visual_gap", {}),
-        "a1_score": _capability_success_rate(results, "direct"),
-        "a2_score": (
-            by_rule_mode["full"]["success_rate"]
-            if "full" in by_rule_mode
-            else None
-        ),
-        "a3_final_score": (
+        "direct_score": _capability_success_rate(results, "direct"),
+        "history_final_score": (
             sum(int(result.success) for result in history_results)
             / len(history_results)
             if history_results
             else None
         ),
-        "a3_protocol_score": (
+        "history_protocol_score": (
             sum(int(value) for value in history_protocol_flags)
             / len(history_protocol_flags)
             if history_protocol_flags
             else None
         ),
-        "a3_intermediate_protocol_score": (
+        "history_intermediate_protocol_score": (
             sum(int(value) for value in history_intermediate_protocol_flags)
             / len(history_intermediate_protocol_flags)
             if history_intermediate_protocol_flags
             else None
         ),
-        "a3_state_score": (
+        "history_state_score": (
             sum(int(value) for value in history_state_flags)
             / len(history_state_flags)
             if history_state_flags
             else None
         ),
-        "a3_joint_score": (
+        "history_joint_score": (
             sum(int(value) for value in history_joint_flags)
             / len(history_joint_flags)
             if history_joint_flags
             else None
         ),
-        "a3_score": (
+        "history_score": (
             sum(int(value) for value in history_joint_flags)
             / len(history_joint_flags)
             if history_joint_flags
             else None
         ),
-        "a4_path_score": a4_path_score,
-        "a4_transcription_score": a4_transcription_score,
-        "a4_joint_score": a4_joint_score,
-        "a4_score": a4_path_score,
+        "multimodal_path_score": multimodal_path_score,
+        "multimodal_transcription_score": multimodal_transcription_score,
+        "multimodal_joint_score": multimodal_joint_score,
+        "multimodal_score": multimodal_path_score,
         "json_format_exact_rate": (
             sum(int(result.json_format_valid) for result in results) / total
             if total
@@ -1296,11 +1097,6 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
                 {result.input_mode for result in multimodal_results if result.input_mode}
             ),
         },
-        "rule_ignore_count": rule_ignored_count,
-        "rule_ignore_denominator": rule_denominator,
-        "rule_ignore_rate": (
-            rule_ignored_count / rule_denominator if rule_denominator else None
-        ),
         "metrics": summarize_metrics(results),
     }
 
@@ -1344,23 +1140,6 @@ def _capability_success_rate(
     return sum(int(result.success) for result in selected) / len(selected)
 
 
-def _group_rule_types(
-    results: list[OneStrokeInstanceResult],
-) -> dict[str, dict[str, int | float]]:
-    groups: dict[str, list[OneStrokeInstanceResult]] = {}
-    for result in results:
-        for rule_type in result.rule_types:
-            groups.setdefault(rule_type, []).append(result)
-    return {
-        key: {
-            "total": len(items),
-            "success": sum(int(item.success) for item in items),
-            "success_rate": sum(int(item.success) for item in items) / len(items),
-        }
-        for key, items in sorted(groups.items())
-    }
-
-
 def write_one_stroke_run(
     results: list[OneStrokeInstanceResult],
     output_dir: str | Path = "runs",
@@ -1383,13 +1162,6 @@ def write_one_stroke_run(
     (run_dir / "summary.txt").write_text(
         f"total={summary['total']} success={summary['success']} "
         f"success_rate={summary['success_rate']:.3f}\n"
-        + (
-            f"rule_ignore_rate={summary['rule_ignore_rate']:.3f} "
-            f"({summary['rule_ignore_count']}/"
-            f"{summary['rule_ignore_denominator']})\n"
-            if summary["rule_ignore_rate"] is not None
-            else ""
-        )
         + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
     )
@@ -1490,18 +1262,8 @@ def _response_schema_valid(task: OneStrokeTask, output: str) -> bool:
 
     if set(payload) == {"solvable"} and payload["solvable"] is False:
         return True
-    expected_fields = (
-        {"path", "edge_path"}
-        if task.capability == "rule_condition"
-        else {"path"}
-    )
-    if set(payload) != expected_fields or not _is_string_list(payload.get("path")):
-        return False
-    return (
-        _is_string_list(payload.get("edge_path"))
-        if task.capability == "rule_condition"
-        else True
-    )
+    return set(payload) == {"path"} and _is_string_list(payload["path"])
+
 
 
 def _is_string_list(value: object) -> bool:

@@ -287,13 +287,6 @@ def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
     if args.limit is not None:
         tasks = tasks[: args.limit]
     try:
-        from minibench.datasets.one_stroke.rules import ONE_STROKE_RULE_MODES
-
-        rule_modes = (
-            ONE_STROKE_RULE_MODES
-            if args.rule_mode == "all"
-            else (args.rule_mode,)
-        )
         from minibench.datasets.one_stroke.prompting import ONE_STROKE_INPUT_MODES
 
         input_modes = (
@@ -306,7 +299,6 @@ def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
             tasks,
             agent,
             prompt_variant=args.prompt_variant,
-            rule_modes=rule_modes,
             input_modes=input_modes,
             show_progress=args.progress,
         )
@@ -1138,10 +1130,10 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_one_stroke.add_argument(
         "--one-stroke-tasks",
         type=Path,
-        default=Path("data/one_stroke/a1_direct.jsonl"),
+        default=Path("data/one_stroke/direct.jsonl"),
         help=(
             "Path to one-stroke tasks JSONL. "
-            "Defaults to the canonical A1 dataset: data/one_stroke/a1_direct.jsonl."
+            "Defaults to the direct dataset: data/one_stroke/direct.jsonl."
         ),
     )
     evaluate_one_stroke.add_argument(
@@ -1158,22 +1150,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="One-stroke prompt variant to use.",
     )
     evaluate_one_stroke.add_argument(
-        "--rule-mode",
-        choices=(
-            "full",
-            "standard",
-            "drop_key_rule",
-            "conflicting_rule",
-            "all",
-        ),
-        default="full",
-        help="Temporary-rule mode for rule-condition tasks; all runs four ablations.",
-    )
-    evaluate_one_stroke.add_argument(
         "--input-mode",
-        choices=("text", "clear_image", "challenge_image", "all"),
-        default="challenge_image",
-        help="A4 input mode; all expands the three paired inputs.",
+        choices=("text", "image", "all"),
+        default="image",
+        help="Multimodal input mode; all expands the paired text and image inputs.",
     )
     evaluate_one_stroke.add_argument(
         "--progress",

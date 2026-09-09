@@ -51,8 +51,7 @@ def experiment_config(root, tasks_path, *, run_name="one-stroke-resume"):
         "evaluation": {
             "prompt_variant": "baseline",
             "memory_modes": ["incremental_state", "step_history_only"],
-            "rule_modes": ["full"],
-            "input_modes": ["challenge_image"],
+            "input_modes": ["image"],
         },
         "run": {
             "output_dir": str(root / "runs"),
@@ -354,165 +353,96 @@ class OneStrokeResumeTests(unittest.TestCase):
             self.assertTrue((run_dir / "manifest.json").is_file())
             self.assertTrue((run_dir / "run_state.json").is_file())
 
-    def test_dataset_profiles_capture_a2_a3_a4_design_limits(self):
-        a1_tasks = load_one_stroke_tasks("data/one_stroke/a1_direct.jsonl")
-        self.assertEqual(_one_stroke_input_assets(a1_tasks), [])
-        a1_plan = plan_one_stroke_work_items(a1_tasks)
-        a1_profile, _ = _one_stroke_dataset_profile(
-            a1_tasks,
-            work_plan=a1_plan,
-            input_modes=("challenge_image",),
+    def test_dataset_profiles_capture_track_design_limits(self):
+        direct_tasks = load_one_stroke_tasks("data/one_stroke/direct.jsonl")
+        self.assertEqual(_one_stroke_input_assets(direct_tasks), [])
+        direct_plan = plan_one_stroke_work_items(direct_tasks)
+        direct_profile, _ = _one_stroke_dataset_profile(
+            direct_tasks,
+            work_plan=direct_plan,
+            input_modes=("image",),
         )
-        self.assertEqual(a1_profile["protocol_generation_total"], 30)
+        self.assertEqual(direct_profile["protocol_generation_total"], 30)
 
-        a2_tasks = load_one_stroke_tasks(
-            "data/one_stroke/a2_rule_condition.jsonl"
-        )
-        self.assertEqual(_one_stroke_input_assets(a2_tasks), [])
-        a2_main_plan = plan_one_stroke_work_items(
-            a2_tasks,
-            rule_modes=("full",),
-        )
-        a2_main_profile, _ = _one_stroke_dataset_profile(
-            a2_tasks,
-            work_plan=a2_main_plan,
-            input_modes=("challenge_image",),
-        )
-        self.assertEqual(a2_main_profile["protocol_generation_total"], 30)
-        self.assertEqual(
-            a2_main_profile["solution_exists_semantics"],
-            "task_base_graph",
-        )
-        self.assertEqual(
-            a2_main_profile["by_solution_exists"],
-            {"true": 30, "false": 0},
-        )
-        self.assertEqual(
-            a2_main_profile["rule_condition"]["by_selected_mode"]["full"],
-            {
-                "task_total": 30,
-                "constrained_solvable": 24,
-                "constrained_unsolvable": 6,
-            },
-        )
-        a2_plan = plan_one_stroke_work_items(
-            a2_tasks,
-            rule_modes=(
-                "full",
-                "standard",
-                "drop_key_rule",
-                "conflicting_rule",
-            ),
-        )
-        a2_profile, a2_warnings = _one_stroke_dataset_profile(
-            a2_tasks,
-            work_plan=a2_plan,
-            input_modes=("challenge_image",),
-        )
-        self.assertEqual(a2_profile["task_total"], 30)
-        self.assertEqual(a2_profile["work_item_total"], 120)
-        self.assertEqual(a2_profile["protocol_generation_total"], 120)
-        self.assertEqual(
-            a2_profile["rule_condition"][
-                "standard_drop_key_rule_same_task_count"
-            ],
-            10,
-        )
-        self.assertIn(
-            "a2_standard_drop_key_rule_equivalent",
-            {warning["code"] for warning in a2_warnings},
-        )
-
-        a3_tasks = load_one_stroke_tasks("data/one_stroke/a3_history.jsonl")
-        self.assertEqual(_one_stroke_input_assets(a3_tasks), [])
-        a3_plan = plan_one_stroke_work_items(
-            a3_tasks,
+        history_tasks = load_one_stroke_tasks("data/one_stroke/history.jsonl")
+        self.assertEqual(_one_stroke_input_assets(history_tasks), [])
+        history_plan = plan_one_stroke_work_items(
+            history_tasks,
             memory_modes=("incremental_state", "step_history_only"),
         )
-        a3_profile, a3_warnings = _one_stroke_dataset_profile(
-            a3_tasks,
-            work_plan=a3_plan,
-            input_modes=("challenge_image",),
+        history_profile, history_warnings = _one_stroke_dataset_profile(
+            history_tasks,
+            work_plan=history_plan,
+            input_modes=("image",),
         )
-        self.assertEqual(a3_profile["work_item_total"], 60)
-        self.assertEqual(a3_profile["protocol_generation_total"], 652)
-        self.assertEqual(a3_profile["history"]["negative_history_count"], 0)
-        self.assertTrue(a3_profile["history"]["no_negative_history_cases"])
-        a3_codes = {warning["code"] for warning in a3_warnings}
-        self.assertIn("a3_no_negative_history_cases", a3_codes)
-        self.assertIn("a3_transcript_context_not_persistent_memory", a3_codes)
+        self.assertEqual(history_profile["work_item_total"], 60)
+        self.assertEqual(history_profile["protocol_generation_total"], 652)
+        self.assertEqual(history_profile["history"]["negative_history_count"], 0)
+        self.assertTrue(history_profile["history"]["no_negative_history_cases"])
+        history_codes = {warning["code"] for warning in history_warnings}
+        self.assertIn("history_no_negative_history_cases", history_codes)
+        self.assertIn("history_transcript_context_not_persistent_memory", history_codes)
 
-        a4_tasks = load_one_stroke_tasks("data/one_stroke/a4_multimodal.jsonl")
-        a4_assets = _one_stroke_input_assets(a4_tasks)
-        self.assertEqual(len(a4_assets), 60)
+        multimodal_tasks = load_one_stroke_tasks("data/one_stroke/multimodal.jsonl")
+        multimodal_assets = _one_stroke_input_assets(multimodal_tasks)
+        self.assertEqual(len(multimodal_assets), 30)
         self.assertEqual(
-            len({(asset["task_id"], asset["variant"]) for asset in a4_assets}),
-            60,
+            len({asset["task_id"] for asset in multimodal_assets}),
+            30,
         )
-        self.assertTrue(all(len(asset["sha256"]) == 64 for asset in a4_assets))
+        self.assertTrue(all(len(asset["sha256"]) == 64 for asset in multimodal_assets))
         self.assertTrue(
-            all(Path(asset["path"]).is_absolute() for asset in a4_assets)
+            all(Path(asset["path"]).is_absolute() for asset in multimodal_assets)
         )
-        a4_plan = plan_one_stroke_work_items(
-            a4_tasks,
-            input_modes=("challenge_image",),
+        multimodal_plan = plan_one_stroke_work_items(
+            multimodal_tasks,
+            input_modes=("image",),
         )
-        a4_profile, a4_warnings = _one_stroke_dataset_profile(
-            a4_tasks,
-            work_plan=a4_plan,
-            input_modes=("challenge_image",),
-            input_assets=a4_assets,
+        multimodal_profile, multimodal_warnings = _one_stroke_dataset_profile(
+            multimodal_tasks,
+            work_plan=multimodal_plan,
+            input_modes=("image",),
         )
-        self.assertEqual(a4_profile["protocol_generation_total"], 30)
+        self.assertEqual(multimodal_profile["protocol_generation_total"], 30)
         self.assertEqual(
-            a4_profile["multimodal"]["selected_input_modes"],
-            ["challenge_image"],
+            multimodal_profile["multimodal"]["selected_input_modes"],
+            ["image"],
         )
         self.assertTrue(
-            a4_profile["multimodal"]["visual_gap_not_estimable"]
+            multimodal_profile["multimodal"]["visual_gap_not_estimable"]
         )
-        self.assertEqual(
-            a4_profile["multimodal"][
-                "clear_challenge_identical_task_count"
-            ],
-            10,
-        )
-        a4_codes = {warning["code"] for warning in a4_warnings}
-        self.assertIn("a4_visual_gap_not_estimable", a4_codes)
-        self.assertIn("a4_report_path_transcription_and_joint", a4_codes)
-        self.assertIn("a4_clear_challenge_identical_assets", a4_codes)
+        multimodal_codes = {warning["code"] for warning in multimodal_warnings}
+        self.assertIn("multimodal_visual_gap_not_estimable", multimodal_codes)
+        self.assertIn("multimodal_report_path_transcription_and_joint", multimodal_codes)
         score_warning = next(
             warning
-            for warning in a4_warnings
-            if warning["code"] == "a4_report_path_transcription_and_joint"
+            for warning in multimodal_warnings
+            if warning["code"] == "multimodal_report_path_transcription_and_joint"
         )
         self.assertEqual(
             score_warning["required_score_views"],
-            ["a4_path_score", "a4_transcription_score", "a4_joint_score"],
+            ["multimodal_path_score", "multimodal_transcription_score", "multimodal_joint_score"],
         )
-        a4_ablation_plan = plan_one_stroke_work_items(
-            a4_tasks,
-            input_modes=("text", "clear_image", "challenge_image"),
+        multimodal_ablation_plan = plan_one_stroke_work_items(
+            multimodal_tasks,
+            input_modes=("text", "image"),
         )
-        a4_ablation_profile, _ = _one_stroke_dataset_profile(
-            a4_tasks,
-            work_plan=a4_ablation_plan,
-            input_modes=("text", "clear_image", "challenge_image"),
-            input_assets=a4_assets,
+        multimodal_ablation_profile, _ = _one_stroke_dataset_profile(
+            multimodal_tasks,
+            work_plan=multimodal_ablation_plan,
+            input_modes=("text", "image"),
         )
-        self.assertEqual(a4_ablation_profile["protocol_generation_total"], 90)
+        self.assertEqual(multimodal_ablation_profile["protocol_generation_total"], 60)
 
     def test_changed_multimodal_asset_refuses_resume_before_agent_creation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            clear_path = root / "clear.png"
-            challenge_path = root / "challenge.png"
-            clear_path.write_bytes(b"clear-image-v1")
-            challenge_path.write_bytes(b"challenge-image-v1")
+            image_path = root / "image.png"
+            image_path.write_bytes(b"image-v1")
             tasks_path = root / "multimodal.jsonl"
             record = {
-                "id": "a4-asset-task",
-                "source_task_id": "a1-source-task",
+                "id": "multimodal-asset-task",
+                "source_task_id": "direct-source-task",
                 "capability": "multimodal",
                 "difficulty": "easy",
                 "vertices": ["A", "B", "C"],
@@ -520,10 +450,7 @@ class OneStrokeResumeTests(unittest.TestCase):
                 "start": "A",
                 "end": "C",
                 "solution_path": ["A", "B", "C"],
-                "image_variants": {
-                    "clear": clear_path.name,
-                    "challenge": challenge_path.name,
-                },
+                "image": image_path.name,
                 "tags": ["one-stroke", "difficulty:easy"],
             }
             tasks_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
@@ -543,10 +470,10 @@ class OneStrokeResumeTests(unittest.TestCase):
             manifest = json.loads(
                 (run_dir / "manifest.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(len(manifest["input_assets"]), 2)
+            self.assertEqual(len(manifest["input_assets"]), 1)
             self.assertEqual(
                 len(manifest["fingerprint_inputs"]["input_asset_hashes"]),
-                2,
+                1,
             )
             before = {
                 name: (run_dir / name).read_bytes()
@@ -556,7 +483,7 @@ class OneStrokeResumeTests(unittest.TestCase):
                     "predictions.jsonl",
                 )
             }
-            challenge_path.write_bytes(b"challenge-image-v2")
+            image_path.write_bytes(b"image-v2")
 
             with patch(
                 "minibench.factory.experiments.make_agent_from_config"

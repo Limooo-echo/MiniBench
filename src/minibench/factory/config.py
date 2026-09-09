@@ -204,6 +204,14 @@ def validate_experiment_config(
         choices = ", ".join(sorted(TASK_FAMILIES))
         raise ValueError(f"{source}: task.family must be one of: {choices}")
 
+    if family == "one_stroke":
+        from minibench.factory.experiments import _one_stroke_selected_modes
+
+        evaluation = raw.get("evaluation", {})
+        if not isinstance(evaluation, dict):
+            raise ValueError(f"{source}: evaluation must be a mapping")
+        _one_stroke_selected_modes(evaluation)
+
     task_ids = task.get("task_ids", [])
     if task_ids is None:
         task["task_ids"] = []

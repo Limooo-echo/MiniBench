@@ -25,11 +25,11 @@ class OneStrokePromptIntegrationTests(unittest.TestCase):
             raise AssertionError("expected a PassthroughAgent")
         cls.client = agent.client
 
-    def test_a4_unsolvable_schema_survives_real_payload_construction(self):
-        tasks = load_one_stroke_tasks("data/one_stroke/a4_multimodal.jsonl")
+    def test_multimodal_unsolvable_schema_survives_real_payload_construction(self):
+        tasks = load_one_stroke_tasks("data/one_stroke/multimodal.jsonl")
         task = next(item for item in tasks if not item.solution_exists)
-        prompt = build_one_stroke_prompt(task, input_mode="challenge_image")
-        image = ImageAttachment(path=task.image_variants["challenge"])
+        prompt = build_one_stroke_prompt(task, input_mode="image")
+        image = ImageAttachment(path=task.image_path)
 
         payload = self.client.build_payload(prompt, images=(image,))
 
@@ -59,32 +59,26 @@ class OneStrokePromptIntegrationTests(unittest.TestCase):
             user_content[1]["image_url"]["url"].startswith("data:image/png;base64,")
         )
 
-    def test_a1_and_a2_keep_minimal_unsolvable_object_in_task_prompt(self):
-        cases = (
-            ("data/one_stroke/a1_direct.jsonl", False),
-            ("data/one_stroke/a2_rule_condition.jsonl", True),
+    def test_direct_keeps_minimal_unsolvable_object_in_task_prompt(self):
+        tasks = load_one_stroke_tasks("data/one_stroke/direct.jsonl")
+        task = next(item for item in tasks if not item.solution_exists)
+        prompt = build_one_stroke_prompt(task)
+
+        payload = self.client.build_payload(prompt)
+
+        messages = payload["messages"]
+        system_text = messages[0]["content"]
+        user_text = messages[1]["content"]
+        self.assertNotIn('{"solvable":false}', system_text)
+        self.assertIn(
+            'If no one-stroke path exists, return only JSON: '
+            '{"solvable":false}.',
+            user_text,
         )
-        for dataset_path, expects_edge_path in cases:
-            with self.subTest(dataset=dataset_path):
-                tasks = load_one_stroke_tasks(dataset_path)
-                task = next(item for item in tasks if not item.solution_exists)
-                prompt = build_one_stroke_prompt(task)
+        self.assertNotIn('"edge_path"', user_text)
 
-                payload = self.client.build_payload(prompt)
-
-                messages = payload["messages"]
-                system_text = messages[0]["content"]
-                user_text = messages[1]["content"]
-                self.assertNotIn('{"solvable":false}', system_text)
-                self.assertIn(
-                    'If no one-stroke path exists, return only JSON: '
-                    '{"solvable":false}.',
-                    user_text,
-                )
-                self.assertEqual('"edge_path"' in user_text, expects_edge_path)
-
-    def test_a3_history_system_prompt_omits_task_metadata(self):
-        tasks = load_one_stroke_tasks("data/one_stroke/a3_history.jsonl")
+    def test_history_system_prompt_omits_task_metadata(self):
+        tasks = load_one_stroke_tasks("data/one_stroke/history.jsonl")
         task = next(item for item in tasks if item.difficulty == "hard")
 
         prompt = history_system_prompt(task, "incremental_state")

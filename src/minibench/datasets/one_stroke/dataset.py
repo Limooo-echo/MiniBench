@@ -6,16 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from minibench.datasets.one_stroke.rules import (
-    OneStrokeRule,
-    find_constrained_one_stroke_path,
-    parse_one_stroke_rule,
-    rules_for_mode,
-    rules_are_semantically_equivalent,
-    rules_form_conflicting_pair,
-    validate_edge_path,
-)
-
 
 @dataclass(frozen=True)
 class OneStrokeHistoryEvent:
@@ -41,15 +31,11 @@ class OneStrokeTask:
     end: str | None
     solution_exists: bool
     solution_path: tuple[str, ...] | None
-    solution_edge_path: tuple[str, ...] | None
     capability: str
     difficulty: str
     history_events: tuple[OneStrokeHistoryEvent, ...]
-    rule_constraints: tuple[OneStrokeRule, ...]
-    key_rule_id: str | None
-    conflicting_rule: OneStrokeRule | None
     source_task_id: str | None
-    image_variants: dict[str, Path]
+    image_path: Path | None
     tags: tuple[str, ...]
 
 
@@ -89,26 +75,6 @@ def _optional_solution_path(
         raise ValueError(
             f"{raw.get('id', '<unknown>')}: solution_path references unknown vertices "
             f"{', '.join(unknown)}"
-        )
-    return tuple(value)
-
-
-def _optional_solution_edge_path(
-    raw: dict[str, Any],
-    edge_ids: tuple[str, ...],
-) -> tuple[str, ...] | None:
-    value = raw.get("solution_edge_path")
-    if value is None:
-        return None
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ValueError(
-            f"{raw.get('id', '<unknown>')}: solution_edge_path must be a list of strings"
-        )
-    unknown = sorted(set(value) - set(edge_ids))
-    if unknown:
-        raise ValueError(
-            f"{raw.get('id', '<unknown>')}: solution_edge_path references unknown "
-            f"edge IDs {', '.join(unknown)}"
         )
     return tuple(value)
 
@@ -188,6 +154,16 @@ def one_stroke_task_from_dict(
     if not isinstance(raw.get("id"), str) or not raw["id"]:
         raise ValueError("task id must be a non-empty string")
 
+    removed_fields = {
+        "rule_constraints", "key_rule_id", "conflicting_rule", "solution_edge_path",
+        "rule_mode", "rule_modes", "image_variants",
+    }
+    unsupported = sorted(removed_fields.intersection(raw))
+    if unsupported:
+        raise ValueError(
+            f"{raw['id']}: removed one-stroke field(s): {', '.join(unsupported)}"
+        )
+
     vertices = _require_string_list(raw, "vertices")
     if not vertices:
         raise ValueError(f"{raw['id']}: vertices must not be empty")
@@ -215,46 +191,18 @@ def one_stroke_task_from_dict(
         edges.append((a, b))
 
     edge_tuple = tuple(edges)
-    edge_ids = one_stroke_edge_ids(edge_tuple)
     start = _optional_vertex(raw, "start", vertex_set)
     end = _optional_vertex(raw, "end", vertex_set)
 
     capability = raw.get("capability", "direct")
     if not isinstance(capability, str) or capability not in {
         "direct",
-        "rule_condition",
         "history_memory",
         "multimodal",
     }:
         raise ValueError(
-            f"{raw['id']}: capability must be direct, rule_condition, "
-            "history_memory, or multimodal"
+            f"{raw['id']}: capability must be direct, history_memory, or multimodal"
         )
-
-    rule_constraints = _parse_rule_constraints(
-        raw,
-        vertices,
-        edge_ids,
-        edge_tuple,
-    )
-    key_rule_id = raw.get("key_rule_id")
-    if key_rule_id is not None and not isinstance(key_rule_id, str):
-        raise ValueError(f"{raw['id']}: key_rule_id must be a string or null")
-    raw_conflicting_rule = raw.get("conflicting_rule")
-    conflicting_rule = (
-        parse_one_stroke_rule(
-            raw_conflicting_rule,
-            task_id=raw["id"],
-            vertices=vertices,
-            edge_ids=edge_ids,
-            edge_count=len(edge_tuple),
-            field="conflicting_rule",
-        )
-        if raw_conflicting_rule is not None
-        else None
-    )
-    if conflicting_rule is not None:
-        _validate_rule_edge_semantics(raw["id"], conflicting_rule, edge_ids, edge_tuple)
 
     solution_exists = raw.get("solution_exists", True)
     if not isinstance(solution_exists, bool):
@@ -266,69 +214,27 @@ def one_stroke_task_from_dict(
         start=start,
         end=end,
     )
-    if capability == "rule_condition":
-        if not standard_solution_exists:
-            raise ValueError(f"{raw['id']}: rule-condition base graph must be solvable")
-        actual_solution_exists = (
-            find_constrained_one_stroke_path(
-                vertices,
-                edge_tuple,
-                start=start,
-                end=end,
-                constraints=rule_constraints,
-            )
-            is not None
+    if solution_exists and not standard_solution_exists:
+        raise ValueError(f"{raw['id']}: graph has no one-stroke solution")
+    if not solution_exists and standard_solution_exists:
+        raise ValueError(
+            f"{raw['id']}: marked solution_exists=false but graph has a "
+            "one-stroke solution"
         )
-        if solution_exists != actual_solution_exists:
-            raise ValueError(
-                f"{raw['id']}: solution_exists does not match full rule constraints"
-            )
-    else:
-        if solution_exists and not standard_solution_exists:
-            raise ValueError(f"{raw['id']}: graph has no one-stroke solution")
-        if not solution_exists and standard_solution_exists:
-            raise ValueError(
-                f"{raw['id']}: marked solution_exists=false but graph has a "
-                "one-stroke solution"
-            )
 
     solution_path = _optional_solution_path(raw, vertex_set)
-    solution_edge_path = _optional_solution_edge_path(raw, edge_ids)
     if solution_path is not None:
         if not solution_exists:
             raise ValueError(
                 f"{raw['id']}: solution_path must be null when solution_exists=false"
             )
-        if capability == "rule_condition":
-            if solution_edge_path is None:
-                raise ValueError(
-                    f"{raw['id']}: rule-condition solution requires solution_edge_path"
-                )
-            valid, reasons = validate_edge_path(
-                vertices,
-                edge_tuple,
-                solution_path,
-                solution_edge_path,
-                start=start,
-                end=end,
-                constraints=rule_constraints,
-            )
-            if not valid:
-                raise ValueError(
-                    f"{raw['id']}: invalid constrained solution: {', '.join(reasons)}"
-                )
-        else:
-            _validate_solution_path(
-                raw["id"],
-                edge_tuple,
-                solution_path,
-                start=start,
-                end=end,
-            )
-    elif solution_edge_path is not None:
-        raise ValueError(f"{raw['id']}: solution_edge_path requires solution_path")
-    if solution_exists and solution_path is None and capability == "rule_condition":
-        raise ValueError(f"{raw['id']}: solvable rule-condition task requires an oracle")
+        _validate_solution_path(
+            raw["id"],
+            edge_tuple,
+            solution_path,
+            start=start,
+            end=end,
+        )
 
     tags = _require_string_list(raw, "tags")
     difficulty = raw.get("difficulty") or _tag_value(tags, "difficulty:") or "unknown"
@@ -340,7 +246,7 @@ def one_stroke_task_from_dict(
         not isinstance(source_task_id, str) or not source_task_id
     ):
         raise ValueError(f"{raw['id']}: source_task_id must be a non-empty string")
-    image_variants = _parse_image_variants(raw, base_dir=base_dir)
+    image_path = _parse_image_path(raw, base_dir=base_dir)
 
     task = OneStrokeTask(
         id=raw["id"],
@@ -350,38 +256,24 @@ def one_stroke_task_from_dict(
         end=end,
         solution_exists=solution_exists,
         solution_path=solution_path,
-        solution_edge_path=solution_edge_path,
         capability=capability,
         difficulty=difficulty,
         history_events=history_events,
-        rule_constraints=rule_constraints,
-        key_rule_id=key_rule_id,
-        conflicting_rule=conflicting_rule,
         source_task_id=source_task_id,
-        image_variants=image_variants,
+        image_path=image_path,
         tags=tags,
     )
     if capability != "history_memory" and history_events:
         raise ValueError(f"{raw['id']}: only history tasks may define history_events")
-    if capability != "rule_condition" and (
-        rule_constraints or key_rule_id is not None or conflicting_rule is not None
-    ):
-        raise ValueError(
-            f"{raw['id']}: rule fields require capability rule_condition"
-        )
     if capability == "multimodal":
         if source_task_id is None:
             raise ValueError(f"{raw['id']}: multimodal tasks require source_task_id")
-        if set(image_variants) != {"clear", "challenge"}:
-            raise ValueError(
-                f"{raw['id']}: multimodal image_variants must contain clear and challenge"
-            )
-    elif source_task_id is not None or image_variants:
+        if image_path is None:
+            raise ValueError(f"{raw['id']}: multimodal tasks require image")
+    elif source_task_id is not None or image_path is not None:
         raise ValueError(
-            f"{raw['id']}: source_task_id and image_variants require capability multimodal"
+            f"{raw['id']}: source_task_id and image require capability multimodal"
         )
-    if capability == "rule_condition":
-        _validate_rule_task_modes(task)
     if capability == "history_memory":
         if not solution_exists:
             raise ValueError(f"{raw['id']}: history tasks must be solvable")
@@ -407,125 +299,22 @@ def one_stroke_task_from_dict(
     return task
 
 
-def _parse_image_variants(
+def _parse_image_path(
     raw: dict[str, Any],
     *,
     base_dir: Path | None,
-) -> dict[str, Path]:
-    value = raw.get("image_variants", {})
-    if not isinstance(value, dict):
-        raise ValueError(f"{raw['id']}: image_variants must be an object")
-    variants: dict[str, Path] = {}
-    for name, raw_path in value.items():
-        if not isinstance(name, str) or not isinstance(raw_path, str) or not raw_path:
-            raise ValueError(
-                f"{raw['id']}: image_variants must map names to non-empty paths"
-            )
-        path = Path(raw_path)
-        if base_dir is not None and not path.is_absolute():
-            path = (base_dir / path).resolve()
-        if base_dir is not None and not path.is_file():
-            raise ValueError(f"{raw['id']}: image file does not exist: {path}")
-        variants[name] = path
-    return variants
-
-
-def _parse_rule_constraints(
-    raw: dict[str, Any],
-    vertices: tuple[str, ...],
-    edge_ids: tuple[str, ...],
-    edges: tuple[tuple[str, str], ...],
-) -> tuple[OneStrokeRule, ...]:
-    value = raw.get("rule_constraints", [])
-    if not isinstance(value, list):
-        raise ValueError(f"{raw['id']}: rule_constraints must be a list")
-    rules = tuple(
-        parse_one_stroke_rule(
-            item,
-            task_id=raw["id"],
-            vertices=vertices,
-            edge_ids=edge_ids,
-            edge_count=len(edges),
-            field=f"rule_constraints[{index}]",
-        )
-        for index, item in enumerate(value, start=1)
-    )
-    ids = [rule.id for rule in rules]
-    if len(set(ids)) != len(ids):
-        raise ValueError(f"{raw['id']}: rule IDs must be unique")
-    for rule in rules:
-        _validate_rule_edge_semantics(raw["id"], rule, edge_ids, edges)
-    return rules
-
-
-def _validate_rule_edge_semantics(
-    task_id: str,
-    rule: OneStrokeRule,
-    edge_ids: tuple[str, ...],
-    edges: tuple[tuple[str, str], ...],
-) -> None:
-    if rule.type != "directed_edge":
-        return
-    edge_map = dict(zip(edge_ids, edges))
-    assert rule.edge_id is not None
-    expected = _canonical_edge(edge_map[rule.edge_id])
-    actual = _canonical_edge((rule.from_vertex or "", rule.to_vertex or ""))
-    if expected != actual:
-        raise ValueError(
-            f"{task_id}: directed rule {rule.id} endpoints do not match {rule.edge_id}"
-        )
-
-
-def _validate_rule_task_modes(task: OneStrokeTask) -> None:
-    if not task.rule_constraints:
-        raise ValueError(f"{task.id}: rule-condition tasks require rule_constraints")
-    if task.key_rule_id not in {rule.id for rule in task.rule_constraints}:
-        raise ValueError(f"{task.id}: key_rule_id must reference a full constraint")
-    if task.conflicting_rule is None:
-        raise ValueError(f"{task.id}: rule-condition tasks require conflicting_rule")
-    if task.conflicting_rule.id in {rule.id for rule in task.rule_constraints}:
-        raise ValueError(f"{task.id}: conflicting rule ID must be unique")
-    key_rule = next(rule for rule in task.rule_constraints if rule.id == task.key_rule_id)
-    if not rules_form_conflicting_pair(key_rule, task.conflicting_rule):
-        raise ValueError(
-            f"{task.id}: conflicting_rule must be a true logical reverse of the key rule"
-        )
-    remaining_rules = tuple(
-        rule for rule in task.rule_constraints if rule.id != task.key_rule_id
-    )
-    if any(
-        rules_are_semantically_equivalent(rule, task.conflicting_rule)
-        for rule in remaining_rules
-    ):
-        raise ValueError(
-            f"{task.id}: conflicting_rule must not duplicate a remaining rule"
-        )
-    for mode in ("standard", "drop_key_rule", "conflicting_rule"):
-        constraints = rules_for_mode(
-            task.rule_constraints,
-            task.key_rule_id,
-            task.conflicting_rule,
-            mode,
-        )
-        if find_constrained_one_stroke_path(
-            task.vertices,
-            task.edges,
-            start=task.start,
-            end=task.end,
-            constraints=constraints,
-        ) is None:
-            raise ValueError(f"{task.id}: {mode} mode must have a valid oracle path")
-    combined = (*task.rule_constraints, task.conflicting_rule)
-    if find_constrained_one_stroke_path(
-        task.vertices,
-        task.edges,
-        start=task.start,
-        end=task.end,
-        constraints=combined,
-    ) is not None:
-        raise ValueError(
-            f"{task.id}: key and conflicting rules must not be jointly satisfiable"
-        )
+) -> Path | None:
+    value = raw.get("image")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{raw['id']}: image must be a non-empty path")
+    path = Path(value)
+    if base_dir is not None and not path.is_absolute():
+        path = (base_dir / path).resolve()
+    if base_dir is not None and not path.is_file():
+        raise ValueError(f"{raw['id']}: image file does not exist: {path}")
+    return path
 
 
 def _parse_history_events(

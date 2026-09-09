@@ -1,3 +1,5 @@
+from contextlib import redirect_stderr
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -62,12 +64,19 @@ class StaticAgentCliTests(unittest.TestCase):
 
         self.assertIn("only supported for static Xiangqi", str(raised.exception))
 
-    def test_one_stroke_accepts_rule_ablation_modes(self):
-        args = build_parser().parse_args(
-            ["evaluate-one-stroke", "--rule-mode", "all"]
-        )
-
-        self.assertEqual(args.rule_mode, "all")
+    def test_one_stroke_rejects_removed_rule_and_image_modes(self):
+        for option, value in (
+            ("--rule-mode", "all"),
+            ("--input-mode", "clear_image"),
+            ("--input-mode", "challenge_image"),
+        ):
+            with self.subTest(option=option, value=value):
+                with redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as raised:
+                        build_parser().parse_args(
+                            ["evaluate-one-stroke", option, value]
+                        )
+                self.assertEqual(raised.exception.code, 2)
 
 
 if __name__ == "__main__":

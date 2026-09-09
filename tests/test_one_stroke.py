@@ -26,7 +26,7 @@ from minibench.datasets.one_stroke.prompting import (
     build_one_stroke_prompt,
     history_event_prompt,
 )
-from minibench.datasets.one_stroke.rules import find_constrained_one_stroke_path
+import networkx as nx
 
 
 class FixedPathAgent:
@@ -140,15 +140,24 @@ class FormalHistoryOracleAgent:
             for edge_id, edge in zip(one_stroke_edge_ids(task.edges), task.edges)
             if edge_id in remaining_ids
         )
-        oracle = find_constrained_one_stroke_path(
-            task.vertices,
-            remaining_edges,
-            start=state.current_vertex,
-            end=task.end,
-        )
-        if oracle is None:
-            raise AssertionError(f"formal history unexpectedly has no completion: {task.id}")
-        return json.dumps({"path": list(oracle[0])})
+        graph = nx.MultiGraph()
+        graph.add_edges_from(remaining_edges)
+        path = [state.current_vertex]
+        if remaining_edges:
+            try:
+                path.extend(
+                    target
+                    for _, target in nx.eulerian_path(
+                        graph, source=state.current_vertex
+                    )
+                )
+            except nx.NetworkXError as exc:
+                raise AssertionError(
+                    f"formal history unexpectedly has no completion: {task.id}"
+                ) from exc
+        if task.end is not None and path[-1] != task.end:
+            raise AssertionError(f"formal history completion has wrong end: {task.id}")
+        return json.dumps({"path": path})
 
 
 def sample_task():
@@ -227,8 +236,28 @@ class OneStrokeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicate task id"):
                 load_one_stroke_tasks(path)
 
-    def test_formal_a1_inventory_and_unsolvable_quota(self):
-        tasks = load_one_stroke_tasks("data/one_stroke/a1_direct.jsonl")
+    def test_retired_protocol_data_cannot_silently_become_direct_tasks(self):
+        record = {
+            "id": "retired-protocol",
+            "vertices": ["A", "B"],
+            "edges": [["A", "B"]],
+            "start": "A",
+            "end": "B",
+            "tags": ["one-stroke"],
+        }
+        retired_protocols = (
+            {"capability": "rule_condition"},
+            {"rule_constraints": [{"id": "start", "type": "start_vertex", "vertex": "B"}]},
+            {"solution_edge_path": ["e01"]},
+            {"image_variants": {"clear": "old.png", "challenge": "old.png"}},
+        )
+        for protocol in retired_protocols:
+            with self.subTest(protocol=protocol):
+                with self.assertRaisesRegex(ValueError, "capability|removed one-stroke field"):
+                    one_stroke_task_from_dict({**record, **protocol})
+
+    def test_formal_direct_inventory_and_unsolvable_quota(self):
+        tasks = load_one_stroke_tasks("data/one_stroke/direct.jsonl")
 
         self.assertEqual(len(tasks), 30)
         for difficulty in ("easy", "medium", "hard"):
@@ -241,8 +270,8 @@ class OneStrokeTests(unittest.TestCase):
                 self.assertNotIn("Useful theorem and checklist", prompt)
                 self.assertNotIn("Odd-degree vertices", prompt)
 
-    def test_formal_a3_inventory_and_history_ranges(self):
-        tasks = load_one_stroke_tasks("data/one_stroke/a3_history.jsonl")
+    def test_formal_history_inventory_and_history_ranges(self):
+        tasks = load_one_stroke_tasks("data/one_stroke/history.jsonl")
         expected_ranges = {"easy": (4, 6), "medium": (7, 12), "hard": (12, 20)}
 
         self.assertEqual(len(tasks), 30)
@@ -447,10 +476,10 @@ class OneStrokeTests(unittest.TestCase):
         self.assertTrue(result.history_joint_success)
         self.assertTrue(result.response_schema_valid)
         summary = summarize_one_stroke([result])
-        self.assertEqual(summary["a3_final_score"], 1.0)
-        self.assertEqual(summary["a3_protocol_score"], 1.0)
-        self.assertEqual(summary["a3_state_score"], 1.0)
-        self.assertEqual(summary["a3_score"], 1.0)
+        self.assertEqual(summary["history_final_score"], 1.0)
+        self.assertEqual(summary["history_protocol_score"], 1.0)
+        self.assertEqual(summary["history_state_score"], 1.0)
+        self.assertEqual(summary["history_score"], 1.0)
 
     def test_history_final_wrapped_json_keeps_semantic_score_but_fails_joint(self):
         result = evaluate_one_stroke_tasks(
@@ -470,23 +499,23 @@ class OneStrokeTests(unittest.TestCase):
             result.history_protocol_reasons,
         )
         summary = summarize_one_stroke([result])
-        self.assertEqual(summary["a3_final_score"], 1.0)
-        self.assertEqual(summary["a3_intermediate_protocol_score"], 1.0)
-        self.assertEqual(summary["a3_protocol_score"], 0.0)
-        self.assertEqual(summary["a3_score"], 0.0)
+        self.assertEqual(summary["history_final_score"], 1.0)
+        self.assertEqual(summary["history_intermediate_protocol_score"], 1.0)
+        self.assertEqual(summary["history_protocol_score"], 0.0)
+        self.assertEqual(summary["history_score"], 0.0)
 
-    def test_formal_a3_protocol_oracle_passes_all_tasks_and_modes(self):
-        tasks = load_one_stroke_tasks("data/one_stroke/a3_history.jsonl")
+    def test_formal_history_protocol_oracle_passes_all_tasks_and_modes(self):
+        tasks = load_one_stroke_tasks("data/one_stroke/history.jsonl")
 
         results = evaluate_one_stroke_tasks(tasks, FormalHistoryOracleAgent())
 
         self.assertEqual(len(results), 60)
         self.assertTrue(all(result.history_joint_success for result in results))
         summary = summarize_one_stroke(results)
-        self.assertEqual(summary["a3_final_score"], 1.0)
-        self.assertEqual(summary["a3_protocol_score"], 1.0)
-        self.assertEqual(summary["a3_state_score"], 1.0)
-        self.assertEqual(summary["a3_score"], 1.0)
+        self.assertEqual(summary["history_final_score"], 1.0)
+        self.assertEqual(summary["history_protocol_score"], 1.0)
+        self.assertEqual(summary["history_state_score"], 1.0)
+        self.assertEqual(summary["history_score"], 1.0)
 
     def test_history_wrong_intermediate_state_fails_joint_not_final(self):
         result = evaluate_one_stroke_tasks(
@@ -501,9 +530,9 @@ class OneStrokeTests(unittest.TestCase):
         self.assertFalse(result.history_joint_success)
         self.assertIn("step_1:current_vertex_mismatch:expected=B,actual=A", result.history_protocol_reasons)
         summary = summarize_one_stroke([result])
-        self.assertEqual(summary["a3_final_score"], 1.0)
-        self.assertEqual(summary["a3_state_score"], 0.0)
-        self.assertEqual(summary["a3_score"], 0.0)
+        self.assertEqual(summary["history_final_score"], 1.0)
+        self.assertEqual(summary["history_state_score"], 0.0)
+        self.assertEqual(summary["history_score"], 0.0)
 
     def test_step_only_scratchpad_is_a_protocol_violation(self):
         result = evaluate_one_stroke_tasks(

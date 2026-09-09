@@ -5,7 +5,8 @@ MiniBench currently has several task families:
 - Zebra logic-grid smoke tasks in `data/zebra/tasks.jsonl` and the formal
   evaluation set in `data/zebra/eval.jsonl`.
 - Xiangqi schema-v2 tasks under `data/xiangqi/<family>/tasks.jsonl`.
-- One-stroke graph puzzles in `data/one_stroke_tasks.jsonl`.
+- One-stroke graph puzzles in `data/one_stroke/direct.jsonl`, `history.jsonl`,
+  and `multimodal.jsonl`.
 - Riichi Mahjong tile-shape tasks in `data/mahjong_tasks.jsonl`.
 - Local Riichi Mahjong v1 table tasks in `data/mahjong_riichi_tasks.jsonl`.
 
@@ -73,27 +74,40 @@ human-readable examples.
 ## One-Stroke Tasks
 
 One-stroke tasks are undirected graph puzzles. The agent must return a vertex
-path that traverses every listed edge exactly once.
+path that traverses every listed edge exactly once; vertices may be revisited.
+The formal tracks are direct reasoning, history memory, and multimodal.
 
 ```json
-{"id":"os-example-011","vertices":["A","B","C","D"],"edges":[["A","B"],["B","C"],["C","D"]],"start":"A","end":"D","tags":["one-stroke","euler-trail","difficulty:easy"]}
+{"id":"direct-easy-01","capability":"direct","difficulty":"easy","vertices":["A","B","C","D"],"edges":[["A","B"],["B","C"],["C","D"]],"start":"A","end":"D","solution_exists":true,"solution_path":["A","B","C","D"],"tags":["one-stroke","capability:direct","difficulty:easy"]}
 ```
 
-Required fields:
+Required fields are `id`, unique `vertices`, a non-empty `edges` list, and
+normalized `tags`. Formal IDs use `direct-`, `history-`, or `multimodal-`
+followed by difficulty and a two-digit sequence number. Capability is `direct`
+(the default), `history_memory`, or `multimodal`; difficulty is `easy`,
+`medium`, or `hard`.
 
-- `id`: unique task id. Use `os-...`.
-- `vertices`: unique vertex labels.
-- `edges`: non-empty list of two-vertex undirected edges.
-- `tags`: normalized tags.
+Optional `start` and `end` constrain path endpoints. `solution_exists`
+defaults to true; set it to false for an unsolvable graph and omit the
+`solution_path` or set it to null. When supplied, an oracle `solution_path`
+must traverse every edge exactly once. The loader verifies solvability under
+the endpoint constraints. Repeated edges represent parallel edges; self-loops
+are not supported.
 
-Optional fields:
+History records add ordered `history_events` with move/undo actions and edge
+IDs `e01`, `e02`, etc., derived from original edge-list order. The loader
+validates history legality, LIFO undo, and whether the remaining graph can be
+completed. Evaluation supports `incremental_state` and `step_history_only`.
 
-- `start`: required first vertex.
-- `end`: required final vertex.
+Multimodal records add `source_task_id`, one `image` path relative to the
+JSONL file, and renderer provenance (`renderer_version`, `render_seed`).
+Use `images/<task-id>.png` with the clear renderer (`multimodal-v3`).
+Evaluation input modes are `text` and `image` (default); CLI `all` selects
+both. Graph difficulty is preserved independently of presentation.
 
-The loader validates that the graph has a one-stroke solution under the supplied
-start and end constraints. Parallel edges are accepted by the evaluator if they
-appear as repeated edge entries, but self-loops are not supported.
+The rule-conditioned track and its fields are no longer supported.
+See `data/one_stroke/README.md` for generation commands, score definitions,
+and migration requirements.
 
 ## Mahjong Tasks
 
