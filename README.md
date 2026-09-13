@@ -262,6 +262,21 @@ python scripts/run_xiangqi_smoke.py
 python scripts/xiangqi_web_test.py --suite-dir runs/xiangqi-smoke-<时间戳>
 ```
 
+也可以只完成一个任务在该固定样本中的全部题目，例如：
+
+```bash
+python scripts/xiangqi_web_test.py \
+  --suite-dir runs/xiangqi-smoke-<时间戳> \
+  --task h2 \
+  --history-mode paired
+```
+
+网页桥接会在每道题后立即打印将杀、合法性、最优着与损失诊断，并在
+每个任务结束后打印该任务的完整汇总。D3、C2、M2 的独立调用以及 H2
+的 `full-state` 回合使用新对话，以复现无状态 API 协议；H2 的
+`move-history-only` 在同一道题内持续使用同一个对话，换题或换信息模式
+时再新建对话。这里的“新对话”不要求打开新的浏览器窗口或标签页。
+
 ### 4.2 象棋 schema v2
 
 | 配置 | 公开 family | 内容 |

@@ -50,6 +50,7 @@ class ManualWebAgent:
         self.calls_by_session: dict[tuple[str, str], int] = {}
         self.call_index = 0
         self.task_system_prompt: str | None = None
+        self.task_short_name: str | None = None
 
     @staticmethod
     def _task_id(task: Any) -> str:
@@ -85,11 +86,31 @@ class ManualWebAgent:
         print(f"WEB CALL {self.call_index} | task={task_id} | transport={transport}")
         if messages is not None:
             if not persistent or task_call == 1:
-                print("Open a NEW browser chat and send the following conversation:")
+                if persistent:
+                    print(
+                        "Start a NEW CHAT for this task and information mode. "
+                        "Keep this chat open until the current game ends. "
+                        "A new browser window or tab is not required."
+                    )
+                elif self.task_short_name == "h2":
+                    print(
+                        "Start a NEW CHAT for this full-state model turn. "
+                        "This intentionally matches the stateless API protocol; "
+                        "the current board and prior moves are included below. "
+                        "A new browser window or tab is not required."
+                    )
+                else:
+                    print(
+                        "Start a NEW CHAT for this independent model call. "
+                        "A new browser window or tab is not required."
+                    )
                 for message in messages:
                     print(f"\n[{str(message['role']).upper()}]\n{message['content']}")
             else:
-                print("Continue the SAME browser chat and send only this next user turn:")
+                print(
+                    "Continue the SAME CHAT for this game and send only this "
+                    "next user turn:"
+                )
                 print(f"\n[USER]\n{messages[-1]['content']}")
         else:
             print("Open a NEW browser chat for this stateless call and send:")
@@ -194,6 +215,67 @@ def _serializable(result: Any) -> Any:
     return result
 
 
+def _value(result: Any, name: str, default: Any = None) -> Any:
+    if isinstance(result, dict):
+        return result.get(name, default)
+    return getattr(result, name, default)
+
+
+def _yes_no(value: Any) -> str:
+    return "YES" if bool(value) else "NO"
+
+
+def _print_completed_unit(
+    short_name: str,
+    results: Sequence[Any],
+    *,
+    unit_index: int,
+    unit_total: int,
+) -> None:
+    """Print an explicit, human-readable verdict after one saved task record."""
+    print("\n" + "-" * 88)
+    print(f"COMPLETED {short_name.upper()} TASK {unit_index}/{unit_total}")
+    for result in results:
+        if short_name == "d3":
+            print(
+                f"task={_value(result, 'task_id')} | "
+                f"checkmate={_yes_no(_value(result, 'goal_achieved'))} | "
+                f"legal={_yes_no(_value(result, 'is_legal'))} | "
+                f"preferred_move={_yes_no(_value(result, 'is_optimal'))} | "
+                f"move={_value(result, 'agent_uci')} | "
+                f"cp_loss={_value(result, 'cp_loss')}"
+            )
+        elif short_name == "h2":
+            print(
+                f"task={_value(result, 'task_id')} | "
+                f"mode={_value(result, 'history_mode')} | "
+                f"checkmate={_yes_no(_value(result, 'goal_achieved'))} | "
+                f"legal_rate={float(_value(result, 'legality_rate', 0.0)):.1%} | "
+                f"optimal_rate={float(_value(result, 'optimal_rate', 0.0)):.1%} | "
+                f"avg_cp_loss={_value(result, 'avg_cp_loss')} | "
+                f"reasons={_value(result, 'reasons', [])}"
+            )
+        elif short_name == "c2":
+            print(
+                f"task={_value(result, 'id')} | "
+                f"ruleset={_value(result, 'ruleset')} | "
+                f"success={_yes_no(_value(result, 'success'))} | "
+                f"legal_rate={float(_value(result, 'legality_rate', 0.0)):.1%} | "
+                f"optimal_rate={float(_value(result, 'optimal_rate', 0.0)):.1%} | "
+                f"value_loss={_value(result, 'avg_value_loss')}"
+            )
+        elif short_name == "m2":
+            print(
+                f"task={_value(result, 'task_id')} | "
+                f"mode={_value(result, 'input_mode', _value(result, 'mode'))} | "
+                f"checkmate={_yes_no(_value(result, 'success'))} | "
+                f"legal_rate={float(_value(result, 'legality_rate', 0.0)):.1%} | "
+                f"preferred_move={_yes_no(_value(result, 'pikafish_preferred_match'))} | "
+                f"cp_loss={_value(result, 'engine_cp_loss')}"
+            )
+    print("-" * 88, flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Drive MiniBench Xiangqi evaluation using responses pasted from a web UI."
@@ -202,7 +284,16 @@ def main(argv: list[str] | None = None) -> int:
         "--suite-dir", type=Path, required=True,
         help="A directory produced by scripts/run_xiangqi_smoke.py.",
     )
-    parser.add_argument("--tasks", default="d3,h2,c2,m2")
+    task_selection = parser.add_mutually_exclusive_group()
+    task_selection.add_argument(
+        "--task",
+        choices=tuple(TASKS),
+        help="Run every saved record for one task only, for example --task h2.",
+    )
+    task_selection.add_argument(
+        "--tasks",
+        help="Comma-separated tasks. If neither option is given, run all four.",
+    )
     parser.add_argument(
         "--history-mode",
         choices=("paired", "full-state", "move-history-only"),
@@ -222,10 +313,19 @@ def main(argv: list[str] | None = None) -> int:
     session_dir.mkdir(parents=True, exist_ok=False)
     agent = ManualWebAgent(session_dir)
     summaries: dict[str, Any] = {}
-    pikafish_path = resolve_pikafish_executable(None, start_dir=ROOT)
+    selected_task_names = (
+        [args.task]
+        if args.task is not None
+        else _parse_tasks(args.tasks or "d3,h2,c2,m2")
+    )
+    pikafish_path = (
+        resolve_pikafish_executable(None, start_dir=ROOT)
+        if set(selected_task_names) & {"d3", "h2", "m2"}
+        else None
+    )
 
     try:
-        for short_name in _parse_tasks(args.tasks):
+        for short_name in selected_task_names:
             family, config_name = TASKS[short_name]
             sample_path = suite_dir / "samples" / f"{short_name}.jsonl"
             if not sample_path.is_file():
@@ -235,11 +335,13 @@ def main(argv: list[str] | None = None) -> int:
             shutil.copy2(sample_path, task_dir / "selected_tasks.jsonl")
             spec = get_task_family_spec(family)
             agent.task_system_prompt = spec.system_prompt
+            agent.task_short_name = short_name
             tasks = spec.load_tasks(sample_path)
             config = load_experiment_config(ROOT / "config/experiments" / config_name)
             evaluation = dict(config.get("evaluation") or {})
             evaluation["pikafish_depth"] = args.pikafish_depth
             if short_name in {"d3", "h2", "m2"}:
+                assert pikafish_path is not None
                 evaluation["pikafish_path"] = str(pikafish_path)
             if short_name == "h2":
                 evaluation["history_mode"] = args.history_mode
@@ -253,13 +355,27 @@ def main(argv: list[str] | None = None) -> int:
                     step_dir=str(task_dir / "rendered-inputs"),
                 )
             print(f"\n######## {short_name.upper()} ({len(tasks)} saved records) ########")
-            results = _evaluate(spec, tasks, agent, family, evaluation)
+            results: list[Any] = []
+            for unit_index, task in enumerate(tasks, start=1):
+                unit_results = _evaluate(spec, [task], agent, family, evaluation)
+                results.extend(unit_results)
+                _print_completed_unit(
+                    short_name,
+                    unit_results,
+                    unit_index=unit_index,
+                    unit_total=len(tasks),
+                )
             run_dir = spec.write_run(results, task_dir, "results")
+            task_summary = spec.summarize(results)
             summaries[short_name] = {
                 "run_dir": str(run_dir),
-                "summary": spec.summarize(results),
+                "summary": task_summary,
                 "results": [_serializable(result) for result in results],
             }
+            print("\n" + "#" * 88)
+            print(f"{short_name.upper()} FINAL SUMMARY")
+            print(json.dumps(task_summary, indent=2, ensure_ascii=False))
+            print("#" * 88, flush=True)
     except KeyboardInterrupt:
         status = "stopped_by_user"
     except Exception as exc:
@@ -277,7 +393,23 @@ def main(argv: list[str] | None = None) -> int:
     (session_dir / "web_test_results.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    print(json.dumps(report, indent=2, ensure_ascii=False))
+    console_report = {
+        "status": status,
+        "source_suite_dir": str(suite_dir),
+        "session_dir": str(session_dir),
+        "tasks": {
+            name: {
+                "run_dir": payload["run_dir"],
+                "summary": payload["summary"],
+            }
+            for name, payload in summaries.items()
+            if isinstance(payload, dict) and "summary" in payload
+        },
+    }
+    if "error" in summaries:
+        console_report["error"] = summaries["error"]
+    print("\nWEB TEST SESSION SUMMARY")
+    print(json.dumps(console_report, indent=2, ensure_ascii=False))
     return 0 if status == "completed" else 1
 
 

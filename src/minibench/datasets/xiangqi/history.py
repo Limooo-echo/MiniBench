@@ -349,6 +349,12 @@ def evaluate_history_tasks(
                                 "cp_loss": HISTORY_CP_LOSS_CAP, "is_legal": False,
                                 "is_optimal": False, "optimal_uci": optimal_uci or "",
                             })
+                            print(
+                                f"    MOVE RESULT task={task.id} mode={history_mode} "
+                                f"move={generated_uci or 'PARSE_FAIL'} legal=NO "
+                                "checkmate=NO optimal=NO cp_loss=500.0",
+                                flush=True,
+                            )
                             reasons.append("invalid_or_illegal_uci")
                             break
                     else:
@@ -410,6 +416,16 @@ def evaluate_history_tasks(
                         "is_optimal": is_optimal,
                         "optimal_uci": optimal_uci or "",
                     })
+
+                    if is_agent_turn:
+                        print(
+                            f"    MOVE RESULT task={task.id} mode={history_mode} "
+                            f"move={uci} legal=YES "
+                            f"checkmate={'YES' if goal_achieved and terminal else 'NO'} "
+                            f"optimal={'YES' if is_optimal else 'NO'} "
+                            f"cp_loss={cp_loss:.1f}",
+                            flush=True,
+                        )
 
                     if is_agent_turn:
                         agent_uci_history.append(uci)
