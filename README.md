@@ -37,8 +37,10 @@ python3.10 -m venv ~/.venvs/minibench
 source ~/.venvs/minibench/bin/activate
 
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -c constraints/ci-py310.txt -e .
+python -m pip install -c constraints/ci-py310.txt -e ".[xiangqi-generation]"
 ```
+
+完整测试需要 `xiangqi-generation` 中固定版本的独立象棋裁判 `cchess`；只安装基础包不足以运行全套生成器与数据验证测试。
 
 验证安装：
 
