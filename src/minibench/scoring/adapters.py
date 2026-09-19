@@ -65,7 +65,10 @@ def _invalid(record: dict, reason: str) -> dict:
 
 def _error_reason(record: dict) -> str | None:
     for key in ("error", "infrastructure_error", "provider_error", "api_error", "engine_error",
-                "evaluation_error", "scorer_error", "transport_error"):
+                "evaluation_error", "scorer_error", "transport_error", "llm_error", "pikafish_error"):
+        if (key == "error" and record.get("status") == "invalid"
+                and isinstance(record.get(key), dict) and record[key].get("stage") == "format"):
+            continue  # An observed malformed answer is a model failure, not an outage.
         if record.get(key):
             return f"{key}:{record[key]}"
     if record.get("status") in {"missing", "error", "infrastructure_error", "evaluation_error"}:
@@ -77,7 +80,7 @@ def _error_reason(record: dict) -> str | None:
         for reason in reasons:
             if isinstance(reason, str) and reason.lower().startswith((
                 "error:", "api_error", "provider_error", "transport_error", "engine_error",
-                "evaluation_error", "scorer_error", "infrastructure_error",
+                "evaluation_error", "scorer_error", "infrastructure_error", "llm_error", "pikafish_error",
             )):
                 return reason
     return None
@@ -324,5 +327,10 @@ def score_record(family: str, dimension: str, record: dict, task: dict | None, *
             result = _unavailable(record, "unsupported_family:" + family)
     except (ValueError, TypeError, KeyError, ImportError, RuntimeError) as exc:
         result = _unavailable(record, f"offline_validation_unavailable:{type(exc).__name__}:{exc}")
+    if result["y"] == 0 and record.get("status") == "invalid":
+        result["status"] = "invalid"
+        if isinstance(record.get("error"), dict) and record["error"].get("stage") == "format":
+            result["reasons"].append("invalid_answer_format")
+            result["evidence"]["format_error"] = record["error"]
     result["evidence"].update({"family": family, "dimension": dimension, "mode": mode})
     return result

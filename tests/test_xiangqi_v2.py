@@ -230,15 +230,17 @@ class XiangqiV2DataTests(unittest.TestCase):
         )
         self.assertNotIn("WINNING STATUS", source)
 
-    def test_migration_manifest_matches_current_dataset_revision(self):
+    def test_migration_manifest_matches_immutable_legacy_revision(self):
         mapping = json.loads(
             Path("data/xiangqi/migration_v1_to_v2.json").read_text(encoding="utf-8")
         )
+        archive = Path("data/xiangqi/legacy") / mapping["dataset_revision"]
         by_id = {
             record["id"]: record
-            for records in self.by_family.values()
-            for record in records
+            for path in archive.glob("*/tasks.jsonl")
+            for record in (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
         }
+        self.assertTrue(by_id)
         projections = []
         for old_id, new_id in sorted(mapping["task_ids"].items()):
             record = by_id[new_id]
@@ -322,14 +324,10 @@ class XiangqiV2DataTests(unittest.TestCase):
     def test_direct_prompt_v2_configs_are_neutral_and_reproducible(self):
         for family, config_path in CONFIG_PATHS.items():
             config = load_experiment_config(config_path)
-            expected_prompt = {
-                "xiangqi-mate-in-one": "xiangqi-v4-free-uci-mate-verification",
-                "xiangqi-history": "xiangqi-v3-paired-free-uci-history",
-                "xiangqi-rule-variants": "xiangqi-v4-free-uci-single-move-paired-rules",
-                "xiangqi-multimodal": "xiangqi-v4-free-uci-paired-mate-in-one",
-            }.get(family, "xiangqi-v2-neutral-interface")
-            self.assertEqual(config["task"]["prompt_version"], expected_prompt)
-            self.assertTrue(config["task"]["sampling"]["enabled"])
+            self.assertEqual(config["task"]["prompt_version"], "xiangqi-reasoning-v2")
+            self.assertFalse(config["task"]["sampling"]["enabled"])
+            selection = config["task"]["selection"]
+            self.assertEqual(sha256(Path(selection["path"]).read_bytes()).hexdigest(), selection["sha256"])
             if family == "xiangqi-history":
                 self.assertEqual(config["task"]["sampling"]["count"], 30)
                 self.assertEqual(config["task"]["sampling"]["strategy"], "stratified")
@@ -353,12 +351,13 @@ class XiangqiV2DataTests(unittest.TestCase):
             predictions.write_text("", encoding="utf-8")
             for family in XIANGQI_FAMILIES:
                 config = load_experiment_config(CONFIG_PATHS[family])
+                config["task"].pop("selection", None)
                 config["task"]["sampling"].update(enabled=True, count=1)
                 config["agent"]["predictions"] = str(predictions)
                 config["run"].update(output_dir=str(root), run_name=family)
                 original_spec = get_task_family_spec(family)
 
-                def writer(results, output_dir, run_name, *, _root=root):
+                def writer(results, output_dir, run_name, *, write_predictions=True, _root=root):
                     run_dir = _root / str(run_name)
                     run_dir.mkdir(parents=True, exist_ok=True)
                     for name, content in (
@@ -366,7 +365,8 @@ class XiangqiV2DataTests(unittest.TestCase):
                         ("results.json", "{}\n"),
                         ("summary.txt", "smoke\n"),
                     ):
-                        (run_dir / name).write_text(content, encoding="utf-8")
+                        if name != "predictions.jsonl" or write_predictions:
+                            (run_dir / name).write_text(content, encoding="utf-8")
                     return run_dir
 
                 smoke_spec = replace(

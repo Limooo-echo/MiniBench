@@ -17,11 +17,20 @@ def load_mapping(path: str | Path | None = None) -> dict[str, Any]:
     return json.loads(source.read_text(encoding="utf-8"))
 
 
-def _canonical_records() -> dict[str, dict[str, Any]]:
-    records: dict[str, dict[str, Any]] = {}
-    for family in XIANGQI_FAMILIES:
-        for record in load_records(FAMILY_PATHS[family], expected_family=family):
-            records[record["id"]] = record
+def _canonical_records(mapping: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    # The legacy ID map describes the old corpus, including its documented
+    # defects. Never use the active repaired boards as replacement answers.
+    revision = mapping.get("dataset_revision")
+    archive = default_mapping_path().parent / "legacy" / str(revision)
+    if not archive.is_dir():
+        raise ValueError(f"no immutable dataset archive for migration revision: {revision}")
+    records = {}
+    for relative in FAMILY_PATHS.values():
+        source = archive / relative.parent.name / relative.name
+        for line in source.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                record = json.loads(line)
+                records[record["id"]] = record
     return records
 
 
@@ -41,11 +50,13 @@ def migrate_xiangqi_v2(
     if destination.exists():
         raise FileExistsError(f"output already exists: {destination}")
     mapping = load_mapping(mapping_path)
-    canonical = _canonical_records()
+    canonical = _canonical_records(mapping)
     report: dict[str, Any] = {
         "input": str(source),
         "output": str(destination),
         "dry_run": dry_run,
+        "target_dataset_revision": mapping.get("dataset_revision"),
+        "active_release_compatible": False,
         "converted": 0,
         "unchanged": 0,
         "unrecognized": [],

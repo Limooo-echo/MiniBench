@@ -206,6 +206,8 @@ def _provenance_reasons(run: dict, experiment: dict, profile: dict, architecture
     required = {"dataset_sha256": dataset_hash, "model": profile["model"],
                 "agent_config": architecture.get("experiment_configs", {}).get(experiment["id"], architecture["config"]),
                 "protocol": experiment["protocol"]}
+    if experiment.get("selection") is not None:
+        required["selection_sha256"] = experiment["selection"]["sha256"]
     for name, expected in required.items():
         if provenance.get(name) != expected:
             problems.append(f"provenance_mismatch:{name}")
@@ -259,6 +261,31 @@ def load_suite(path: Path) -> dict:
         source_tasks = {t["id"]: t for t in read_jsonl(data_path)}
         source_tasks.update({t["id"]: t for t in tasks})
         exclusions.extend(dict(experiment=exp_id, **item) for item in excluded)
+        selection = exp.get("selection")
+        if selection is not None:
+            if not isinstance(selection, dict):
+                raise ValueError(f"{exp_id}: selection must contain path and sha256")
+            if "task_ids" in exp:
+                raise ValueError(f"{exp_id}: selection cannot be combined with task_ids")
+            selection_path = _path(path.parent, selection.get("path"))
+            selection_hash = file_hash(selection_path)
+            if selection.get("sha256") != selection_hash:
+                raise ValueError(f"{exp_id}: selection sha256 mismatch")
+            roster = read_jsonl(selection_path)
+            roster_ids = [r.get("id") for r in roster]
+            if (not roster or not all(isinstance(i, str) for i in roster_ids)
+                    or len(roster_ids) != len(set(roster_ids))):
+                raise ValueError(f"{exp_id}: selection must have nonempty unique item ids")
+            for record in roster:
+                if source_tasks.get(record["id"]) != record:
+                    raise ValueError(f"{exp_id}: selection differs from dataset: {record['id']}")
+            # A common C2 roster may contain its standard-rule controls. Preserve
+            # their diagnostic exclusion while freezing the eligible main rows.
+            tasks = [t for t in tasks if t["id"] in set(roster_ids)]
+            protected.append(selection_path)
+            sources.append({"experiment": exp_id, "role": "selection",
+                            "path": str(selection_path), "sha256": selection_hash,
+                            "selected_records": len(roster)})
         selected_ids = exp.get("task_ids")
         if selected_ids is not None:
             if not isinstance(selected_ids, list) or len(selected_ids) != len(set(selected_ids)):

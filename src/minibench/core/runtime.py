@@ -35,7 +35,18 @@ class ExecutionBudgetExceeded(RuntimeError):
 
 
 class StrictJSONObjectError(ValueError):
-    """Raised when a response is not exactly one JSON object."""
+    """An answered-but-invalid format, retaining outputs even with summary traces."""
+
+    def __init__(
+        self, message: str, *, raw_output: str | None = None,
+        raw_outputs: list[str] | None = None,
+    ):
+        super().__init__(message)
+        self.raw_output = raw_output
+        self.raw_outputs = (
+            list(raw_outputs) if raw_outputs is not None
+            else [raw_output] if raw_output is not None else []
+        )
 
 
 @dataclass
@@ -637,6 +648,8 @@ class AgentRuntime:
                 error=str(exc),
             )
             if not repair_format:
+                exc.raw_output = observed.result.content
+                exc.raw_outputs = [observed.result.content]
                 raise
         else:
             self._record_successful_stage(observed, json_valid=True, parsed=parsed)
@@ -667,7 +680,9 @@ class AgentRuntime:
                 error=str(exc),
             )
             raise StrictJSONObjectError(
-                "format repair did not produce exactly one JSON object"
+                "format repair did not produce exactly one JSON object",
+                raw_output=repaired.result.content,
+                raw_outputs=[observed.result.content, repaired.result.content],
             ) from exc
         self._record_successful_stage(repaired, json_valid=True, parsed=parsed)
         return replace(

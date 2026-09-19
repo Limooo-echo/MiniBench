@@ -1,0 +1,34 @@
+task:
+  prompt_version: xiangqi-reasoning-v2
+  family: xiangqi-mate-in-one
+  path: data/xiangqi/mate_in_one/tasks.jsonl
+  sampling:
+    enabled: false
+    seed: 42
+    count: 30
+    strategy: stratified
+  selection:
+    path: data/xiangqi/evaluation_samples/smoke/d3.jsonl
+    sha256: 791d46e36e90a8bdf66dd884ace345763b369e1daed8aae8f43c7be0c66d7876
+agent:
+  name: direct
+  max_tokens: 1024
+provider:
+  name: qwen
+  model: qwen3.8-max
+  api_key_env: DASHSCOPE_API_KEY
+  json_mode: true
+  extra_body:
+    enable_thinking: false
+  max_retries: 3
+  timeout: 300
+evaluation:
+  pikafish_depth: 8
+  pikafish_timeout: 60.0
+  max_plies: 1
+  pikafish_binary_sha256: 0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3
+  pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
+run:
+  output_dir: runs
+  run_name: xiangqi_d3_direct_smoke_r1
+  on_existing: error

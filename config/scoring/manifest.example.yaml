@@ -1,7 +1,5 @@
-# Frozen task roster; fill profiles/configs and historical run provenance before formal comparison.
-# Empty runs intentionally report missing coverage. Paths are relative to this file.
 version: 1
-suite_id: minibench-four-dim-v1
+suite_id: minibench-four-dim-xiangqi-reasoning-v2
 profiles:
 - id: example-model
   model:
@@ -18,7 +16,7 @@ experiments:
   dimension: D
   dataset:
     path: ../../data/zebra/eval.jsonl
-    sha256: a0dcc6d59f448868f6df373dcc12704d01832a7465ba567290d495c02af34e93
+    sha256: 7163d88b25c0b9a86c94ef586b46b623a05da9f80167a86ab02c8a4f77f0b9c1
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -29,7 +27,7 @@ experiments:
   dimension: R
   dataset:
     path: ../../data/zebra/rule_codebook_eval.jsonl
-    sha256: 1f4968de862d56da3c15dfac72842b5adfa6adf97094ac1c4bf4f8175ee1d8cf
+    sha256: 827dec7ec7e86f89bd7fd635636be1e541f0806256429b19371f9a2229b57794
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -40,7 +38,7 @@ experiments:
   dimension: H
   dataset:
     path: ../../data/zebra/history_eval.jsonl
-    sha256: 306dedad56f6bd0322537fd53ada94041c5e4ebe5797c2e37599eb721bf6900c
+    sha256: bc0984980a9d8f5d3f09e17ab95d5878afe06074fb4c53c806fadfe9d62dbb4f
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -56,7 +54,7 @@ experiments:
   dimension: D
   dataset:
     path: ../../data/one_stroke/direct.jsonl
-    sha256: c586d272814a0fdb8010ce301da375a909ff414bbfb23f6cfbdd647f0e7703e8
+    sha256: 0556189988526c93f062ee93307d37cf8c7d4676df0ff14195f98cb555fa3786
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -68,7 +66,7 @@ experiments:
   dimension: H
   dataset:
     path: ../../data/one_stroke/history.jsonl
-    sha256: a019a0d69deaebac726d5dd76308c0c3b0c48954d0156aa2b9cb00cba7109229
+    sha256: 3dda677dc64d7217f4eda9481caa5910136deb7f21d1447851819fb363dfcf25
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -98,57 +96,79 @@ experiments:
   dimension: D
   dataset:
     path: ../../data/xiangqi/mate_in_one/tasks.jsonl
-    sha256: b5c3344d87e1795e76f5970d323e0140121593c51d9569f17e6103cd7e8fe518
+    sha256: f4edbfb1a4eadf88e1ee4bfc0e0d6e800bd7bcf211dc022881282e86646e8f1e
   protocol:
-    version: existing-task-protocol-v1
+    version: xiangqi-reasoning-v2
+    release_id: xiangqi-2026-09-19-r1
     evaluation:
       pikafish_depth: 8
       pikafish_timeout: 60.0
-      max_plies: 4
+      max_plies: 1
+      pikafish_binary_sha256: 0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3
+      pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
   runs: []
+  selection:
+    path: ../../data/xiangqi/evaluation_samples/formal/d3.jsonl
+    sha256: ac963bacff8c76986eddfee43327ca7f7408c8f57d7e75cd81bcb0c1a8345f9c
 - id: xiangqi-rule
   family: xiangqi_rule_variants
   dimension: R
   dataset:
     path: ../../data/xiangqi/rule_variants/tasks.jsonl
-    sha256: 4e9e0dd40323197e316c93a1b7f746bab7dd1dbc4750542e64c62a51be7452c2
+    sha256: dd1cc29e88b0faf763968c5decd2d11d940e89cb32088ccae03fee209ac06924
   protocol:
-    version: existing-task-protocol-v1
+    version: xiangqi-reasoning-v2
+    release_id: xiangqi-2026-09-19-r1
     evaluation:
-      search_depth: 3
-      max_plies: 12
+      oracle_depth: 3
+      max_plies: 1
   runs: []
+  selection:
+    path: ../../data/xiangqi/evaluation_samples/formal/c2.jsonl
+    sha256: ae1b0510cd33e246dffb26645b2abc5ff99563271d7dc5212f5ac2313096d0b1
 - id: xiangqi-history
   family: xiangqi_history
   dimension: H
   dataset:
     path: ../../data/xiangqi/history/tasks.jsonl
-    sha256: 67176df8b2ebb11cb475865117dc4fc8b5c626d9413cd6ef3cfb707c7676ff36
+    sha256: 228610b9a1a5cb7e8604cd420d353d76dd30d7b3b2258bc7adc49f18e7259b74
   protocol:
-    version: existing-task-protocol-v1
+    version: xiangqi-reasoning-v2
+    release_id: xiangqi-2026-09-19-r1
     evaluation:
-      history_mode: full-state
-      pikafish_depth: 8
+      history_mode: paired
+      pikafish_depth: 16
       pikafish_timeout: 60.0
-      max_plies: 20
+      pikafish_binary_sha256: 0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3
+      pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
   runs: []
+  selection:
+    path: ../../data/xiangqi/evaluation_samples/formal/h2.jsonl
+    sha256: 0c3a3376b2a7a1d4e50dd5304f63692ea2374bf0fae76c8a8663dc4af3a7a981
 - id: xiangqi-visual
   family: xiangqi_multimodal
   dimension: V
   dataset:
     path: ../../data/xiangqi/multimodal/tasks.jsonl
-    sha256: c8f817068abdc292428c8b461cbbd074f71bea796ea9e434ef99283e3111155d
+    sha256: 0efe16c4e0ca4e3a6a71642cbde392e926785ed274e5a7f5712b90b3736c405e
   protocol:
-    version: existing-task-protocol-v1
+    version: xiangqi-reasoning-v2
+    release_id: xiangqi-2026-09-19-r1
     evaluation:
       input_modes:
       - text
       - chinese-piece-image
       - latin-piece-image
-      opponent_depth: 4
-      optimal_depth: 3
-      max_plies: 20
+      max_plies: 1
+      verify_with_pikafish: true
+      pikafish_depth: 8
+      pikafish_timeout: 60.0
+      pikafish_binary_sha256: 0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3
+      pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
   runs: []
+  selection:
+    path: ../../data/xiangqi/evaluation_samples/formal/m2.jsonl
+    sha256: 9470d5998ed93f530a26c8373671ec79e945efcc807401be02b2c52081ce5b89
 - id: mahjong-direct
   family: mahjong
   dimension: D

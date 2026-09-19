@@ -11,6 +11,8 @@ import argparse
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 import json
+import hashlib
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -24,9 +26,10 @@ if str(ROOT / "src") not in sys.path:
 from minibench.core.agent import ChatMessage
 from minibench.core.multimodal import ImageAttachment
 from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT, direct_prompt
-from minibench.datasets.xiangqi.engines.pikafish import resolve_pikafish_executable
+from minibench.datasets.xiangqi.engines.pikafish import resolve_pikafish_executable, pikafish_fingerprint
+from minibench.datasets.xiangqi.runtime import PROTOCOL_VERSION
 from minibench.factory.config import load_experiment_config
-from minibench.factory.experiments import _evaluate, get_task_family_spec
+from minibench.factory.experiments import _evaluate, get_task_family_spec, _select_frozen_xiangqi_tasks
 
 
 TASKS = {
@@ -50,6 +53,10 @@ class ManualWebAgent:
         self.calls_by_session: dict[tuple[str, str], int] = {}
         self.call_index = 0
         self.task_system_prompt: str | None = None
+
+    def reset(self) -> None:
+        # Each task/mode starts a new chat; cumulative usage counters stay intact.
+        self.calls_by_session.clear()
 
     @staticmethod
     def _task_id(task: Any) -> str:
@@ -76,7 +83,7 @@ class ManualWebAgent:
         for image_index, attachment in enumerate(images, start=1):
             suffix = "png" if attachment.mime_type == "image/png" else "bin"
             path = self.image_dir / (
-                f"{task_id}-call{task_call:02d}-image{image_index}.{suffix}"
+                f"{task_id}-call{self.call_index:04d}-image{image_index}.{suffix}"
             )
             path.write_bytes(attachment.data)
             image_paths.append(str(path.resolve()))
@@ -113,6 +120,8 @@ class ManualWebAgent:
         }
         with self.transcript_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
         return response
 
     def generate(self, prompt: str, task: Any) -> str:
@@ -194,89 +203,127 @@ def _serializable(result: Any) -> Any:
     return result
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Drive MiniBench Xiangqi evaluation using responses pasted from a web UI."
-    )
-    parser.add_argument(
-        "--suite-dir", type=Path, required=True,
-        help="A directory produced by scripts/run_xiangqi_smoke.py.",
-    )
-    parser.add_argument("--tasks", default="d3,h2,c2,m2")
-    parser.add_argument(
-        "--history-mode",
-        choices=("paired", "full-state", "move-history-only"),
-        default="paired",
-    )
-    parser.add_argument(
-        "--m2-modes",
-        default="text,chinese-piece-image,latin-piece-image",
-    )
-    parser.add_argument("--pikafish-depth", type=int, default=8)
-    args = parser.parse_args(argv)
+def _digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    suite_dir = args.suite_dir.resolve()
-    if not suite_dir.is_dir():
-        raise SystemExit(f"suite directory does not exist: {suite_dir}")
-    session_dir = suite_dir / "web-tests" / datetime.now().strftime("%Y%m%d-%H%M%S")
+
+def _write_json(path: Path, payload: Any) -> None:
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def prepare_web_session(suite_dir: Path, session_dir: Path, names: list[str], *,
+                        pikafish_path: Path | None = None, history_mode: str | None = None,
+                        m2_modes: Sequence[str] | None = None):
+    """Reuse saved configs and exact rosters; never silently resample or lower depth."""
+    source_plan = json.loads((suite_dir / "smoke_plan.json").read_text(encoding="utf-8"))
+    if source_plan.get("protocol_version") != PROTOCOL_VERSION:
+        raise ValueError("manual sessions require a prepared current-protocol smoke suite")
     session_dir.mkdir(parents=True, exist_ok=False)
-    agent = ManualWebAgent(session_dir)
-    summaries: dict[str, Any] = {}
-    pikafish_path = resolve_pikafish_executable(None, start_dir=ROOT)
+    prepared = {}
+    plan = {"protocol_version": PROTOCOL_VERSION, "source_suite_dir": str(suite_dir),
+            "agent_adapter": "manual-web using direct prompts without automatic format repair",
+            "status": "prepared", "tasks": {}}
+    for key in names:
+        entry = source_plan["tasks"][key]
+        config_path, sample_path = suite_dir / entry["config_path"], suite_dir / entry["sample_path"]
+        if _digest(config_path) != entry["config_sha256"] or _digest(sample_path) != entry["sample_sha256"]:
+            raise ValueError(f"{key}: saved config/selection hash mismatch")
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        family = config["task"]["family"]
+        if family != TASKS[key][0]:
+            raise ValueError(f"{key}: saved family mismatch")
+        data_path = Path(config["task"]["path"])
+        if _digest(data_path) != entry["source_sha256"]:
+            raise ValueError(f"{key}: source dataset changed since suite preparation")
+        config["task"]["selection"] = {"path": str(sample_path), "sha256": entry["sample_sha256"]}
+        spec = get_task_family_spec(family)
+        tasks = _select_frozen_xiangqi_tasks(spec.load_tasks(data_path), config["task"], data_path, family)
+        run_dir = session_dir / key / "results"
+        run_dir.mkdir(parents=True)
+        selected = run_dir / "selected_tasks.jsonl"
+        shutil.copyfile(sample_path, selected)
+        config["task"]["selection"] = {"path": str(selected), "sha256": entry["sample_sha256"]}
+        config["run"].update(output_dir=str(run_dir.parent), run_name="results", on_existing="error")
+        evaluation = config.setdefault("evaluation", {})
+        actual_engine = None
+        if key in {"d3", "h2", "m2"}:
+            engine = resolve_pikafish_executable(pikafish_path or evaluation.get("pikafish_path"), start_dir=ROOT)
+            evaluation.update(pikafish_path=str(engine.resolve()), pikafish_depth=16 if key == "h2" else 8)
+            actual_engine = pikafish_fingerprint(engine)
+        if key == "h2" and history_mode is not None:
+            evaluation["history_mode"] = history_mode
+        if key == "m2":
+            if m2_modes is not None:
+                evaluation["input_modes"] = list(m2_modes)
+            evaluation.update(max_plies=1, verify_with_pikafish=True, step_dir=str(run_dir / "rendered-inputs"))
+        _write_json(run_dir / "resolved_config.json", config)
+        _write_json(run_dir / "run_metadata.json", {
+            "protocol_version": PROTOCOL_VERSION, "agent_adapter": plan["agent_adapter"],
+            "source_sha256": entry["source_sha256"], "selection_sha256": entry["sample_sha256"],
+            "engine": actual_engine, "evaluation": evaluation,
+        })
+        _write_json(run_dir / "run_state.json", {"status": "prepared", "completed_results": 0})
+        (run_dir / "predictions.jsonl").touch(exist_ok=False)
+        plan["tasks"][key] = {"family": family, "run_dir": str(run_dir), "selected_record_count": len(tasks),
+                                "config_sha256": _digest(run_dir / "resolved_config.json"), "selection_sha256": entry["sample_sha256"]}
+        prepared[key] = (spec, tasks, config, run_dir)
+    _write_json(session_dir / "web_test_plan.json", plan)
+    return prepared
 
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Use pasted web answers with the exact saved Xiangqi protocol and roster.")
+    parser.add_argument("--suite-dir", type=Path, required=True)
+    parser.add_argument("--tasks", default="d3,h2,c2,m2")
+    parser.add_argument("--history-mode", choices=("paired", "full-state", "move-history-only"))
+    parser.add_argument("--m2-modes", help="Optional explicit mode subset, saved in the actual configuration")
+    parser.add_argument("--pikafish-path", type=Path)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--prepare-only", action="store_true")
+    args = parser.parse_args(argv)
+    suite_dir = args.suite_dir.resolve()
+    session_dir = (args.output_dir or suite_dir / "web-tests" / datetime.now().strftime("%Y%m%d-%H%M%S")).resolve()
+    names = _parse_tasks(args.tasks)
+    if not names:
+        raise ValueError("at least one task family is required")
+    modes = [item.strip() for item in args.m2_modes.split(",") if item.strip()] if args.m2_modes else None
+    prepared = prepare_web_session(suite_dir, session_dir, names, pikafish_path=args.pikafish_path,
+                                   history_mode=args.history_mode, m2_modes=modes)
+    if args.prepare_only:
+        print(json.dumps({"status": "prepared", "session_dir": str(session_dir), "model_calls": 0}))
+        return 0
+    agent = ManualWebAgent(session_dir)
+    summaries = {}
+    active_dir = None
+    completed = []
+    status = "completed"
     try:
-        for short_name in _parse_tasks(args.tasks):
-            family, config_name = TASKS[short_name]
-            sample_path = suite_dir / "samples" / f"{short_name}.jsonl"
-            if not sample_path.is_file():
-                raise FileNotFoundError(f"missing saved sample: {sample_path}")
-            task_dir = session_dir / short_name
-            task_dir.mkdir()
-            shutil.copy2(sample_path, task_dir / "selected_tasks.jsonl")
-            spec = get_task_family_spec(family)
+        for key in names:
+            spec, tasks, config, active_dir = prepared[key]
             agent.task_system_prompt = spec.system_prompt
-            tasks = spec.load_tasks(sample_path)
-            config = load_experiment_config(ROOT / "config/experiments" / config_name)
-            evaluation = dict(config.get("evaluation") or {})
-            evaluation["pikafish_depth"] = args.pikafish_depth
-            if short_name in {"d3", "h2", "m2"}:
-                evaluation["pikafish_path"] = str(pikafish_path)
-            if short_name == "h2":
-                evaluation["history_mode"] = args.history_mode
-            if short_name == "m2":
-                evaluation.update(
-                    input_modes=tuple(
-                        item.strip() for item in args.m2_modes.split(",") if item.strip()
-                    ),
-                    max_plies=1,
-                    verify_with_pikafish=True,
-                    step_dir=str(task_dir / "rendered-inputs"),
-                )
-            print(f"\n######## {short_name.upper()} ({len(tasks)} saved records) ########")
-            results = _evaluate(spec, tasks, agent, family, evaluation)
-            run_dir = spec.write_run(results, task_dir, "results")
-            summaries[short_name] = {
-                "run_dir": str(run_dir),
-                "summary": spec.summarize(results),
-                "results": [_serializable(result) for result in results],
-            }
+            completed = []
+            _write_json(active_dir / "run_state.json", {"status": "running", "completed_results": 0})
+            def persist(result):
+                record = _serializable(result)
+                with (active_dir / "predictions.jsonl").open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                completed.append(record)
+                _write_json(active_dir / "run_state.json", {"status": "running", "completed_results": len(completed)})
+            results = _evaluate(spec, tasks, agent, config["task"]["family"], config["evaluation"], on_result=persist)
+            spec.write_run(results, active_dir.parent, active_dir.name, write_predictions=False)
+            summaries[key] = {"run_dir": str(active_dir), "summary": spec.summarize(results), "completed_results": len(completed)}
+            _write_json(active_dir / "run_state.json", {"status": "completed", "completed_results": len(completed)})
     except KeyboardInterrupt:
         status = "stopped_by_user"
     except Exception as exc:
         status = "failed"
         summaries["error"] = f"{type(exc).__name__}: {exc}"
-    else:
-        status = "completed"
-
-    report = {
-        "status": status,
-        "source_suite_dir": str(suite_dir),
-        "session_dir": str(session_dir),
-        "tasks": summaries,
-    }
-    (session_dir / "web_test_results.json").write_text(
-        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    if status != "completed" and active_dir is not None:
+        _write_json(active_dir / "run_state.json", {"status": status, "completed_results": len(completed), "error": summaries.get("error")})
+    report = {"status": status, "source_suite_dir": str(suite_dir), "session_dir": str(session_dir), "tasks": summaries}
+    _write_json(session_dir / "web_test_results.json", report)
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0 if status == "completed" else 1
 

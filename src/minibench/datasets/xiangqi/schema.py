@@ -142,6 +142,11 @@ def validate_record(record: dict[str, Any], *, expected_family: str | None = Non
         raise ValueError(f"{task_id}: FEN is not in canonical MiniBench form")
     if record.get("agent_color") != side_to_move:
         raise ValueError(f"{task_id}: FEN active color and agent_color disagree")
+    from minibench.datasets.xiangqi.validation import validate_position
+
+    position_errors = validate_position(board, 1 if side_to_move == "red" else -1)
+    if position_errors:
+        raise ValueError(f"{task_id}: invalid initial position: {'; '.join(position_errors)}")
     expected_goal = (
         "best-move-under-rule"
         if family == "xiangqi-rule-variants"
@@ -183,6 +188,11 @@ def validate_record(record: dict[str, Any], *, expected_family: str | None = Non
         _validate_mate_in_one_record(record)
     if family == "xiangqi-rule-variants":
         _validate_rule_record(record)
+        from minibench.datasets.xiangqi.reference import in_check
+
+        side = 1 if side_to_move == "red" else -1
+        if in_check(board, -side, internal_rules(record)):
+            raise ValueError(f"{task_id}: active rules leave side not to move in check")
     return record
 
 

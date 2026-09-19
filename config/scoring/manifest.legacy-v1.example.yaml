@@ -1,0 +1,227 @@
+# Historical tracing template bound to the archived eab452b Xiangqi data.
+# Stale original hashes were corrected; legacy_declared_dataset_sha256 is informational only.
+# Do not mix these old results with release xiangqi-2026-09-19-r1.
+# Non-Xiangqi datasets have no separate legacy archive.
+version: 1
+suite_id: minibench-four-dim-v1
+profiles:
+- id: example-model
+  model:
+    provider: replace-with-recorded-provider
+    name: replace-with-recorded-model
+architectures:
+- id: cot
+  default_config: true
+  config:
+    name: cot
+experiments:
+- id: zebra-direct
+  family: zebra
+  dimension: D
+  dataset:
+    path: ../../data/zebra/eval.jsonl
+    sha256: 7163d88b25c0b9a86c94ef586b46b623a05da9f80167a86ab02c8a4f77f0b9c1
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      show_progress: true
+  runs: []
+  legacy_declared_dataset_sha256: a0dcc6d59f448868f6df373dcc12704d01832a7465ba567290d495c02af34e93
+  legacy_dataset_note: No separate legacy archive; references the existing non-Xiangqi
+    dataset.
+- id: zebra-rule
+  family: zebra
+  dimension: R
+  dataset:
+    path: ../../data/zebra/rule_codebook_eval.jsonl
+    sha256: 827dec7ec7e86f89bd7fd635636be1e541f0806256429b19371f9a2229b57794
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      show_progress: true
+  runs: []
+  legacy_declared_dataset_sha256: 1f4968de862d56da3c15dfac72842b5adfa6adf97094ac1c4bf4f8175ee1d8cf
+  legacy_dataset_note: No separate legacy archive; references the existing non-Xiangqi
+    dataset.
+- id: zebra-history
+  family: zebra
+  dimension: H
+  dataset:
+    path: ../../data/zebra/history_eval.jsonl
+    sha256: bc0984980a9d8f5d3f09e17ab95d5878afe06074fb4c53c806fadfe9d62dbb4f
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      memory_modes:
+      - deferred_reasoning
+      state_max_tokens: 512
+      ack_max_tokens: 32
+      final_max_tokens: 4096
+      show_progress: true
+  runs: []
+  legacy_declared_dataset_sha256: 306dedad56f6bd0322537fd53ada94041c5e4ebe5797c2e37599eb721bf6900c
+  legacy_dataset_note: No separate legacy archive; references the existing non-Xiangqi
+    dataset.
+- id: one-stroke-direct
+  family: one_stroke
+  dimension: D
+  dataset:
+    path: ../../data/one_stroke/direct.jsonl
+    sha256: 0556189988526c93f062ee93307d37cf8c7d4676df0ff14195f98cb555fa3786
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      prompt_variant: baseline
+      show_progress: true
+  runs: []
+  legacy_declared_dataset_sha256: c586d272814a0fdb8010ce301da375a909ff414bbfb23f6cfbdd647f0e7703e8
+  legacy_dataset_note: No separate legacy archive; references the existing non-Xiangqi
+    dataset.
+- id: one-stroke-history
+  family: one_stroke
+  dimension: H
+  dataset:
+    path: ../../data/one_stroke/history.jsonl
+    sha256: 3dda677dc64d7217f4eda9481caa5910136deb7f21d1447851819fb363dfcf25
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      memory_modes:
+      - incremental_state
+      - step_history_only
+      state_max_tokens: 512
+      ack_max_tokens: 32
+      final_max_tokens: 1024
+      show_progress: true
+  runs: []
+  legacy_declared_dataset_sha256: a019a0d69deaebac726d5dd76308c0c3b0c48954d0156aa2b9cb00cba7109229
+  legacy_dataset_note: No separate legacy archive; references the existing non-Xiangqi
+    dataset.
+- id: one-stroke-visual
+  family: one_stroke
+  dimension: V
+  dataset:
+    path: ../../data/one_stroke/multimodal.jsonl
+    sha256: bd07f099ae70a67be645961889f39c57e20c12280b202aa40bfe7363173d206d
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      input_modes:
+      - image
+      show_progress: true
+  runs: []
+  legacy_dataset_note: No separate legacy archive; references the existing non-Xiangqi
+    dataset.
+- id: xiangqi-direct
+  family: xiangqi_mate_in_one
+  dimension: D
+  dataset:
+    path: ../../data/xiangqi/legacy/xiangqi-corpus-rebuild-2026-08-31/mate_in_one/tasks.jsonl
+    sha256: 79d742b912003d24093095010ee4228e68bfd8436b9c789bb8299b2349f1514e
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      pikafish_depth: 8
+      pikafish_timeout: 60.0
+      max_plies: 4
+  runs: []
+  legacy_declared_dataset_sha256: b5c3344d87e1795e76f5970d323e0140121593c51d9569f17e6103cd7e8fe518
+- id: xiangqi-rule
+  family: xiangqi_rule_variants
+  dimension: R
+  dataset:
+    path: ../../data/xiangqi/legacy/xiangqi-corpus-rebuild-2026-08-31/rule_variants/tasks.jsonl
+    sha256: 42d388367d132667c3ee63792932993a084cd958b48a166700d9641eff4d49de
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      search_depth: 3
+      max_plies: 12
+  runs: []
+  legacy_declared_dataset_sha256: 4e9e0dd40323197e316c93a1b7f746bab7dd1dbc4750542e64c62a51be7452c2
+- id: xiangqi-history
+  family: xiangqi_history
+  dimension: H
+  dataset:
+    path: ../../data/xiangqi/legacy/xiangqi-corpus-rebuild-2026-08-31/history/tasks.jsonl
+    sha256: 4eec4363812d04c8e9318764861d7c049d13ed241f1d9cad491ba4bca1e16026
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      history_mode: full-state
+      pikafish_depth: 8
+      pikafish_timeout: 60.0
+      max_plies: 20
+  runs: []
+  legacy_declared_dataset_sha256: 67176df8b2ebb11cb475865117dc4fc8b5c626d9413cd6ef3cfb707c7676ff36
+- id: xiangqi-visual
+  family: xiangqi_multimodal
+  dimension: V
+  dataset:
+    path: ../../data/xiangqi/legacy/xiangqi-corpus-rebuild-2026-08-31/multimodal/tasks.jsonl
+    sha256: 5d011b4a768c92f6027bcc5ec4dc5e924a7ddd87899fa99e33b1336065b9b558
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      input_modes:
+      - text
+      - chinese-piece-image
+      - latin-piece-image
+      opponent_depth: 4
+      optimal_depth: 3
+      max_plies: 20
+  runs: []
+  legacy_declared_dataset_sha256: c8f817068abdc292428c8b461cbbd074f71bea796ea9e434ef99283e3111155d
+- id: mahjong-direct
+  family: mahjong
+  dimension: D
+  dataset:
+    path: ../../data/mahjong/tasks.jsonl
+    sha256: d7a49a933e7037bc99ced084d622ab251dce8cf57bb7467a855df11ddda9a52b
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation: {}
+  runs: []
+  legacy_dataset_note: No separate legacy archive; references the existing non-Xiangqi
+    dataset.
+- id: mahjong-rule
+  family: mahjong_rule_variants
+  dimension: R
+  dataset:
+    path: ../../data/mahjong_solo/tasks_win.jsonl
+    sha256: 6f3eeffbdfb43c9bba6e6fb54cec3b3db9d53aebbb0cbe921723dce0f53fed32
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      observation_mode: full-hand
+      show_progress: true
+  runs: []
+  legacy_dataset_note: No separate legacy archive; references the existing non-Xiangqi
+    dataset.
+- id: mahjong-history
+  family: mahjong_solo
+  dimension: H
+  dataset:
+    path: ../../data/mahjong_solo/tasks_win.jsonl
+    sha256: 6f3eeffbdfb43c9bba6e6fb54cec3b3db9d53aebbb0cbe921723dce0f53fed32
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      observation_mode: history-only
+  runs: []
+  legacy_dataset_note: No separate legacy archive; references the existing non-Xiangqi
+    dataset.
+- id: mahjong-visual
+  family: mahjong
+  dimension: V
+  dataset:
+    path: ../../data/mahjong/visual_tasks.jsonl
+    sha256: 9348aaa2b1d0e12e4b933efdf5367bb0e5840dd0fdfc490bb106deffb8fc18de
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      input_modes:
+      - image
+  runs: []
+  legacy_dataset_note: No separate legacy archive; references the existing non-Xiangqi
+    dataset.

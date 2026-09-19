@@ -1,19 +1,18 @@
 task:
-  prompt_version: xiangqi-v4-free-uci-single-move-paired-rules
+  prompt_version: xiangqi-reasoning-v2
   family: xiangqi-rule-variants
   path: data/xiangqi/rule_variants/tasks.jsonl
   sampling:
-    enabled: true
+    enabled: false
     seed: 42
     count: 10
-    # Sample 10 scenarios across the three rule foci, then keep all four
-    # same-FEN rule conditions for every selected scenario.
     strategy: paired-stratified
-
+  selection:
+    path: data/xiangqi/evaluation_samples/formal/c2.jsonl
+    sha256: ae1b0510cd33e246dffb26645b2abc5ff99563271d7dc5212f5ac2313096d0b1
 agent:
   name: direct
   max_tokens: 512
-
 provider:
   name: qwen
   model: qwen3.8-max
@@ -22,11 +21,10 @@ provider:
   json_mode: true
   extra_body:
     enable_thinking: false
-
 evaluation:
   oracle_depth: 3
   max_plies: 1
-
 run:
   output_dir: runs
-  run_name: xiangqi_c2_direct_qwen38max_free_uci_v3
+  run_name: xiangqi_c2_direct_formal_r1
+  on_existing: error

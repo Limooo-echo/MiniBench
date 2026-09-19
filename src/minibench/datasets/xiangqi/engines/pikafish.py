@@ -253,7 +253,7 @@ def resolve_pikafish_executable(
     return found
 
 
-def pikafish_fingerprint(executable: str | Path) -> dict[str, object]:
+def pikafish_fingerprint(executable: str | Path, *, eval_file: str | Path | None = None) -> dict[str, object]:
     """Return immutable identifiers for the exact engine binary and NNUE file."""
     binary = Path(executable).resolve()
     if not binary.is_file():
@@ -270,9 +270,10 @@ def pikafish_fingerprint(executable: str | Path) -> dict[str, object]:
         "executable": str(binary),
         "binary_sha256": digest(binary),
         "binary_size_bytes": binary.stat().st_size,
+        "options": {"Threads": 1, "Hash": 128, "clear_hash_per_analysis": True},
     }
-    eval_file = binary.parent / "pikafish.nnue"
-    if eval_file.is_file():
+    eval_file = PikafishEngine._resolve_eval_file(binary, eval_file)
+    if eval_file is not None and eval_file.is_file():
         payload["eval_file"] = str(eval_file.resolve())
         payload["eval_file_sha256"] = digest(eval_file)
     else:
@@ -290,7 +291,7 @@ class PikafishEngine:
         cwd: str | Path | None = None,
         eval_file: str | Path | None = None,
     ):
-        executable_path = Path(executable)
+        executable_path = Path(executable).resolve()
         self.executable = str(executable_path)
         self.timeout = timeout
         self.cwd = str(cwd) if cwd is not None else str(executable_path.parent)
@@ -311,6 +312,7 @@ class PikafishEngine:
         if self._process is not None and self._process.poll() is None:
             return
 
+        self._lines = Queue()
         try:
             self._process = subprocess.Popen(
                 [self.executable],
@@ -329,12 +331,18 @@ class PikafishEngine:
         self._reader = threading.Thread(target=self._read_stdout, daemon=True)
         self._reader.start()
 
-        self._send("uci")
-        self._read_until(lambda line: line.strip() == "uciok", "uciok")
-        if self._eval_file is not None:
-            eval_file = self._path_for_engine(self._eval_file)
-            self._send(f"setoption name EvalFile value {eval_file}")
-        self.ready()
+        try:
+            self._send("uci")
+            self._read_until(lambda line: line.strip() == "uciok", "uciok")
+            self._send("setoption name Threads value 1")
+            self._send("setoption name Hash value 128")
+            if self._eval_file is not None:
+                eval_file = self._path_for_engine(self._eval_file)
+                self._send(f"setoption name EvalFile value {eval_file}")
+            self.ready()
+        except (PikafishError, OSError):
+            self.close()
+            raise
 
     def ready(self) -> None:
         self._send("isready")
@@ -375,17 +383,26 @@ class PikafishEngine:
         if depth is not None and depth <= 0:
             raise ValueError("depth must be positive")
 
-        self._send(f"position fen {fen}")
-        if movetime_ms is not None:
-            self._send(f"go movetime {movetime_ms}")
-        else:
-            self._send(f"go depth {depth or 8}")
+        self.start()
+        try:
+            self._send("ucinewgame")
+            self._send("setoption name Clear Hash")
+            self.ready()
+            self._send(f"position fen {fen}")
+            if movetime_ms is not None:
+                self._send(f"go movetime {movetime_ms}")
+            else:
+                self._send(f"go depth {depth or 8}")
 
-        lines = self._read_until(
-            lambda line: line.strip().startswith("bestmove "),
-            "bestmove",
-            timeout=self.timeout,
-        )
+            lines = self._read_until(
+                lambda line: line.strip().startswith("bestmove "),
+                "bestmove",
+                timeout=self.timeout,
+            )
+        except (PikafishError, OSError):
+            # Discard late output from a timed-out search before another query.
+            self.close()
+            raise
         bestmove_line = next(
             line.strip() for line in reversed(lines) if line.strip().startswith("bestmove ")
         )
@@ -424,16 +441,25 @@ class PikafishEngine:
                     process.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     process.kill()
+                    process.wait(timeout=2)
 
+        if self._reader is not None:
+            self._reader.join(timeout=2)
+        for stream in (process.stdin, process.stdout):
+            if stream is not None:
+                stream.close()
         self._process = None
+        self._reader = None
+        self._lines = Queue()
 
     def _read_stdout(self) -> None:
         process = self._process
+        lines = self._lines
         if process is None or process.stdout is None:
             return
 
         for line in process.stdout:
-            self._lines.put(line.rstrip("\n"))
+            lines.put(line.rstrip("\n"))
 
     def _send(self, command: str) -> None:
         process = self._ensure_running()
@@ -487,11 +513,11 @@ class PikafishEngine:
         eval_file: str | Path | None,
     ) -> Path | None:
         if eval_file is not None:
-            return Path(eval_file)
+            return Path(eval_file).resolve()
 
         env_eval_file = os.environ.get("PIKAFISH_EVAL_FILE")
         if env_eval_file:
-            return Path(env_eval_file)
+            return Path(env_eval_file).resolve()
 
         default_eval_file = executable.parent / "pikafish.nnue"
         if default_eval_file.exists():

@@ -197,6 +197,25 @@ class ScoringAdapterTests(unittest.TestCase):
                 self.assertIsNone(result["y"])
                 self.assertIsNone(result["p"])
 
+    def test_xiangqi_provider_and_engine_errors_are_missing_not_failures(self):
+        for family in ("xiangqi_mate_in_one", "xiangqi_history", "xiangqi_rule_variants", "xiangqi_multimodal"):
+            for error in ("llm_error: timeout", "pikafish_error: disconnected"):
+                for record in ({"success": False, "goal_achieved": False, "reasons": [error]},
+                               {"success": True, "goal_achieved": True, error.split(":")[0]: "failure"},
+                               {"status": "error", "success": None, "goal_achieved": None}):
+                    with self.subTest(family=family, record=record):
+                        result = self.score(family, record)
+                        self.assertIsNone(result["y"])
+                        self.assertIsNone(result["p"])
+                        self.assertEqual(result["status"], "missing")
+
+    def test_xiangqi_format_error_is_an_observed_zero_not_missing(self):
+        result = self.score("xiangqi_history", {"status": "invalid", "goal_achieved": False,
+            "raw_output": "not a JSON object", "error": {"stage": "format", "type": "StrictJSONObjectError"}})
+        self.assertEqual((result["y"], result["p"]), (0, 0))
+        self.assertEqual(result["status"], "invalid")
+        self.assertIn("invalid_answer_format", result["reasons"])
+
     def test_solo_action_error_is_task_failure_and_moves_are_episode_mean(self):
         result = self.score("mahjong_solo", {"success": False, "action_errors": ["invalid_discard"],
                                             "move_scores": [.1, .9], "score": .7})

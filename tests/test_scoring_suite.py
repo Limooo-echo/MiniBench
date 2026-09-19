@@ -331,6 +331,63 @@ class ScoringSuiteTests(unittest.TestCase):
         self.assertEqual(tokens["calls_with_usage_status"], 20)
         self.assertAlmostEqual(tokens["call_coverage"], .1)
 
+    def test_legacy_known_calls_without_usage_status_stay_in_denominator(self):
+        self.experiment(records=[
+            {"task_id": "z1", "correct_cells": 4, "total_cells": 4,
+             "metrics": {"usage_available": True, "llm_calls": 1, "usage_missing_calls": 0,
+                         "token_usage": {"total_tokens": 100}}},
+            {"task_id": "z2", "correct_cells": 4, "total_cells": 4,
+             "metrics": {"usage_available": False, "llm_calls": 99}},
+        ])
+        costs = self.run_suite()["costs"][0]
+        self.assertEqual(costs["llm_calls"]["observed_total"], 100)
+        self.assertEqual(costs["total_tokens"]["calls_with_usage"], 1)
+        self.assertEqual(costs["total_tokens"]["recorded_calls"], 100)
+        self.assertEqual(costs["total_tokens"]["call_coverage"], .01)
+
+    def test_unknown_call_counts_or_usage_counts_cannot_claim_full_coverage(self):
+        from minibench.scoring.report import _costs
+        known = {"profile": "p", "architecture": "a", "status": "ok", "metrics": {
+            "usage_available": True, "llm_calls": 1, "usage_missing_calls": 0,
+            "token_usage": {"total_tokens": 100}}}
+        for unknown in ({}, {"llm_calls": 99, "usage_available": True,
+                             "token_usage": {"total_tokens": 100}}):
+            costs = _costs([known, dict(known, metrics=unknown)])[0]
+            self.assertIsNone(costs["total_tokens"]["call_coverage"])
+
+    def test_frozen_selection_applies_to_all_architectures_and_requires_provenance(self):
+        tasks = [{"id": "standard", "ruleset": "standard", "rules": []},
+                 {"id": "selected", "ruleset": "variant", "rules": [{"type": "fixture"}], "scenario_id": "s1"},
+                 {"id": "outside", "ruleset": "variant", "rules": [{"type": "fixture"}], "scenario_id": "s2"}]
+        exp = self.experiment("xiangqi_rule_variants", "R", tasks=tasks, records=[
+            {"id": "selected", "success": True}, {"id": "outside", "success": False}])
+        roster = self.write_jsonl("frozen.jsonl", tasks[:2])
+        exp["selection"] = {"path": roster.name, "sha256": file_hash(roster)}
+        exp["runs"][0]["provenance"]["selection_sha256"] = file_hash(roster)
+        self.manifest["architectures"].append({"id": "other", "config": self.config, "default_config": True})
+        other = copy.deepcopy(exp["runs"][0]); other["architecture"] = "other"
+        other["provenance"]["selection_sha256"] = "different-roster"
+        exp["runs"].append(other)
+        self.save_manifest()
+        suite = load_suite(self.manifest_path)
+        self.assertEqual({r["item_id"] for r in suite["rows"]}, {"selected"})
+        self.assertEqual(len(suite["rows"]), 2)
+        self.assertEqual(next(r for r in suite["rows"] if r["architecture"] == "base")["y"], 1)
+        wrong = next(r for r in suite["rows"] if r["architecture"] == "other")
+        self.assertIsNone(wrong["y"])
+        self.assertIn("provenance_mismatch:selection_sha256", wrong["reasons"])
+        self.assertTrue(any(e.get("task_id") == "outside" for e in suite["exclusions"]))
+
+    def test_selection_rejects_changed_gold_even_when_roster_hash_is_updated(self):
+        exp = self.experiment()
+        original = json.loads((self.inputs / exp["dataset"]["path"]).read_text().splitlines()[0])
+        original["puzzle"] = "Changed after evaluation"
+        roster = self.write_jsonl("changed.jsonl", [original])
+        exp["selection"] = {"path": roster.name, "sha256": file_hash(roster)}
+        self.save_manifest()
+        with self.assertRaisesRegex(ValueError, "selection differs from dataset"):
+            load_suite(self.manifest_path)
+
     def test_unverified_costs_are_separate_from_formal_costs(self):
         self.experiment(verified=False, records=[
             {"task_id": tid, "correct_cells": 4, "total_cells": 4,

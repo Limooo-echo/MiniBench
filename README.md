@@ -240,38 +240,38 @@ minibench run-config config/experiments/zebra_history.yaml
 
 `zebra_history.yaml` 默认使用 `agent.name: passthrough`；所有实现 phase-aware 消息接口的推理 Agent 也可运行该多轮评测。
 
-发布象棋结果前，先执行来源、结构和复现信息审计：
-
-```bash
-python scripts/audit_xiangqi_release.py --strict
-```
-
-M2 会在运行时逐题用 Pikafish 复核初始局面确为一步杀。正式全量运行前，
-可先跑四任务小规模验收，并保存本次实际抽中的题目：
-
-```bash
-export DASHSCOPE_API_KEY
-python scripts/run_xiangqi_smoke.py
-```
-
-默认抽取 D3/H2/M2 各 6 个位置（每层 2 个），C2 抽取 3 个配对场景
-（每种规则焦点 1 个，展开为 12 条规则条件）。若要把同一批题交给网页版模型，
-再由本地代码执行合法性检查、Pikafish 应着和评分，可运行：
-
-```bash
-python scripts/xiangqi_web_test.py --suite-dir runs/xiangqi-smoke-<时间戳>
-```
-
 ### 4.2 象棋 schema v2
+
+当前数据为 `xiangqi-2026-09-19-r1`，运行协议为 `xiangqi-reasoning-v2`。
+四类各 250 条数据已重新审核；修复内容、旧题替换原因和验收证据见
+[象棋修复报告](docs/xiangqi-repair-report.md)。
 
 | 配置 | 公开 family | 内容 |
 | --- | --- | --- |
-| `xiangqi_mate_in_one.yaml` | `xiangqi-mate-in-one` | 一步杀 |
-| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 同局面四规则卡的配对规则推理；自由 UCI 走法 |
-| `xiangqi_history.yaml` | `xiangqi-history` | 按将杀步数分层抽样，配对 `full-state` / `move-history-only`，由 Pikafish 应战 |
-| `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 同一步杀局面的文本、中文棋子图、拉丁棋子图配对比较，并由 Pikafish 外部复核 |
+| `xiangqi_mate_in_one.yaml` | `xiangqi-mate-in-one` | 严格一步将死，接受全部合法答案 |
+| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 同局面四规则卡，固定三层效用，自由生成 UCI |
+| `xiangqi_history.yaml` | `xiangqi-history` | 按参考将杀距离分层，配对 `full-state` / `move-history-only`，固定 Pikafish 应战 |
+| `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 同一 D3 局面的文字、中文棋子图、拉丁棋子图比较 |
 
-直接运行 YAML：
+D3/M2 用精确棋规判定将死，Pikafish 只提供诊断；H2 需要固定的对手引擎。
+本版使用的引擎与 NNUE 指纹在 `data/xiangqi/provenance.json`，配置会校验它们。
+本地已验收的 Windows universal 引擎可通过 WSL 使用（新克隆需按 provenance
+取得同一发行资产；不要直接用不同版本引擎替代）：
+
+```bash
+export PIKAFISH_PATH="$PWD/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe"
+python scripts/validate_xiangqi_data.py --workers 6 --output data/xiangqi/independent_validation.json
+python scripts/audit_xiangqi_release.py --technical --output data/xiangqi/release_audit.json
+python scripts/run_xiangqi_smoke.py --prepare-only --pikafish-path "$PIKAFISH_PATH"
+```
+
+以上命令不调用语言模型。`--strict` 还检查外部来源声明，原仓库未声明顶级许可证的状态
+仍会被报告。数据数量、规则、配对、哈希或来源有分歧时，技术门禁会失败。
+
+小样本名单已冻结：D3/H2/M2 各 6 个局面，C2 三个配对场景（12 条规则条件）。
+正式配置固定为 D3/H2/M2 各 30 个局面，C2 十个场景；不会每次重新抽题。
+同一模型的各架构使用相同名单，并保留各自登记的默认架构配置。
+需要运行真实模型时，配置凭据后去掉 `--prepare-only`，或运行对应 YAML：
 
 ```bash
 minibench run-config config/experiments/xiangqi_mate_in_one.yaml
@@ -280,62 +280,27 @@ minibench run-config config/experiments/xiangqi_history.yaml
 minibench run-config config/experiments/xiangqi_multimodal.yaml
 ```
 
-象棋还提供可覆盖 YAML 的便捷入口：
+`run-task`/`run-suite` 可以覆盖 agent、provider、model 等参数。冻结配置的
+`task.selection` 不能同时设置抽样、limit 或 task_ids；探索性重选题时，应复制 YAML
+并明确移除 selection，记录自己的名单，避免混入正式对照。
+同名结果禁止覆盖，下一次实验应使用新的 run_name 或输出目录。
+
+网页版流程复用已准备的配置和名单：
 
 ```bash
-minibench run-task xiangqi-mate-in-one \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-v4-flash \
-  --sample-seed 42 \
-  --sample-count 10
-
-minibench run-task xiangqi-history \
-  --history-mode paired \
-  --sample-count 10 \
-  --pikafish-depth 16
-
-minibench run-suite \
-  --tasks xiangqi-mate-in-one,xiangqi-rule-variants \
-  --sample-count 10
+python scripts/xiangqi_web_test.py --suite-dir runs/xiangqi-smoke-<时间戳> --prepare-only
 ```
 
-`run-task`/`run-suite` 可覆盖 agent、provider、model、key 变量、抽样和常用评测参数，但不提供 `--base-url`。自定义 endpoint 请复制 YAML，设置 `provider.base_url`，再用 `run-config`。
-
-一步杀和历史任务需要 Pikafish。全部操作仍在 WSL 中：
+人工检查数据也不需要调用模型：
 
 ```bash
-mkdir -p ~/opt
-git clone https://github.com/official-pikafish/Pikafish.git ~/opt/Pikafish
-cd ~/opt/Pikafish/src
-make -j"$(nproc)" profile-build
-
-export PIKAFISH_PATH="$HOME/opt/Pikafish/src/pikafish"
-test -x "$PIKAFISH_PATH"
-
-cd /mnt/d/AAALimoWork/CS/Seminar/MiniBench
-```
-
-Pikafish 官方编译说明也建议在 `src` 下执行 `make -j profile-build`：[官方 README](https://github.com/official-pikafish/Pikafish#compiling-pikafish)。
-
-人工检查数据不需要调用模型：
-
-```bash
-minibench inspect-xiangqi \
-  --task xiangqi-history \
-  --id xiangqi-history-0001 \
-  --format terminal
-
-minibench inspect-xiangqi \
-  --task xiangqi-multimodal \
-  --id xiangqi-multimodal-0001 \
-  --format png \
-  --output output/xiangqi-example.png
-
+minibench inspect-xiangqi --task xiangqi-history --id xiangqi-history-0001 --format terminal
+minibench inspect-xiangqi --task xiangqi-multimodal --id xiangqi-multimodal-m2-0001 --format png --output output/xiangqi-example.png
 minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 ```
 
-字段、FEN、坐标、UCI 和评分定义见 [`docs/xiangqi-data-card.md`](docs/xiangqi-data-card.md)。
+字段、效用函数、固定引擎、完整重建命令和方法边界见
+[数据卡](docs/xiangqi-data-card.md)。
 
 ### 4.3 一笔画
 

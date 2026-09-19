@@ -54,7 +54,10 @@ def _costs(rows: list[dict], *, unverified: bool = False) -> list[dict]:
             out[metric] = {"observed_total": sum(observed) if observed else None,
                            "observed_records": len(observed), "coverage": len(observed) / len(items)}
         usable, tokens, known_calls, missing_calls = 0, 0, 0, 0
+        unknown_call_records = unknown_usage_calls = 0
         for row in items:
+            if (row.get("status") == "unverified") != unverified:
+                continue
             metrics = measured(row)
             value = (metrics.get("token_usage") or {}).get("total_tokens")
             # Older writers emit zero-filled usage even when it is unavailable.
@@ -62,14 +65,28 @@ def _costs(rows: list[dict], *, unverified: bool = False) -> list[dict]:
                 tokens += value
                 usable += 1
             calls, missing = metrics.get("llm_calls"), metrics.get("usage_missing_calls")
-            if isinstance(calls, int) and isinstance(missing, int) and 0 <= missing <= calls:
-                known_calls += calls
+            if type(calls) is not int or calls < 0:
+                unknown_call_records += 1
+                continue
+            known_calls += calls
+            if type(missing) is int and 0 <= missing <= calls:
                 missing_calls += missing
+            elif metrics.get("usage_available") is False:
+                # A known call count with no usable usage still belongs in the
+                # denominator, even in legacy records lacking missing-call counts.
+                missing_calls += calls
+            elif calls:
+                unknown_usage_calls += calls
         out["total_tokens"] = {"observed_total": tokens if usable else None,
                                 "observed_records": usable, "coverage": usable / len(items),
-                                "calls_with_usage": known_calls - missing_calls,
-                                "calls_with_usage_status": known_calls,
-                                "call_coverage": (known_calls - missing_calls) / known_calls if known_calls else None}
+                                "calls_with_usage": known_calls - missing_calls - unknown_usage_calls,
+                                "calls_with_usage_status": known_calls - unknown_usage_calls,
+                                "recorded_calls": known_calls,
+                                "unknown_usage_calls": unknown_usage_calls,
+                                "unknown_call_records": unknown_call_records,
+                                "call_coverage": ((known_calls - missing_calls) / known_calls
+                                                  if known_calls and not unknown_call_records
+                                                  and not unknown_usage_calls else None)}
         result.append(out)
     return result
 

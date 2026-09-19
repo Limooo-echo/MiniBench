@@ -66,8 +66,9 @@ class Rule:
                         "between it and the target. Normal moves still require "
                         "one screen or none (standard).")
             if mod == "free_retreat":
-                return ("Soldier may also move backward (one step) after "
-                        "crossing the river, in addition to forward/sideways.")
+                return ("A soldier may move backward one step only while CURRENTLY on the opponent half "
+                        "(Red: ranks 5-9; Black: ranks 0-4), in addition to its normal moves. "
+                        "After retreating across the river to its own half it cannot move backward or sideways.")
         if self.kind == "zone_limit":
             zone = self.params.get("zone")
             if zone == "no_cross_river":

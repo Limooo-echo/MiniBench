@@ -13,9 +13,13 @@ import statistics
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from time import strftime
-from typing import Any
+from typing import Any, Callable
 
 from minibench.core.agent import Agent
+from minibench.core.metrics import start_task_metrics, finish_task_metrics, summarize_metrics
+from minibench.datasets.xiangqi.runtime import (
+    StrictJSONObjectError, PROTOCOL_VERSION, error_detail, reset_agent, mean_or_none, rounded, status_counts, display,
+)
 from minibench.datasets.xiangqi.text_encoding import BOARD_ENCODING, board_state_text
 from minibench.datasets.xiangqi.variants.board import Move, VariantBoard
 from minibench.datasets.xiangqi.variants.rules import Rule
@@ -52,6 +56,8 @@ def build_rule_variant_prompt(
     return f"""{SYSTEM_PROMPT}
 
 Objective: choose the move that is best for Red under the rule card.
+The evaluator uses a fixed depth-three minimax search (three half-moves), not an
+unlimited-depth optimum. All maximum-utility moves within 1e-6 are accepted.
 {BOARD_ENCODING}
 Coordinate convention: UCI `a0a1` means move from file a, rank 0 (bottom row)
 to file a, rank 1. Board row 0 is rank 9; board row 9 is rank 0.
@@ -116,230 +122,176 @@ class RuleVariantResult:
     scenario_id: str
     ruleset: str
     difficulty: str
-    success: bool
-    legality_rate: float
-    first_move_optimal: bool
+    success: bool | None
+    legality_rate: float | None
+    first_move_optimal: bool | None
     optimal_uci: str | None
-    answer_correct: bool
-    optimal_rate: float
-    avg_value_loss: float
-    value_quality_score: float
-    score: float
+    answer_correct: bool | None
+    optimal_rate: float | None
+    avg_value_loss: float | None
+    value_quality_score: float | None
+    score: float | None
     steps: list[dict] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+    status: str = "ok"
+    goal_achieved: bool | None = None
+    error: dict[str, Any] | None = None
+    metrics: dict[str, Any] = field(default_factory=dict)
+    termination_reason: str = ""
+    protocol_version: str = PROTOCOL_VERSION
 
 
 def evaluate_rule_variant_task(
-    task: dict,
-    agent: Agent,
-    *,
-    max_steps: int = 12,
-    agent_side: int = 1,
-    search_depth: int | None = None,
-    opponent_depth: int = 2,
-    oracle_depth: int = 3,
+    task: dict, agent: Agent, *, max_steps: int = 12, agent_side: int = 1,
+    search_depth: int | None = None, opponent_depth: int = 2, oracle_depth: int = 3,
 ) -> RuleVariantResult:
-    """Evaluate one free-UCI move under the stated temporary rule."""
-    if search_depth is not None:
-        oracle_depth = search_depth
-    rules = [Rule.from_dict(r) for r in task.get("rules", [])]
-    current = VariantBoard(task["board"], rules)
-    steps: list[dict] = []
-    reasons: list[str] = []
-    variant_legal = current.legal_moves(agent_side)
-    scored = score_moves(current, agent_side, oracle_depth, agent_side)
-    best_uci = scored[0][0].to_uci() if scored else None
-    raw = agent.generate(build_rule_variant_prompt(task, board=current), task)
-    generated_uci = _extract_uci(raw)
-    move = _move_by_uci(variant_legal, generated_uci)
-    standard_move = _move_by_uci(
-        VariantBoard(current.board, []).legal_moves(agent_side), generated_uci
-    )
-    legal = move is not None
-    first_optimal = bool(move and best_uci and move.to_uci() == best_uci)
-    if not legal:
-        avg_value_loss = VALUE_LOSS_CAP
-        reasons.append(
-            "variant_violation" if standard_move is not None
-            else "invalid_or_illegal_uci"
-        )
-    else:
-        best_value = scored[0][1]
-        agent_value = next(
-            value for candidate, value in scored
-            if candidate.to_uci() == move.to_uci()
-        )
-        avg_value_loss = max(0.0, best_value - agent_value)
-        reasons.append("optimal_move" if first_optimal else "legal_suboptimal_move")
-    steps.append({
-        "step_idx": 0,
-        "actor": "agent",
-        "raw_output": (raw or "")[:200],
-        "uci": generated_uci or "PARSE_FAIL",
-        "is_legal": legal,
-        "is_optimal": first_optimal,
-        "optimal_uci": best_uci or "",
-        "value_loss": avg_value_loss,
-    })
-    legality_rate = float(legal)
-    optimal_rate = float(first_optimal)
-    answer_correct = first_optimal
-    value_quality = max(0.0, 1.0 - avg_value_loss / VALUE_LOSS_CAP)
-    score = 0.7 * value_quality + 0.2 * optimal_rate + 0.1 * legality_rate
-
-    difficulty = "unknown"
-    for tag in task.get("tags", []):
-        if tag and tag.startswith("difficulty:"):
-            difficulty = tag.split(":")[1]
-
+    """The C2 protocol accepts every legal maximum-utility depth-three move."""
+    if (search_depth is not None and search_depth != 3) or oracle_depth != 3:
+        raise ValueError("C2 reasoning protocol requires search depth 3")
+    start = start_task_metrics(agent)
+    steps, reasons = [], []
+    status, error, raw, best_uci = "error", None, "", None
+    success = legal = first_optimal = value_loss = quality = score = None
+    stage = "agent_reset"
+    try:
+        reset_agent(agent)
+        stage = "judge"
+        current = VariantBoard(task["board"], [Rule.from_dict(r) for r in task.get("rules", [])])
+        legal_moves = current.legal_moves(agent_side)
+        scored = score_moves(current, agent_side, 3, agent_side)
+        best_value = (max if agent_side > 0 else min)((value for _, value in scored), default=None)
+        best_moves = sorted(move.to_uci() for move, value in scored
+                            if best_value is not None and abs(value - best_value) <= 1e-6)
+        best_uci = best_moves[0] if best_moves else None
+        stage = "model"
+        raw = agent.generate(build_rule_variant_prompt(task, board=current), task)
+        stage = "judge"
+        generated_uci = _extract_uci(raw)
+        move = _move_by_uci(legal_moves, generated_uci)
+        legal = move is not None
+        if legal:
+            if best_value is None:
+                raise ValueError("oracle returned no values for a position with legal moves")
+            value = next(value for candidate, value in scored if candidate.to_uci() == generated_uci)
+            value_loss = max(0.0, agent_side * (best_value - value))
+            first_optimal = abs(value - best_value) <= 1e-6
+            reasons.append("optimal_move" if first_optimal else "legal_suboptimal_move")
+            status = "ok"
+        else:
+            standard_move = _move_by_uci(VariantBoard(current.board, []).legal_moves(agent_side), generated_uci)
+            value_loss = VALUE_LOSS_CAP
+            first_optimal = False
+            status = "invalid"
+            reasons.append("variant_violation" if standard_move else "invalid_or_illegal_uci")
+        success = first_optimal
+        quality = max(0.0, 1.0 - value_loss / VALUE_LOSS_CAP)
+        score = 0.7 * quality + 0.2 * first_optimal + 0.1 * legal
+        steps.append({
+            "step_idx": 0, "actor": "agent", "raw_output": raw, "uci": generated_uci or "PARSE_FAIL",
+            "is_legal": legal, "is_optimal": first_optimal, "optimal_uci": best_uci,
+            "optimal_moves_uci": best_moves, "value_loss": value_loss,
+        })
+    except Exception as exc:
+        malformed = stage == "model" and isinstance(exc, StrictJSONObjectError)
+        status = "invalid" if malformed else "error"
+        success = first_optimal = legal = False if malformed else None
+        quality = score = 0.0 if malformed else None
+        value_loss = VALUE_LOSS_CAP if malformed else None
+        if malformed:
+            raw = exc.raw_output or ""
+            stage = "format"
+        error = error_detail(stage, exc)
+        reasons.append(stage + "_error")
+        if raw or malformed:
+            steps.append({"step_idx": 0, "actor": "agent", "raw_output": raw, "is_legal": legal,
+                          "is_optimal": first_optimal, "uci": "PARSE_FAIL", "value_loss": value_loss})
+    difficulty = task.get("difficulty") or next(
+        (tag.split(":", 1)[1] for tag in task.get("tags", []) if tag.startswith("difficulty:")), "unknown")
     return RuleVariantResult(
-        id=task["id"],
-        scenario_id=task.get("scenario_id", task["id"]),
-        ruleset=task["ruleset"],
-        difficulty=task.get("difficulty", difficulty),
-        success=first_optimal,
-        legality_rate=round(legality_rate, 3),
-        first_move_optimal=first_optimal,
-        optimal_uci=best_uci,
-        answer_correct=answer_correct,
-        optimal_rate=round(optimal_rate, 3),
-        avg_value_loss=round(avg_value_loss, 3),
-        value_quality_score=round(value_quality, 3),
-        score=round(score, 3),
-        steps=steps,
-        reasons=reasons,
+        id=task["id"], scenario_id=task.get("scenario_id", task["id"]), ruleset=task["ruleset"],
+        difficulty=difficulty, success=success, legality_rate=float(legal) if legal is not None else None,
+        first_move_optimal=first_optimal, optimal_uci=best_uci, answer_correct=success,
+        optimal_rate=float(first_optimal) if first_optimal is not None else None,
+        avg_value_loss=rounded(value_loss, 3), value_quality_score=rounded(quality, 3), score=rounded(score, 3),
+        steps=steps, reasons=reasons, status=status, goal_achieved=success, error=error,
+        metrics=finish_task_metrics(agent, start), termination_reason=reasons[-1],
     )
 
 
 def evaluate_rule_variant_tasks(
-    tasks: list[dict],
-    agent: Agent,
-    *,
-    max_steps: int = 12,
-    search_depth: int | None = None,
-    opponent_depth: int = 2,
-    oracle_depth: int = 3,
+    tasks: list[dict], agent: Agent, *, max_steps: int = 12, search_depth: int | None = None,
+    opponent_depth: int = 2, oracle_depth: int = 3,
+    on_result: Callable[[RuleVariantResult], None] | None = None,
 ) -> list[RuleVariantResult]:
     results = []
-    for i, task in enumerate(tasks):
-        r = evaluate_rule_variant_task(
-            task, agent, max_steps=max_steps, search_depth=search_depth,
-            opponent_depth=opponent_depth, oracle_depth=oracle_depth,
-        )
-        results.append(r)
-        print(
-            f"  [{i+1:2d}/{len(tasks)}] {r.id:28s} score={r.score:.2f} "
-            f"success={r.success} legal={r.legality_rate:.0%} "
-            f"opt={r.optimal_rate:.0%} value_loss={r.avg_value_loss:.1f} "
-            f"reason={r.reasons[-1][:30]}"
-        )
+    for task in tasks:
+        result = evaluate_rule_variant_task(task, agent, max_steps=max_steps, search_depth=search_depth,
+                                            opponent_depth=opponent_depth, oracle_depth=oracle_depth)
+        results.append(result)
+        if on_result is not None:
+            on_result(result)
     return results
 
 
 def summarize_rule_variants(results: list[RuleVariantResult]) -> dict[str, Any]:
-    n = len(results)
-    if n == 0:
-        return {"total": 0}
-    step_regrets = [
-        float(step["value_loss"])
-        for result in results for step in result.steps
-        if step.get("actor") == "agent" and "value_loss" in step
-    ]
-    mean_regret = statistics.mean(step_regrets) if step_regrets else VALUE_LOSS_CAP
-    paired = _paired_rule_effects(results)
+    valid = [r for r in results if r.status != "error"]
+    regrets = [step["value_loss"] for r in valid for step in r.steps
+               if step.get("actor") == "agent" and step.get("value_loss") is not None]
     return {
-        "total": n,
-        "unique_scenarios": len({r.scenario_id for r in results}),
-        "primary_metric": "mean_utility_regret",
-        "utility_regret_unit": "shallow variant-search utility (not centipawns or engine truth)",
-        "difficulty_policy": "dataset labels are descriptive only; no difficulty leaderboard is reported",
-        "paired_rule_effects": paired,
-        "avg_score": round(statistics.mean(r.score for r in results), 2),
-        "success_rate": statistics.mean(float(r.success) for r in results),
-        "answer_correct_rate": statistics.mean(
-            float(r.answer_correct) for r in results),
-        "optimal_rate": statistics.mean(r.optimal_rate for r in results),
-        "legality_rate": statistics.mean(r.legality_rate for r in results),
-        "mean_utility_regret": round(mean_regret, 3),
-        "median_utility_regret": round(statistics.median(step_regrets), 3) if step_regrets else 0.0,
+        **status_counts(results), "unique_scenarios": len({r.scenario_id for r in results}),
+        "primary_metric": "success_rate",
+        "utility_regret_unit": "fixed depth-three variant-search utility (not centipawns or global optimum)",
+        "difficulty_policy": "dataset labels are descriptive only",
+        "paired_rule_effects": _paired_rule_effects(valid),
+        "avg_score": mean_or_none((r.score for r in valid), 2),
+        "success_rate": mean_or_none(r.success for r in valid),
+        "answer_correct_rate": mean_or_none(r.answer_correct for r in valid),
+        "optimal_rate": mean_or_none(r.optimal_rate for r in valid),
+        "legality_rate": mean_or_none(r.legality_rate for r in valid),
+        "mean_utility_regret": mean_or_none(regrets, 3),
+        "median_utility_regret": round(statistics.median(regrets), 3) if regrets else None,
         "utility_regret_cap": VALUE_LOSS_CAP,
-        "avg_value_loss": round(statistics.mean(r.avg_value_loss for r in results), 3),  # legacy per-task mean
-        "avg_value_quality_score": round(statistics.mean(r.value_quality_score for r in results), 3),
+        "avg_value_loss": mean_or_none((r.avg_value_loss for r in valid), 3),
+        "avg_value_quality_score": mean_or_none((r.value_quality_score for r in valid), 3),
+        "metrics": summarize_metrics(results),
     }
 
 
 def _paired_rule_effects(results: list[RuleVariantResult]) -> dict[str, Any]:
-    """Compare each temporary rule with its same-scenario standard control."""
-    by_scenario: dict[str, dict[str, RuleVariantResult]] = {}
+    grouped = {}
     for result in results:
-        by_scenario.setdefault(result.scenario_id, {})[result.ruleset] = result
-    effects: dict[str, dict[str, Any]] = {}
-    rulesets = sorted({r.ruleset for r in results} - {"standard"})
-    for ruleset in rulesets:
-        pairs = [
-            values for values in by_scenario.values()
-            if "standard" in values and ruleset in values
-        ]
-        if not pairs:
-            continue
-        score_delta = [
-            values[ruleset].score - values["standard"].score for values in pairs
-        ]
-        regret_delta = [
-            values[ruleset].avg_value_loss - values["standard"].avg_value_loss
-            for values in pairs
-        ]
-        effects[ruleset] = {
-            "paired_total": len(pairs),
-            "rule_minus_standard_score": round(statistics.mean(score_delta), 3),
-            "rule_minus_standard_utility_regret": round(statistics.mean(regret_delta), 3),
-        }
+        if result.status != "error":
+            grouped.setdefault(result.scenario_id, {})[result.ruleset] = result
+    effects = {}
+    for ruleset in sorted({r.ruleset for r in results} - {"standard"}):
+        pairs = [values for values in grouped.values() if "standard" in values and ruleset in values]
+        if pairs:
+            effects[ruleset] = {
+                "paired_total": len(pairs),
+                "rule_minus_standard_success": mean_or_none(float(p[ruleset].success) - float(p["standard"].success) for p in pairs),
+                "rule_minus_standard_score": mean_or_none((p[ruleset].score - p["standard"].score for p in pairs), 3),
+                "rule_minus_standard_utility_regret": mean_or_none((p[ruleset].avg_value_loss - p["standard"].avg_value_loss for p in pairs), 3),
+            }
     return effects
 
 
 def write_rule_variants_run(
-    results: list[RuleVariantResult],
-    output_dir: str | Path = "runs",
-    run_name: str | None = None,
+    results: list[RuleVariantResult], output_dir: str | Path = "runs", run_name: str | None = None,
+    *, write_predictions: bool = True,
 ) -> Path:
-    root = Path(output_dir)
-    name = run_name or f"xiangqi-rule-variants-{strftime('%Y%m%d-%H%M%S')}"
-    run_dir = root / name
+    run_dir = Path(output_dir) / (run_name or f"xiangqi-rule-variants-{strftime('%Y%m%d-%H%M%S')}")
     run_dir.mkdir(parents=True, exist_ok=True)
-
-    with (run_dir / "predictions.jsonl").open("w", encoding="utf-8") as f:
-        for r in results:
-            f.write(json.dumps(asdict(r), ensure_ascii=False) + "\n")
-
-    by_group: dict[str, list[RuleVariantResult]] = {}
-    for r in results:
-        by_group.setdefault(r.ruleset, []).append(r)
-
-    # Compute paired rule-vs-standard effects before splitting by ruleset.
+    if write_predictions:
+        with (run_dir / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+            for result in results:
+                handle.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
     summary = summarize_rule_variants(results)
-    summary["by_ruleset"] = {
-        group: summarize_rule_variants(rs) for group, rs in sorted(by_group.items())
-    }
-    # Retain the former top-level groups for older report readers.
+    summary["by_ruleset"] = {ruleset: summarize_rule_variants([r for r in results if r.ruleset == ruleset])
+                              for ruleset in sorted({r.ruleset for r in results})}
     summary.update(summary["by_ruleset"])
-    (run_dir / "results.json").write_text(
-        json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-    lines = ["Xiangqi Rule Variants Evaluation", f"Total: {len(results)}", ""]
-    for group in (
-        "standard",
-        "horse-no-leg-block",
-        "chariot-no-center",
-        "soldier-free-retreat",
-    ):
-        if group in summary["by_ruleset"]:
-            s = summary["by_ruleset"][group]
-            lines.append(
-                f"  {group:12s}: score={s['avg_score']:.2f} "
-                f"success={s['success_rate']:.0%} "
-                f"opt={s['optimal_rate']:.0%} "
-                f"legal={s['legality_rate']:.0%} "
-                f"utility_regret={s['mean_utility_regret']:.1f}"
-            )
+    (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    lines = ["Xiangqi Rule Variants Evaluation", f"Total: {summary['total']} Missing: {summary['missing']}"]
+    for group, values in summary["by_ruleset"].items():
+        lines.append(f"{group}: success={display(values['success_rate'], '.1%')} utility_regret={display(values['mean_utility_regret'])}")
     (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return run_dir

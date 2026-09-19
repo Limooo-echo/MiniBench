@@ -113,9 +113,13 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--tail-plies", type=int, default=30)
     parser.add_argument("--max-games", type=int)
+    parser.add_argument("--include-subdir", action="append", default=[], help="Source-relative subtree; may repeat")
     args = parser.parse_args()
 
     files = sorted(args.source.rglob("*.pgn"))
+    if args.include_subdir:
+        prefixes = [prefix.replace("\\", "/").strip("/") + "/" for prefix in args.include_subdir]
+        files = [path for path in files if any(path.relative_to(args.source).as_posix().startswith(prefix) for prefix in prefixes)]
     if args.max_games is not None:
         files = files[: args.max_games]
     failed: list[dict[str, str]] = []

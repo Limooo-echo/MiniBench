@@ -14,6 +14,7 @@ parser = argparse.ArgumentParser(description="Audit Xiangqi release provenance a
 parser.add_argument("--manifest", type=Path, default=Path("data/xiangqi/provenance.json"))
 parser.add_argument("--output", type=Path)
 parser.add_argument("--strict", action="store_true", help="Fail when provenance is unresolved or same-family FENs repeat.")
+parser.add_argument("--technical", action="store_true", help="Require full independent validation and matching dataset hashes")
 args = parser.parse_args()
 report = audit_xiangqi_release(args.manifest)
 serialized = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
@@ -22,3 +23,6 @@ if args.output:
 print(serialized, end="")
 if args.strict and not report["release_ready"]:
     raise SystemExit("release audit failed; fill provenance manifest or resolve duplicate positions")
+
+if args.technical and not report["technical_ready"]:
+    raise SystemExit("technical release gate failed; regenerate independent validation")

@@ -1,0 +1,44 @@
+{
+  "agent": {
+    "max_tokens": 512,
+    "name": "direct"
+  },
+  "evaluation": {
+    "history_mode": "paired",
+    "pikafish_binary_sha256": "0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3",
+    "pikafish_depth": 16,
+    "pikafish_nnue_sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e",
+    "pikafish_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe",
+    "pikafish_timeout": 60.0
+  },
+  "provider": {
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "extra_body": {
+      "enable_thinking": false
+    },
+    "json_mode": true,
+    "max_retries": 3,
+    "model": "qwen3.8-max",
+    "name": "qwen"
+  },
+  "run": {
+    "on_existing": "error",
+    "output_dir": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/output/acceptance/xiangqi-smoke-prepared",
+    "run_name": "h2"
+  },
+  "task": {
+    "family": "xiangqi-history",
+    "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/history/tasks.jsonl",
+    "prompt_version": "xiangqi-reasoning-v2",
+    "sampling": {
+      "count": 30,
+      "enabled": false,
+      "seed": 42,
+      "strategy": "stratified"
+    },
+    "selection": {
+      "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/output/acceptance/xiangqi-smoke-prepared/samples/h2.jsonl",
+      "sha256": "da24c3a4b66fffccd307f4775cdca159b868f8b4cb23b2a649299052d6f4e94e"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "protocol_version": "xiangqi-reasoning-v2",
+  "kind": "scripted_offline_acceptance",
+  "uses_language_model": false,
+  "created_at": "2026-09-19T05:01:59.436688+00:00",
+  "families": [
+    "d3",
+    "h2",
+    "m2",
+    "c2"
+  ],
+  "scope": "one selected position per family; not full-dataset validation or model performance",
+  "engine": {
+    "executable": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe",
+    "binary_sha256": "0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3",
+    "binary_size_bytes": 6944256,
+    "options": {
+      "Threads": 1,
+      "Hash": 128,
+      "clear_hash_per_analysis": true
+    },
+    "eval_file": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/tmp/resources/pikafish/pikafish.nnue",
+    "eval_file_sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e"
+  },
+  "depths": {
+    "d3_m2": 8,
+    "h2_opponent": 16,
+    "h2_scripted_agent": 20
+  },
+  "sources": {
+    "d3": {
+      "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/mate_in_one/tasks.jsonl",
+      "sha256": "f4edbfb1a4eadf88e1ee4bfc0e0d6e800bd7bcf211dc022881282e86646e8f1e",
+      "selected_id": "xiangqi-mate-in-one-0001"
+    },
+    "h2": {
+      "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/history/tasks.jsonl",
+      "sha256": "4eec4363812d04c8e9318764861d7c049d13ed241f1d9cad491ba4bca1e16026",
+      "selected_id": "xiangqi-history-0001"
+    },
+    "m2": {
+      "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/multimodal/tasks.jsonl",
+      "sha256": "0efe16c4e0ca4e3a6a71642cbde392e926785ed274e5a7f5712b90b3736c405e",
+      "selected_id": "xiangqi-multimodal-m2-0001"
+    },
+    "c2": {
+      "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/rule_variants/tasks.jsonl",
+      "sha256": "dd1cc29e88b0faf763968c5decd2d11d940e89cb32088ccae03fee209ac06924",
+      "selected_id": "xiangqi-rule-variants-c2-r1-0002-7c6012f2cc"
+    }
+  }
+}

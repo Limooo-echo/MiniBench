@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from .rules import Rule, piece_matches, piece_of_id
 
@@ -36,8 +36,9 @@ def _crossed_river(pid: int, r: int) -> bool:
     return r <= 4 if pid > 0 else r >= 5
 
 
-def _in_palace(r: int, c: int) -> bool:
-    return 3 <= c <= 5 and (7 <= r <= 9 or 0 <= r <= 2)
+def _in_palace(r: int, c: int, side: int) -> bool:
+    """A piece is confined to its own palace, never the opponent's palace."""
+    return 3 <= c <= 5 and (7 <= r <= 9 if side > 0 else 0 <= r <= 2)
 
 
 class VariantBoard:
@@ -80,7 +81,7 @@ class VariantBoard:
         out = []
         for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
             nr, nc = r + dr, c + dc
-            if self.in_board(nr, nc) and _in_palace(nr, nc):
+            if self.in_board(nr, nc) and _in_palace(nr, nc, self.board[r][c]):
                 out.append((nr, nc))
         return out
 
@@ -88,7 +89,7 @@ class VariantBoard:
         out = []
         for dr, dc in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
             nr, nc = r + dr, c + dc
-            if self.in_board(nr, nc) and _in_palace(nr, nc):
+            if self.in_board(nr, nc) and _in_palace(nr, nc, self.board[r][c]):
                 out.append((nr, nc))
         return out
 
@@ -189,8 +190,9 @@ class VariantBoard:
                 nr, nc = r, c + dc
                 if self.in_board(nr, nc):
                     out.append((nr, nc))
-        if free:
-            # 变体: 兵可后退
+        if free and crossed:
+            # Retreat is available only while on the far side of the river.
+            # Retreating back across it does not grant further backward moves.
             nr, nc = r - forward, c
             if self.in_board(nr, nc):
                 out.append((nr, nc))
@@ -267,8 +269,15 @@ class VariantBoard:
         return out
 
     def legal_moves(self, side: int) -> list[Move]:
-        """变体规则下的所有合法走法 (含不能送将检查)."""
-        moves: list[Move] = []
+        """All legal moves, including the self-check filter."""
+        return list(self._iter_legal_moves(side))
+
+    def _iter_legal_moves(self, side: int) -> Iterator[Move]:
+        """Yield moves so terminal tests can stop at the first legal reply."""
+        if side not in (-1, 1):
+            raise ValueError("side must be 1 (red) or -1 (black)")
+        if self.find_general(side) is None or self.find_general(-side) is None:
+            return
         for r in range(ROWS):
             for c in range(COLS):
                 pid = self.board[r][c]
@@ -282,8 +291,7 @@ class VariantBoard:
                         continue  # 不能吃己方
                     mv = Move(r, c, nr, nc)
                     if self._not_self_check(mv):
-                        moves.append(mv)
-        return moves
+                        yield mv
 
     def _not_self_check(self, mv: Move) -> bool:
         """走 mv 后己方将不会被吃 (含将帅照面)."""
@@ -330,11 +338,28 @@ class VariantBoard:
         self.board[mv.fr][mv.fc] = 0
 
     def has_legal_moves(self, side: int) -> bool:
-        return len(self.legal_moves(side)) > 0
+        return next(self._iter_legal_moves(side), None) is not None
 
     def is_checkmate(self, side: int) -> bool:
         """side 方被将死."""
-        return self._is_in_check(side) and not self.has_legal_moves(side)
+        return self.terminal_status(side) == "checkmate"
 
     def is_stalemate(self, side: int) -> bool:
-        return not self._is_in_check(side) and not self.has_legal_moves(side)
+        return self.terminal_status(side) == "stalemate"
+
+    def terminal_status(self, side: int) -> str:
+        """Classify the position with ``side`` to move.
+
+        Both checkmate and stalemate lose under standard Xiangqi rules. They
+        remain distinct so strict-checkmate tasks can reject a stalemate without
+        incorrectly making it a draw in the game/search rules.
+        """
+        if side not in (-1, 1):
+            raise ValueError("side must be 1 (red) or -1 (black)")
+        if self.find_general(side) is None:
+            return "general_captured"
+        if self.find_general(-side) is None:
+            return "opponent_general_captured"
+        if self.has_legal_moves(side):
+            return "ongoing"
+        return "checkmate" if self._is_in_check(side) else "stalemate"

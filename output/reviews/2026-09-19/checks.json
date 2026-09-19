@@ -1,0 +1,428 @@
+{
+  "reviewed_commit": "eab452b069b40a1cfaec39fe2b3895d7503484f2",
+  "manifest_error": "ValueError: zebra-direct: dataset sha256 mismatch; do not rescore against changed gold data",
+  "stale_manifest_entries": [
+    {
+      "experiment": "zebra-direct",
+      "declared": "a0dcc6d59f448868f6df373dcc12704d01832a7465ba567290d495c02af34e93",
+      "actual": "7163d88b25c0b9a86c94ef586b46b623a05da9f80167a86ab02c8a4f77f0b9c1"
+    },
+    {
+      "experiment": "zebra-rule",
+      "declared": "1f4968de862d56da3c15dfac72842b5adfa6adf97094ac1c4bf4f8175ee1d8cf",
+      "actual": "827dec7ec7e86f89bd7fd635636be1e541f0806256429b19371f9a2229b57794"
+    },
+    {
+      "experiment": "zebra-history",
+      "declared": "306dedad56f6bd0322537fd53ada94041c5e4ebe5797c2e37599eb721bf6900c",
+      "actual": "bc0984980a9d8f5d3f09e17ab95d5878afe06074fb4c53c806fadfe9d62dbb4f"
+    },
+    {
+      "experiment": "one-stroke-direct",
+      "declared": "c586d272814a0fdb8010ce301da375a909ff414bbfb23f6cfbdd647f0e7703e8",
+      "actual": "0556189988526c93f062ee93307d37cf8c7d4676df0ff14195f98cb555fa3786"
+    },
+    {
+      "experiment": "one-stroke-history",
+      "declared": "a019a0d69deaebac726d5dd76308c0c3b0c48954d0156aa2b9cb00cba7109229",
+      "actual": "3dda677dc64d7217f4eda9481caa5910136deb7f21d1447851819fb363dfcf25"
+    },
+    {
+      "experiment": "xiangqi-direct",
+      "declared": "b5c3344d87e1795e76f5970d323e0140121593c51d9569f17e6103cd7e8fe518",
+      "actual": "79d742b912003d24093095010ee4228e68bfd8436b9c789bb8299b2349f1514e"
+    },
+    {
+      "experiment": "xiangqi-rule",
+      "declared": "4e9e0dd40323197e316c93a1b7f746bab7dd1dbc4750542e64c62a51be7452c2",
+      "actual": "42d388367d132667c3ee63792932993a084cd958b48a166700d9641eff4d49de"
+    },
+    {
+      "experiment": "xiangqi-history",
+      "declared": "67176df8b2ebb11cb475865117dc4fc8b5c626d9413cd6ef3cfb707c7676ff36",
+      "actual": "4eec4363812d04c8e9318764861d7c049d13ed241f1d9cad491ba4bca1e16026"
+    },
+    {
+      "experiment": "xiangqi-visual",
+      "declared": "c8f817068abdc292428c8b461cbbd074f71bea796ea9e434ef99283e3111155d",
+      "actual": "5d011b4a768c92f6027bcc5ec4dc5e924a7ddd87899fa99e33b1336065b9b558"
+    }
+  ],
+  "direct_timeout": {
+    "raw_output": "EMPTY",
+    "goal_achieved": false,
+    "scored": {
+      "y": 0.0,
+      "p": 0.0,
+      "status": "ok",
+      "reasons": [],
+      "evidence": {
+        "method": "binary_original_goal",
+        "outcome_field": "goal_achieved",
+        "family": "xiangqi_mate_in_one",
+        "dimension": "D",
+        "mode": "single"
+      },
+      "diagnostics": {
+        "is_legal": false,
+        "is_optimal": false,
+        "cp_loss": 0.0,
+        "legacy_normalized_score": 0.0
+      },
+      "metrics": {}
+    }
+  },
+  "history_timeout": {
+    "reasons": [
+      "llm_error:synthetic provider timeout"
+    ],
+    "goal_achieved": false,
+    "scored": {
+      "y": 0.0,
+      "p": 0.0,
+      "status": "ok",
+      "reasons": [],
+      "evidence": {
+        "method": "binary_original_goal",
+        "outcome_field": "goal_achieved",
+        "family": "xiangqi_history",
+        "dimension": "H",
+        "mode": "move-history-only"
+      },
+      "diagnostics": {
+        "reasons": [
+          "llm_error:synthetic provider timeout"
+        ],
+        "legality_rate": 0.0,
+        "optimal_rate": 0.0,
+        "avg_cp_loss": 999999.0,
+        "legacy_normalized_score": 0.0
+      },
+      "metrics": {}
+    }
+  },
+  "history_engine_error": {
+    "y": 0.0,
+    "p": 0.0,
+    "status": "ok",
+    "reasons": [],
+    "evidence": {
+      "method": "binary_original_goal",
+      "outcome_field": "goal_achieved",
+      "family": "xiangqi_history",
+      "dimension": "H",
+      "mode": "move-history-only"
+    },
+    "diagnostics": {
+      "reasons": [
+        "pikafish_error"
+      ]
+    },
+    "metrics": {}
+  },
+  "multimodal_retry": [
+    {
+      "mode": "text",
+      "calls": 1,
+      "success": false,
+      "reasons": [
+        "invalid_or_illegal_uci"
+      ]
+    },
+    {
+      "mode": "chinese-piece-image",
+      "calls": 2,
+      "success": true,
+      "reasons": [
+        "agent_checkmated_opponent"
+      ]
+    }
+  ],
+  "c2_outside_palace": {
+    "records": 165,
+    "total": 250,
+    "unique_fens": 45,
+    "ids": [
+      "xiangqi-rule-variants-c2-0001",
+      "xiangqi-rule-variants-c2-0002",
+      "xiangqi-rule-variants-c2-0003",
+      "xiangqi-rule-variants-c2-0004",
+      "xiangqi-rule-variants-c2-0005",
+      "xiangqi-rule-variants-c2-0006",
+      "xiangqi-rule-variants-c2-0007",
+      "xiangqi-rule-variants-c2-0008",
+      "xiangqi-rule-variants-c2-0009",
+      "xiangqi-rule-variants-c2-0010",
+      "xiangqi-rule-variants-c2-0011",
+      "xiangqi-rule-variants-c2-0012",
+      "xiangqi-rule-variants-c2-0013",
+      "xiangqi-rule-variants-c2-0014",
+      "xiangqi-rule-variants-c2-0015",
+      "xiangqi-rule-variants-c2-0016",
+      "xiangqi-rule-variants-c2-0017",
+      "xiangqi-rule-variants-c2-0018",
+      "xiangqi-rule-variants-c2-0019",
+      "xiangqi-rule-variants-c2-0020",
+      "xiangqi-rule-variants-c2-0021",
+      "xiangqi-rule-variants-c2-0022",
+      "xiangqi-rule-variants-c2-0023",
+      "xiangqi-rule-variants-c2-0024",
+      "xiangqi-rule-variants-c2-0025",
+      "xiangqi-rule-variants-c2-0026",
+      "xiangqi-rule-variants-c2-0027",
+      "xiangqi-rule-variants-c2-0028",
+      "xiangqi-rule-variants-c2-0029",
+      "xiangqi-rule-variants-c2-0030",
+      "xiangqi-rule-variants-c2-0031",
+      "xiangqi-rule-variants-c2-0032",
+      "xiangqi-rule-variants-c2-0033",
+      "xiangqi-rule-variants-c2-0034",
+      "xiangqi-rule-variants-c2-0035",
+      "xiangqi-rule-variants-c2-0036",
+      "xiangqi-rule-variants-c2-0037",
+      "xiangqi-rule-variants-c2-0038",
+      "xiangqi-rule-variants-c2-0039",
+      "xiangqi-rule-variants-c2-0040",
+      "xiangqi-rule-variants-c2-0041",
+      "xiangqi-rule-variants-c2-0042",
+      "xiangqi-rule-variants-c2-0043",
+      "xiangqi-rule-variants-c2-0044",
+      "xiangqi-rule-variants-c2-0045",
+      "xiangqi-rule-variants-c2-0046",
+      "xiangqi-rule-variants-c2-0047",
+      "xiangqi-rule-variants-c2-0048",
+      "xiangqi-rule-variants-c2-0049",
+      "xiangqi-rule-variants-c2-0050",
+      "xiangqi-rule-variants-c2-0051",
+      "xiangqi-rule-variants-c2-0052",
+      "xiangqi-rule-variants-c2-0053",
+      "xiangqi-rule-variants-c2-0054",
+      "xiangqi-rule-variants-c2-0055",
+      "xiangqi-rule-variants-c2-0056",
+      "xiangqi-rule-variants-c2-0057",
+      "xiangqi-rule-variants-c2-0058",
+      "xiangqi-rule-variants-c2-0059",
+      "xiangqi-rule-variants-c2-0060",
+      "xiangqi-rule-variants-c2-0061",
+      "xiangqi-rule-variants-c2-0062",
+      "xiangqi-rule-variants-c2-0063",
+      "xiangqi-rule-variants-c2-0064",
+      "xiangqi-rule-variants-c2-0065",
+      "xiangqi-rule-variants-c2-0066",
+      "xiangqi-rule-variants-c2-0067",
+      "xiangqi-rule-variants-c2-0068",
+      "xiangqi-rule-variants-c2-0069",
+      "xiangqi-rule-variants-c2-0070",
+      "xiangqi-rule-variants-c2-0071",
+      "xiangqi-rule-variants-c2-0072",
+      "xiangqi-rule-variants-c2-0073",
+      "xiangqi-rule-variants-c2-0074",
+      "xiangqi-rule-variants-c2-0075",
+      "xiangqi-rule-variants-c2-0076",
+      "xiangqi-rule-variants-c2-0077",
+      "xiangqi-rule-variants-c2-0078",
+      "xiangqi-rule-variants-c2-0079",
+      "xiangqi-rule-variants-c2-0080",
+      "xiangqi-rule-variants-c2-0161",
+      "xiangqi-rule-variants-c2-0162",
+      "xiangqi-rule-variants-c2-0163",
+      "xiangqi-rule-variants-c2-0164",
+      "xiangqi-rule-variants-c2-0165",
+      "xiangqi-rule-variants-c2-0166",
+      "xiangqi-rule-variants-c2-0167",
+      "xiangqi-rule-variants-c2-0168",
+      "xiangqi-rule-variants-c2-0169",
+      "xiangqi-rule-variants-c2-0170",
+      "xiangqi-rule-variants-c2-0171",
+      "xiangqi-rule-variants-c2-0172",
+      "xiangqi-rule-variants-c2-0173",
+      "xiangqi-rule-variants-c2-0174",
+      "xiangqi-rule-variants-c2-0175",
+      "xiangqi-rule-variants-c2-0176",
+      "xiangqi-rule-variants-c2-0177",
+      "xiangqi-rule-variants-c2-0178",
+      "xiangqi-rule-variants-c2-0179",
+      "xiangqi-rule-variants-c2-0180",
+      "xiangqi-rule-variants-c2-0181",
+      "xiangqi-rule-variants-c2-0182",
+      "xiangqi-rule-variants-c2-0183",
+      "xiangqi-rule-variants-c2-0184",
+      "xiangqi-rule-variants-c2-0185",
+      "xiangqi-rule-variants-c2-0186",
+      "xiangqi-rule-variants-c2-0187",
+      "xiangqi-rule-variants-c2-0188",
+      "xiangqi-rule-variants-c2-0189",
+      "xiangqi-rule-variants-c2-0190",
+      "xiangqi-rule-variants-c2-0191",
+      "xiangqi-rule-variants-c2-0192",
+      "xiangqi-rule-variants-c2-0193",
+      "xiangqi-rule-variants-c2-0194",
+      "xiangqi-rule-variants-c2-0195",
+      "xiangqi-rule-variants-c2-0196",
+      "xiangqi-rule-variants-c2-0197",
+      "xiangqi-rule-variants-c2-0198",
+      "xiangqi-rule-variants-c2-0199",
+      "xiangqi-rule-variants-c2-0200",
+      "xiangqi-rule-variants-c2-0201",
+      "xiangqi-rule-variants-c2-0202",
+      "xiangqi-rule-variants-c2-0203",
+      "xiangqi-rule-variants-c2-0204",
+      "xiangqi-rule-variants-c2-0205",
+      "xiangqi-rule-variants-c2-0206",
+      "xiangqi-rule-variants-c2-0207",
+      "xiangqi-rule-variants-c2-0208",
+      "xiangqi-rule-variants-c2-0209",
+      "xiangqi-rule-variants-c2-0210",
+      "xiangqi-rule-variants-c2-0211",
+      "xiangqi-rule-variants-c2-0212",
+      "xiangqi-rule-variants-c2-0213",
+      "xiangqi-rule-variants-c2-0214",
+      "xiangqi-rule-variants-c2-0215",
+      "xiangqi-rule-variants-c2-0216",
+      "xiangqi-rule-variants-c2-0217",
+      "xiangqi-rule-variants-c2-0218",
+      "xiangqi-rule-variants-c2-0219",
+      "xiangqi-rule-variants-c2-0220",
+      "xiangqi-rule-variants-c2-0221",
+      "xiangqi-rule-variants-c2-0222",
+      "xiangqi-rule-variants-c2-0223",
+      "xiangqi-rule-variants-c2-0224",
+      "xiangqi-rule-variants-c2-0225",
+      "xiangqi-rule-variants-c2-0226",
+      "xiangqi-rule-variants-c2-0227",
+      "xiangqi-rule-variants-c2-0228",
+      "xiangqi-rule-variants-c2-0229",
+      "xiangqi-rule-variants-c2-0230",
+      "xiangqi-rule-variants-c2-0231",
+      "xiangqi-rule-variants-c2-0232",
+      "xiangqi-rule-variants-c2-0233",
+      "xiangqi-rule-variants-c2-0234",
+      "xiangqi-rule-variants-c2-0235",
+      "xiangqi-rule-variants-c2-0236",
+      "xiangqi-rule-variants-c2-0237",
+      "xiangqi-rule-variants-c2-0238",
+      "xiangqi-rule-variants-c2-0239",
+      "xiangqi-rule-variants-c2-0240",
+      "xiangqi-rule-variants-c2-0241",
+      "xiangqi-rule-variants-c2-0243",
+      "xiangqi-rule-variants-c2-0245",
+      "xiangqi-rule-variants-c2-0248",
+      "xiangqi-rule-variants-c2-0250"
+    ]
+  },
+  "c2_uncrossed_retreat_oracles": [
+    "xiangqi-rule-variants-c2-0164",
+    "xiangqi-rule-variants-c2-0168",
+    "xiangqi-rule-variants-c2-0172",
+    "xiangqi-rule-variants-c2-0176",
+    "xiangqi-rule-variants-c2-0180",
+    "xiangqi-rule-variants-c2-0184",
+    "xiangqi-rule-variants-c2-0188",
+    "xiangqi-rule-variants-c2-0192",
+    "xiangqi-rule-variants-c2-0196",
+    "xiangqi-rule-variants-c2-0200",
+    "xiangqi-rule-variants-c2-0204",
+    "xiangqi-rule-variants-c2-0208",
+    "xiangqi-rule-variants-c2-0212",
+    "xiangqi-rule-variants-c2-0216",
+    "xiangqi-rule-variants-c2-0220",
+    "xiangqi-rule-variants-c2-0224",
+    "xiangqi-rule-variants-c2-0228",
+    "xiangqi-rule-variants-c2-0232",
+    "xiangqi-rule-variants-c2-0236",
+    "xiangqi-rule-variants-c2-0240"
+  ],
+  "c2_retreat_results": {
+    "current": {
+      "legal": 1.0,
+      "success": true,
+      "score": 1.0
+    },
+    "in_memory_rule_fix": {
+      "legal": 0.0,
+      "success": false,
+      "score": 0.0
+    }
+  },
+  "h2_non_checkmate_reference_lines": [
+    {
+      "id": "xiangqi-history-0025",
+      "pv": [
+        "e9e8",
+        "f2e1",
+        "e2e1",
+        "f1f0",
+        "e8e7"
+      ],
+      "in_check": false,
+      "legal_replies": 0
+    },
+    {
+      "id": "xiangqi-history-0172",
+      "pv": [
+        "a7d7",
+        "f4f2",
+        "f1e1",
+        "f2e2",
+        "d9d8",
+        "e2e1",
+        "d7d2",
+        "e1d1",
+        "d2d1",
+        "d0e0",
+        "d1f1"
+      ],
+      "in_check": false,
+      "legal_replies": 0
+    },
+    {
+      "id": "xiangqi-history-0184",
+      "pv": [
+        "e2e1",
+        "e0f0",
+        "e1d1",
+        "c3b3",
+        "d1e1",
+        "b3c3",
+        "d3f4",
+        "c3f3",
+        "e9d9",
+        "f3f1",
+        "f4g2",
+        "f1g1",
+        "a6a5"
+      ],
+      "in_check": false,
+      "legal_replies": 0
+    }
+  ],
+  "cost_coverage": {
+    "profile": "p",
+    "architecture": "a",
+    "planned_records": 2,
+    "provenance": "verified",
+    "task_elapsed_seconds": {
+      "observed_total": null,
+      "observed_records": 0,
+      "coverage": 0.0
+    },
+    "model_elapsed_seconds": {
+      "observed_total": null,
+      "observed_records": 0,
+      "coverage": 0.0
+    },
+    "llm_calls": {
+      "observed_total": 100.0,
+      "observed_records": 2,
+      "coverage": 1.0
+    },
+    "total_tokens": {
+      "observed_total": 100,
+      "observed_records": 1,
+      "coverage": 0.5,
+      "calls_with_usage": 1,
+      "calls_with_usage_status": 1,
+      "call_coverage": 1.0
+    }
+  }
+}

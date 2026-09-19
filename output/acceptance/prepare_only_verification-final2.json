@@ -1,0 +1,39 @@
+{
+  "status": "passed",
+  "execution_mode": "prepare-only",
+  "language_model_calls": 0,
+  "engine_processes_started": 0,
+  "commands": [
+    "python scripts/run_xiangqi_smoke.py --prepare-only --output-dir output/acceptance/xiangqi-smoke-prepared-final2 --pikafish-path tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe",
+    "python scripts/xiangqi_web_test.py --suite-dir output/acceptance/xiangqi-smoke-prepared-final2 --output-dir output/acceptance/xiangqi-web-prepared-final2 --prepare-only"
+  ],
+  "checks": {
+    "d3.count": true,
+    "d3.full_source": true,
+    "d3.selection_hash": true,
+    "d3.no_resampling": true,
+    "d3.no_manual_answers": true,
+    "d3.fixed_depth": true,
+    "d3.fixed_engine": true,
+    "h2.count": true,
+    "h2.full_source": true,
+    "h2.selection_hash": true,
+    "h2.no_resampling": true,
+    "h2.no_manual_answers": true,
+    "h2.fixed_depth": true,
+    "h2.fixed_engine": true,
+    "c2.count": true,
+    "c2.full_source": true,
+    "c2.selection_hash": true,
+    "c2.no_resampling": true,
+    "c2.no_manual_answers": true,
+    "m2.count": true,
+    "m2.full_source": true,
+    "m2.selection_hash": true,
+    "m2.no_resampling": true,
+    "m2.no_manual_answers": true,
+    "m2.fixed_depth": true,
+    "m2.fixed_engine": true,
+    "final_h2_source": true
+  }
+}

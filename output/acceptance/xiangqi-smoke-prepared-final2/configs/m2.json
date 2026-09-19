@@ -1,0 +1,52 @@
+{
+  "agent": {
+    "max_tokens": 512,
+    "name": "direct"
+  },
+  "evaluation": {
+    "input_modes": [
+      "text",
+      "chinese-piece-image",
+      "latin-piece-image"
+    ],
+    "max_plies": 1,
+    "pikafish_binary_sha256": "0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3",
+    "pikafish_depth": 8,
+    "pikafish_nnue_sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e",
+    "pikafish_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe",
+    "pikafish_timeout": 60.0,
+    "step_dir": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/output/acceptance/xiangqi-smoke-prepared-final2/m2-input-images",
+    "verify_with_pikafish": true
+  },
+  "provider": {
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "extra_body": {
+      "enable_thinking": false
+    },
+    "json_mode": true,
+    "max_retries": 3,
+    "model": "qwen3.8-max",
+    "name": "qwen",
+    "timeout": 120
+  },
+  "run": {
+    "on_existing": "error",
+    "output_dir": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/output/acceptance/xiangqi-smoke-prepared-final2",
+    "run_name": "m2"
+  },
+  "task": {
+    "family": "xiangqi-multimodal",
+    "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/multimodal/tasks.jsonl",
+    "prompt_version": "xiangqi-reasoning-v2",
+    "sampling": {
+      "count": 30,
+      "enabled": false,
+      "seed": 42,
+      "strategy": "stratified"
+    },
+    "selection": {
+      "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/output/acceptance/xiangqi-smoke-prepared-final2/samples/m2.jsonl",
+      "sha256": "ddaa18fda992d4b80654bb9e0919c2e69186c3d06079606a4221846f480e4509"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 import hashlib
 import platform
@@ -8,6 +8,7 @@ import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, version
 import json
+import os
 from pathlib import Path
 from time import strftime
 from typing import Any, Callable
@@ -286,6 +287,8 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
 
     task_path = task_config.get("path") or spec.default_path
     tasks = spec.load_tasks(task_path)
+    if task_config.get("selection") is not None:
+        tasks = _select_frozen_xiangqi_tasks(tasks, task_config, Path(task_path), family)
     tasks = _select_tasks(tasks, task_config.get("task_ids") or [])
     sampling = task_config.get("sampling") or {}
     if sampling.get("enabled"):
@@ -331,6 +334,11 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
             run_config,
         )
 
+    if family.startswith("xiangqi-"):
+        return _run_checkpointed_xiangqi_experiment(
+            spec, tasks, config, Path(task_path), family, evaluation_config, run_config
+        )
+
     agent = make_agent_from_config(
         config["agent"],
         config.get("provider", {}),
@@ -353,21 +361,106 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
         run_config.get("output_dir", "runs"),
         run_config.get("run_name"),
     )
-    if family.startswith("xiangqi-"):
-        selected_tasks_path = _write_xiangqi_selected_tasks(
-            run_dir,
-            tasks=tasks,
-            data_path=Path(task_path),
-            family=family,
+    return run_dir, spec.summarize(results)
+
+
+def _select_frozen_xiangqi_tasks(
+    tasks: list[Any], task_config: dict[str, Any], data_path: Path, family: str
+) -> list[Any]:
+    """Use one hashed roster across architectures, without sampling it again."""
+    from minibench.datasets.xiangqi.schema import load_records
+
+    if not family.startswith("xiangqi-"):
+        raise ValueError("task.selection is currently supported only for Xiangqi")
+    selection = task_config["selection"]
+    if (not isinstance(selection, dict) or not isinstance(selection.get("path"), str)
+            or not isinstance(selection.get("sha256"), str)):
+        raise ValueError("task.selection needs path and sha256")
+    if (task_config.get("task_ids") or task_config.get("limit") is not None
+            or (task_config.get("sampling") or {}).get("enabled")):
+        raise ValueError("task.selection cannot be combined with task_ids, limit, or sampling")
+    path = Path(selection["path"])
+    if sha256_file(path) != selection["sha256"]:
+        raise ValueError("task.selection sha256 mismatch")
+    records = load_records(path, expected_family=family)
+    originals = {r["id"]: r for r in load_records(data_path, expected_family=family)}
+    if not records:
+        raise ValueError("task.selection must be nonempty")
+    for record in records:
+        if originals.get(record["id"]) != record:
+            raise ValueError(f"task.selection differs from the source dataset: {record['id']}")
+    indexed = {str(t["id"] if isinstance(t, dict) else t.id): t for t in tasks}
+    return [indexed[r["id"]] for r in records]
+
+
+def _run_checkpointed_xiangqi_experiment(
+    spec: TaskFamilySpec, tasks: list[Any], config: dict[str, Any], data_path: Path,
+    family: str, evaluation_config: dict[str, Any], run_config: dict[str, Any],
+) -> tuple[Path, dict[str, Any]]:
+    """Persist inputs before model setup and fsync each completed observation."""
+    if not tasks:
+        raise ValueError("Xiangqi evaluation requires at least one selected task")
+    name = run_config.get("run_name") or f"{family}-{strftime('%Y%m%d-%H%M%S')}"
+    run_dir = Path(run_config.get("output_dir", "runs")) / name
+    # Reusing a name must never truncate an earlier run, including an interrupted one.
+    run_dir.mkdir(parents=True, exist_ok=False)
+    predictions = run_dir / "predictions.jsonl"
+    predictions.touch(exist_ok=False)
+    completed: list[Any] = []
+    identities: set[tuple[str, str]] = set()
+    state = {
+        "version": 1, "family": family, "status": "preparing",
+        "selected_tasks": len(tasks), "completed_results": 0,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    def save_state(status: str, **extra: Any) -> None:
+        state.update(status=status, completed_results=len(completed),
+                     updated_at=datetime.now(timezone.utc).isoformat(), **extra)
+        atomic_write_json(run_dir / "run_state.json", state)
+
+    save_state("preparing")
+    try:
+        selected_path = _write_xiangqi_selected_tasks(
+            run_dir, tasks=tasks, data_path=data_path, family=family
         )
         _write_xiangqi_run_metadata(
-            run_dir,
-            config=config,
-            data_path=Path(task_path),
-            family=family,
-            selected_tasks_path=selected_tasks_path,
+            run_dir, config=config, data_path=data_path, family=family,
+            selected_tasks_path=selected_path,
         )
-    return run_dir, spec.summarize(results)
+        save_state("running")
+        agent = make_agent_from_config(
+            config["agent"], config.get("provider", {}), system_prompt=spec.system_prompt
+        )
+
+        def persist(result: Any) -> None:
+            record = asdict(result) if is_dataclass(result) else dict(result)
+            task_id = str(record.get("task_id", record.get("id", "")))
+            mode = str(record.get("input_mode") or record.get("history_mode") or "single")
+            identity = task_id, mode
+            if not task_id or identity in identities:
+                raise ValueError(f"Invalid or duplicate Xiangqi checkpoint result: {identity}")
+            line = json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
+            with predictions.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            identities.add(identity)
+            completed.append(result)
+            save_state("running", last_task_id=task_id, last_mode=mode)
+
+        results = _evaluate(spec, tasks, agent, family, evaluation_config, on_result=persist)
+        if len(results) != len(completed):
+            raise RuntimeError("Xiangqi evaluator returned results without checkpoint callbacks")
+        # Writers retain their native summaries while leaving the durable JSONL intact.
+        spec.write_run(results, run_dir.parent, run_dir.name, write_predictions=False)
+        summary = spec.summarize(results)
+        save_state("completed")
+        return run_dir, summary
+    except BaseException as exc:
+        save_state("interrupted" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "error",
+                   error_type=type(exc).__name__, error=str(exc))
+        raise
 
 
 def _sample_xiangqi_tasks(
@@ -433,6 +526,7 @@ def _write_xiangqi_run_metadata(
     ).encode("utf-8")
     metadata = {
         "family": family,
+        "protocol": {"version": "xiangqi-reasoning-v2", "evaluation": _plain_config(config.get("evaluation") or {})},
         "schema_version": SCHEMA_VERSION,
         "renderer_version": XIANGQI_RENDERER_VERSION,
         "data_file": data_path.as_posix(),
@@ -454,6 +548,23 @@ def _write_xiangqi_run_metadata(
         },
         "model_request": _model_request_metadata(config.get("provider", {})),
     }
+    package_root = Path(__file__).resolve().parents[1]
+    code_hashes = {path.relative_to(package_root).as_posix(): sha256_file(path)
+                   for path in sorted(package_root.rglob("*.py"))}
+    metadata["runtime"]["source_files_sha256"] = code_hashes
+    metadata["runtime"]["source_sha256"] = fingerprint_payload(code_hashes)
+    selection = (config.get("task") or {}).get("selection")
+    if selection is not None:
+        metadata["selection_file"] = str(selection["path"])
+        metadata["selection_sha256"] = selection["sha256"]
+    for provenance_path in (data_path.parent / "provenance.json", data_path.parent.parent / "provenance.json"):
+        if provenance_path.is_file():
+            provenance = read_json_object(provenance_path)
+            if provenance.get("release_id"):
+                metadata["release_id"] = provenance["release_id"]
+                metadata["protocol"]["release_id"] = provenance["release_id"]
+                metadata["dataset_provenance_sha256"] = sha256_file(provenance_path)
+                break
     evaluation = config.get("evaluation") or {}
     pikafish_path = evaluation.get("pikafish_path")
     uses_pikafish = family in {
@@ -625,7 +736,10 @@ def _evaluate(
         return spec.evaluate_tasks(
             tasks,
             agent,
+            on_result=on_result,
             pikafish_path=evaluation_config.get("pikafish_path"),
+            pikafish_binary_sha256=evaluation_config.get("pikafish_binary_sha256"),
+            pikafish_nnue_sha256=evaluation_config.get("pikafish_nnue_sha256"),
             pikafish_depth=evaluation_config.get("pikafish_depth", 8),
             pikafish_timeout=evaluation_config.get("pikafish_timeout", 60.0),
         )
@@ -633,6 +747,7 @@ def _evaluate(
         return spec.evaluate_tasks(
             tasks,
             agent,
+            on_result=on_result,
             max_steps=int(evaluation_config.get("max_plies", 12)),
             opponent_depth=int(evaluation_config.get("opponent_depth", 2)),
             oracle_depth=int(
@@ -645,9 +760,12 @@ def _evaluate(
         return spec.evaluate_tasks(
             tasks,
             agent,
+            on_result=on_result,
             history_mode=evaluation_config.get("history_mode", "move-history-only"),
             pikafish_path=evaluation_config.get("pikafish_path"),
-            pikafish_depth=int(evaluation_config.get("pikafish_depth", 8)),
+            pikafish_binary_sha256=evaluation_config.get("pikafish_binary_sha256"),
+            pikafish_nnue_sha256=evaluation_config.get("pikafish_nnue_sha256"),
+            pikafish_depth=int(evaluation_config.get("pikafish_depth", 16)),
             pikafish_timeout=float(evaluation_config.get("pikafish_timeout", 60.0)),
         )
     if family == "xiangqi-multimodal":
@@ -660,11 +778,14 @@ def _evaluate(
         return spec.evaluate_tasks(
             tasks,
             agent,
+            on_result=on_result,
             modes=tuple(modes),
             opponent_depth=int(evaluation_config.get("opponent_depth", 4)),
             optimal_depth=int(evaluation_config.get("optimal_depth", 3)),
             max_steps=int(evaluation_config.get("max_plies", 20)),
             pikafish_path=evaluation_config.get("pikafish_path"),
+            pikafish_binary_sha256=evaluation_config.get("pikafish_binary_sha256"),
+            pikafish_nnue_sha256=evaluation_config.get("pikafish_nnue_sha256"),
             pikafish_depth=int(evaluation_config.get("pikafish_depth", 8)),
             pikafish_timeout=float(
                 evaluation_config.get("pikafish_timeout", 60.0)

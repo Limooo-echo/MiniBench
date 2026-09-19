@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 import json
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +18,9 @@ REQUIRED_EXTERNAL_PROVENANCE = (
 def audit_xiangqi_release(manifest_path: str | Path) -> dict[str, Any]:
     manifest_file = Path(manifest_path)
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    repository_root = Path(__file__).resolve().parents[4]
     records_by_family = {
-        family: load_records(path, expected_family=family)
+        family: load_records(repository_root / path, expected_family=family)
         for family, path in FAMILY_PATHS.items()
     }
     fen_families: dict[str, set[str]] = defaultdict(set)
@@ -76,6 +78,40 @@ def audit_xiangqi_release(manifest_path: str | Path) -> dict[str, Any]:
         fen: families for fen, families in cross_family.items()
         if fen not in expected_cross_family
     }
+    gate_path = manifest_file.parent / "independent_validation.json"
+    gate_problems = []
+    if gate_path.is_file():
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+        if not (gate.get("release_ready") and gate.get("valid") and gate.get("full")):
+            gate_problems.append("independent_validation_not_full_or_failed")
+        if gate.get("release_id") != manifest.get("release_id"):
+            gate_problems.append("independent_validation_release_mismatch")
+        for family, path in FAMILY_PATHS.items():
+            digest = hashlib.sha256((repository_root / path).read_bytes()).hexdigest()
+            if gate.get("inputs", {}).get(family, {}).get("sha256") != digest:
+                gate_problems.append(f"independent_validation_dataset_hash_mismatch:{family}")
+        for relative, recorded in gate.get("frozen_samples", {}).get("inputs", {}).items():
+            sample_path = manifest_file.parent / "evaluation_samples" / relative
+            if not sample_path.is_file() or hashlib.sha256(sample_path.read_bytes()).hexdigest() != recorded.get("sha256"):
+                gate_problems.append(f"independent_validation_sample_hash_mismatch:{relative}")
+        if len(gate.get("frozen_samples", {}).get("inputs", {})) != 9:
+            gate_problems.append("independent_validation_frozen_inputs_incomplete")
+        source_inputs = gate.get("c2_sources", {}).get("inputs", {})
+        for relative, recorded in source_inputs.items():
+            source_path = manifest_file.parent / "sources" / "ccpd" / relative
+            if not source_path.is_file() or hashlib.sha256(source_path.read_bytes()).hexdigest() != recorded.get("sha256"):
+                gate_problems.append(f"independent_validation_source_hash_mismatch:{relative}")
+        if not gate.get("c2_sources", {}).get("valid") or not source_inputs:
+            gate_problems.append("independent_validation_source_inputs_incomplete")
+        for relative, digest in gate.get("validator_hashes", {}).items():
+            code_path = repository_root / relative
+            if not code_path.is_file() or hashlib.sha256(code_path.read_bytes()).hexdigest() != digest:
+                gate_problems.append(f"independent_validation_code_hash_mismatch:{relative}")
+        if not gate.get("validator_hashes"):
+            gate_problems.append("independent_validation_code_hash_missing")
+    else:
+        gate_problems.append("independent_validation_missing")
+    technical_ready = not gate_problems and unexpected_duplicate_total == 0 and not unexpected_cross_family
     return {
         "manifest": str(manifest_file),
         "per_family": per_family,
@@ -85,8 +121,10 @@ def audit_xiangqi_release(manifest_path: str | Path) -> dict[str, Any]:
         "unexpected_cross_family_overlap_count": len(unexpected_cross_family),
         "unexpected_cross_family_overlaps": unexpected_cross_family,
         "unresolved_external_provenance": unresolved,
-        "release_ready": not unresolved and unexpected_duplicate_total == 0
-        and not unexpected_cross_family,
+        "independent_validation_report": str(gate_path),
+        "independent_validation_problems": gate_problems,
+        "technical_ready": technical_ready,
+        "release_ready": not unresolved and technical_ready,
         "limitations": [
             "Exact-FEN auditing cannot prove absence of near-duplicate positions.",
             "Training-data contamination cannot be established from local files alone; document source and model-provider policy.",
