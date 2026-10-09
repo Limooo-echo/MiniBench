@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-import statistics
+from math import isfinite, nan
 
 import matplotlib
 
@@ -20,8 +20,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from minibench.assets.fonts import configure_matplotlib
-
-configure_matplotlib()
+from minibench.visualization.xiangqi_metrics import metric_mean, metric_value
 
 DIFFS = ("easy", "medium", "hard")
 DIFF_COLORS = {"easy": "#4C72B0", "medium": "#55A868", "hard": "#C44E52"}
@@ -30,14 +29,16 @@ DIFF_COLORS = {"easy": "#4C72B0", "medium": "#55A868", "hard": "#C44E52"}
 def visualize_mate_in_one_results(results, run_dir: str | Path) -> None:
     """Generate all mate-in-one visualizations in the run directory."""
     vis_dir = Path(run_dir) / "visualizations"
-    vis_dir.mkdir(exist_ok=True)
+    vis_dir.mkdir(parents=True, exist_ok=True)
 
-    _plot_per_task_scores(results, vis_dir)
-    _plot_difficulty_comparison(results, vis_dir)
-    _plot_score_distribution(results, vis_dir)
-    _plot_cp_loss_scatter(results, vis_dir)
-    _plot_radar_chart(results, vis_dir)
-    _plot_score_heatmap(results, vis_dir)
+    with matplotlib.rc_context():
+        configure_matplotlib()
+        _plot_per_task_scores(results, vis_dir)
+        _plot_difficulty_comparison(results, vis_dir)
+        _plot_score_distribution(results, vis_dir)
+        _plot_cp_loss_scatter(results, vis_dir)
+        _plot_radar_chart(results, vis_dir)
+        _plot_score_heatmap(results, vis_dir)
 
     print(f"\nVisualizations saved to {vis_dir}/")
 
@@ -45,15 +46,13 @@ def visualize_mate_in_one_results(results, run_dir: str | Path) -> None:
 def _plot_per_task_scores(results, vis_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(14, 5))
     task_ids = [r.task_id.split("-")[-1] for r in results]
-    scores = [r.normalized_score for r in results]
+    scores = [metric_value(r, "normalized_score") for r in results]
     colors = [DIFF_COLORS.get(r.difficulty, "#888") for r in results]
     ax.bar(range(len(scores)), scores, color=colors, width=0.8)
     ax.set_xticks(range(len(task_ids)))
     ax.set_xticklabels(task_ids, rotation=60, fontsize=7)
-    ax.set_ylabel("Normalized Score (0-100)")
-    ax.set_title("Xiangqi Mate-in-One Per-Task Scores")
-    ax.axhline(y=70, color="gray", linestyle="--", alpha=0.5, label="70 (pass)")
-    ax.legend()
+    ax.set_ylabel("Diagnostic Score (0-100)")
+    ax.set_title("Xiangqi Mate-in-One Per-Task Diagnostic Scores")
     plt.tight_layout()
     plt.savefig(vis_dir / "per_task_scores.png", dpi=200)
     plt.close()
@@ -72,18 +71,10 @@ def _plot_difficulty_comparison(results, vis_dir: Path) -> None:
         vals = []
         for diff in DIFFS:
             subset = [r for r in results if r.difficulty == diff]
-            if subset:
-                if is_score:
-                    vals.append(
-                        statistics.mean(getattr(r, field) for r in subset) / 100
-                    )
-                else:
-                    vals.append(
-                        statistics.mean(getattr(r, field) for r in subset)
-                    )
-            else:
-                vals.append(0)
+            value = metric_mean(subset, field)
+            vals.append(value / 100 if is_score else value)
         bars = ax.bar(DIFFS, vals, color=[DIFF_COLORS[d] for d in DIFFS])
+        ax.set_xlim(-0.5, len(DIFFS) - 0.5)
         ax.set_title(title)
         ax.set_ylim(0, 1.05)
         ax.grid(axis="y", linestyle="--", alpha=0.3)
@@ -91,8 +82,8 @@ def _plot_difficulty_comparison(results, vis_dir: Path) -> None:
             yval = bar.get_height()
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
-                yval + 0.02,
-                f"{yval:.2f}",
+                yval + 0.02 if isfinite(yval) else 0.02,
+                f"{yval:.2f}" if isfinite(yval) else "missing",
                 ha="center",
                 va="bottom",
                 fontsize=10,
@@ -106,7 +97,8 @@ def _plot_difficulty_comparison(results, vis_dir: Path) -> None:
 def _plot_score_distribution(results, vis_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(8, 5))
     for diff in DIFFS:
-        subset = [r.normalized_score for r in results if r.difficulty == diff]
+        subset = [r.normalized_score for r in results
+                  if r.difficulty == diff and r.status != "error" and r.normalized_score is not None]
         if subset:
             ax.hist(
                 subset,
@@ -116,10 +108,11 @@ def _plot_score_distribution(results, vis_dir: Path) -> None:
                 label=diff,
                 edgecolor="black",
             )
-    ax.set_xlabel("Score (0-100)")
+    ax.set_xlabel("Diagnostic Score (0-100)")
     ax.set_ylabel("Count")
     ax.set_title("Mate-in-One Score Distribution")
-    ax.legend()
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend()
     plt.tight_layout()
     plt.savefig(vis_dir / "score_distribution.png", dpi=200)
     plt.close()
@@ -131,7 +124,7 @@ def _plot_cp_loss_scatter(results, vis_dir: Path) -> None:
         subset = [
             (i, r.cp_loss)
             for i, r in enumerate(results)
-            if r.difficulty == diff
+            if r.difficulty == diff and r.status != "error" and r.cp_loss is not None
         ]
         if subset:
             xs, ys = zip(*subset)
@@ -141,7 +134,8 @@ def _plot_cp_loss_scatter(results, vis_dir: Path) -> None:
     ax.set_xlabel("Task Index")
     ax.set_ylabel("CP Loss")
     ax.set_title("Mate-in-One Position Evaluation Loss (cp)")
-    ax.legend()
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend()
     ax.grid(axis="y", linestyle="--", alpha=0.3)
     plt.tight_layout()
     plt.savefig(vis_dir / "cp_loss_scatter.png", dpi=200)
@@ -160,10 +154,10 @@ def _plot_radar_chart(results, vis_dir: Path) -> None:
         if not subset:
             continue
         vals = [
-            statistics.mean(r.legality_score for r in subset),
-            statistics.mean(r.correctness_score for r in subset),
-            statistics.mean(r.quality_score for r in subset),
-            statistics.mean(r.normalized_score for r in subset) / 100,
+            metric_mean(subset, "legality_score"),
+            metric_mean(subset, "correctness_score"),
+            metric_mean(subset, "quality_score"),
+            metric_mean(subset, "normalized_score") / 100,
         ]
         vals += vals[:1]
         ax.plot(
@@ -187,14 +181,14 @@ def _plot_score_heatmap(results, vis_dir: Path) -> None:
     matrix = []
     for diff in DIFFS:
         subset = [
-            r.normalized_score for r in results if r.difficulty == diff
+            metric_value(r, "normalized_score") for r in results if r.difficulty == diff
         ]
-        matrix.append(subset if subset else [0])
+        matrix.append(subset if subset else [nan])
 
     max_cols = max(len(row) for row in matrix)
     for row in matrix:
         while len(row) < max_cols:
-            row.append(0)
+            row.append(nan)
 
     fig, ax = plt.subplots(figsize=(14, 4))
     im = ax.imshow(matrix, aspect="auto", cmap="RdYlGn", vmin=0, vmax=100)
@@ -232,7 +226,9 @@ def visualize_mate_in_one_comparison(
     """Generate cross-agent comparison chart (score by difficulty)."""
     vis_dir = Path(output_dir) / "visualizations"
     vis_dir.mkdir(parents=True, exist_ok=True)
-    _plot_agent_difficulty_comparison(all_results, vis_dir)
+    with matplotlib.rc_context():
+        configure_matplotlib()
+        _plot_agent_difficulty_comparison(all_results, vis_dir)
     print(f"\nComparison visualization saved to {vis_dir}/")
 
 
@@ -240,7 +236,7 @@ def _plot_agent_difficulty_comparison(all_results, vis_dir: Path) -> None:
     """Grouped bar chart: score by difficulty per agent."""
     agents = list(all_results.keys())
     x = np.arange(len(DIFFS))
-    width = 0.8 / len(agents)
+    width = 0.8 / max(1, len(agents))
 
     fig, ax = plt.subplots(figsize=(10, 5))
     for idx, (agent_name, results) in enumerate(all_results.items()):
@@ -248,19 +244,21 @@ def _plot_agent_difficulty_comparison(all_results, vis_dir: Path) -> None:
         for diff in DIFFS:
             subset = [r for r in results if r.difficulty == diff]
             if subset:
-                vals.append(statistics.mean(r.normalized_score for r in subset))
+                vals.append(metric_mean(subset, "normalized_score"))
             else:
-                vals.append(0)
+                vals.append(nan)
         offset = (idx - len(agents) / 2 + 0.5) * width
         ax.bar(x + offset, vals, width, label=agent_name,
                color=AGENT_COLORS[idx % len(AGENT_COLORS)])
 
     ax.set_xticks(x)
     ax.set_xticklabels(DIFFS, fontsize=11)
+    ax.set_xlim(-0.5, len(DIFFS) - 0.5)
     ax.set_ylim(0, 105)
-    ax.set_ylabel("Score (0-100)")
-    ax.set_title("Mate-in-One Agent Comparison - Score by Difficulty")
-    ax.legend(loc="upper right")
+    ax.set_ylabel("Diagnostic Score (0-100)")
+    ax.set_title("Mate-in-One Agent Comparison - Diagnostic Score by Difficulty")
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend(loc="upper right")
     ax.grid(axis="y", linestyle="--", alpha=0.3)
     plt.tight_layout()
     plt.savefig(vis_dir / "agent_difficulty_comparison.png", dpi=200)

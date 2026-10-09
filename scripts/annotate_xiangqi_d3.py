@@ -35,13 +35,9 @@ def _percentile_ranks(values: list[float]) -> list[float]:
 def annotate(records: list[dict]) -> list[dict]:
     if len(records) != sum(count for _, count in LABEL_COUNTS):
         raise ValueError("D3 label counts must cover the complete 250-record corpus")
-    baseline_path = ROOT / "data/xiangqi/legacy/xiangqi-corpus-rebuild-2026-08-31/mate_in_one/tasks.jsonl"
-    baseline = {r["id"]: r for r in (json.loads(line) for line in baseline_path.read_text(encoding="utf-8").splitlines())} if baseline_path.exists() else {}
     for record in records:
         identity = hashlib.sha256((record["fen"] + "|" + record["goal"]).encode()).hexdigest()
-        previous = baseline.get(record["id"])
-        changed = (record.get("identity_sha256") not in (None, identity)
-                   or (previous is not None and (previous["fen"],previous["goal"]) != (record["fen"],record["goal"])))
+        changed = record.get("identity_sha256") not in (None, identity)
         if changed:
             record["replaces_id"] = record["id"]
             record["id"] = "xiangqi-mate-in-one-r1-" + identity[:16]
@@ -76,7 +72,7 @@ def annotate(records: list[dict]) -> list[dict]:
         if features["mate_move_count"] < 1:
             raise ValueError(f"{record['id']}: not a mate-in-one position")
         # D3 consumes exactly one agent action. Keep the persisted horizon in
-        # sync with the evaluator rather than carrying the legacy four-ply cap.
+        # sync with the fixed single-decision protocol.
         record["max_plies"] = 1
         legal = int(features["legal_move_count"])
         mates = int(features["mate_move_count"])

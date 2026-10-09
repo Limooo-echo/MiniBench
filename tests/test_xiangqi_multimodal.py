@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import base64
 import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
 import warnings
 
 from minibench.datasets.xiangqi.multimodal import (
@@ -13,7 +11,6 @@ from minibench.datasets.xiangqi.multimodal import (
     _extract_uci,
     board_to_compact,
     evaluate_xiangqi_multimodal_tasks,
-    render_board,
     render_board_png,
     summarize_xiangqi_multimodal,
 )
@@ -41,6 +38,7 @@ class FirstMoveAgent:
 def sample_multimodal_task():
     return {
         "id": "xiangqi-multimodal-unit",
+        "agent_color": "red",
         # R a8-d8 mates: N b7 protects d8 and N d7 controls e9.
         "board": [
             [0, 0, 0, -1, 0, 0, 0, 0, 0],
@@ -70,7 +68,7 @@ class XiangqiMultimodalTests(unittest.TestCase):
         self.assertEqual(_extract_uci('{"move": "H5H9"}'), "h5h9")
         self.assertIsNone(_extract_uci('{"action": 3}'))
 
-    def test_renderer_supports_bytes_and_legacy_base64(self):
+    def test_renderer_supports_png_bytes(self):
         board = sample_multimodal_task()["board"]
         for mode in ("chinese-piece-image", "latin-piece-image"):
             with warnings.catch_warnings(record=True) as caught:
@@ -80,22 +78,19 @@ class XiangqiMultimodalTests(unittest.TestCase):
                 any("missing from font" in str(item.message) for item in caught)
             )
             self.assertTrue(png.startswith(b"\x89PNG"))
-            self.assertEqual(base64.b64decode(render_board(board, mode)), png)
         compact = board_to_compact(board)
         self.assertEqual(len(compact.splitlines()), 10)
         self.assertEqual(compact.splitlines()[0], "...k.....")
         self.assertIn("R", compact)
         self.assertIn("p", compact)
 
-    @patch("minibench.datasets.xiangqi.multimodal.score_moves", return_value=[])
-    def test_three_modes_use_shared_agent_and_write_step_images(self, _score_moves):
+    def test_three_modes_use_shared_agent_and_write_step_images(self):
         agent = FirstMoveAgent()
         with tempfile.TemporaryDirectory() as directory:
             results = evaluate_xiangqi_multimodal_tasks(
                 [sample_multimodal_task()],
                 agent,
                 modes=("text", "chinese-piece-image", "latin-piece-image"),
-                max_steps=1,
                 verify_with_pikafish=False,
                 step_dir=directory,
             )

@@ -67,30 +67,6 @@ def _limit_mahjong_rule_sources(tasks: list[Any], limit: int | None) -> list[Any
     return [task for task in tasks if task.source_task_id in selected_source_ids]
 
 
-def _is_xiangqi_battle_task(task: Any, opponent_override: str | None) -> bool:
-    task_opponent = opponent_override if opponent_override is not None else task.opponent
-    return (
-        task_opponent == "pikafish"
-        or task.max_steps != 1
-        or task.goal != "capture_enemy_general"
-    )
-
-
-def _reject_reasoning_agent_for_xiangqi_battle(
-    args: argparse.Namespace,
-    tasks: list[Any],
-) -> None:
-    if args.agent == "passthrough":
-        return
-    if any(_is_xiangqi_battle_task(task, args.opponent) for task in tasks):
-        raise SystemExit(
-            "reasoning agent architectures are only supported for static Xiangqi "
-            "tasks (opponent=none, max_steps=1, goal=capture_enemy_general). "
-            "Use --agent passthrough for Pikafish or multi-step Xiangqi "
-            "battle tasks."
-        )
-
-
 def _make_cli_agent(
     args: argparse.Namespace,
     *,
@@ -146,131 +122,6 @@ def _add_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--task-id", action="append", default=None)
-
-
-def _cmd_evaluate_xiangqi(args: argparse.Namespace) -> int:
-    from minibench.datasets.xiangqi.dataset import load_xiangqi_tasks
-
-    tasks = load_xiangqi_tasks(args.xiangqi_tasks)
-    tasks = _select_tasks(tasks, args.task_id)
-    if args.limit is not None:
-        tasks = tasks[: args.limit]
-    _reject_reasoning_agent_for_xiangqi_battle(args, tasks)
-
-    from minibench.datasets.xiangqi.evaluation import (
-        evaluate_xiangqi_tasks,
-        summarize_xiangqi,
-        write_xiangqi_run,
-    )
-    from minibench.datasets.xiangqi.prompting import XIANGQI_SYSTEM_PROMPT
-
-    try:
-        agent = _make_cli_agent(args, system_prompt=XIANGQI_SYSTEM_PROMPT)
-        results = evaluate_xiangqi_tasks(
-            tasks,
-            agent,
-            opponent=args.opponent,
-            pikafish_path=args.pikafish_path,
-            pikafish_eval_file=args.pikafish_eval_file,
-            pikafish_depth=args.pikafish_depth,
-            pikafish_movetime_ms=args.pikafish_movetime_ms,
-            pikafish_timeout=args.pikafish_timeout,
-            show_progress=args.progress,
-            score_agent_moves=args.score_agent_moves,
-            score_depth=args.score_depth,
-            score_movetime_ms=args.score_movetime_ms,
-            score_loss_cap_cp=args.score_loss_cap_cp,
-        )
-    except (KeyError, RuntimeError, ValueError) as exc:
-        raise SystemExit(f"xiangqi evaluation failed: {exc}") from exc
-    run_dir = write_xiangqi_run(results, args.output_dir, args.run_name)
-    summary = summarize_xiangqi(results)
-    print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
-    return 0 if summary["success"] == summary["total"] else 1
-
-
-def _cmd_generate_xiangqi_pikafish(args: argparse.Namespace) -> int:
-    from minibench.datasets.xiangqi.ccpd_generation import generate_ccpd_pikafish_tasks
-
-    try:
-        summary = generate_ccpd_pikafish_tasks(
-            ccpd_root=args.ccpd_root,
-            output=args.output,
-            per_category=args.per_category,
-            seed=args.seed,
-            prefix=args.prefix,
-            max_candidates=args.max_candidates,
-            pikafish_path=args.pikafish_path,
-            pikafish_eval_file=args.pikafish_eval_file,
-            pikafish_depth=args.pikafish_depth,
-            pikafish_timeout=args.pikafish_timeout,
-            tactical_mate_max=args.tactical_mate_max,
-            advantage_cp=args.advantage_cp,
-            survival_cp=args.survival_cp,
-            tactical_max_steps=args.tactical_max_steps,
-            survival_max_steps=args.survival_max_steps,
-            allow_partial=args.allow_partial,
-            overwrite=args.overwrite,
-            shuffle=args.shuffle,
-            include_matches=args.include_matches,
-            progress_interval=args.progress_interval,
-            start_dir=Path.cwd(),
-        )
-    except (RuntimeError, ValueError) as exc:
-        raise SystemExit(f"xiangqi task generation failed: {exc}") from exc
-    print(json.dumps(summary, indent=2, ensure_ascii=False))
-    return 0
-
-
-def _cmd_generate_ccpd_endgames(args: argparse.Namespace) -> int:
-    from minibench.datasets.xiangqi.ccpd_endgame_generation import generate_ccpd_endgame_tasks
-
-    try:
-        summary = generate_ccpd_endgame_tasks(
-            ccpd_root=args.ccpd_root,
-            output=args.output,
-            limit=args.limit,
-            seed=args.seed,
-            prefix=args.prefix,
-            pikafish_path=args.pikafish_path,
-            pikafish_eval_file=args.pikafish_eval_file,
-            pikafish_depth=args.pikafish_depth,
-            pikafish_timeout=args.pikafish_timeout,
-            max_steps=args.max_steps,
-            engine_label=args.engine_label,
-            validate_actions=args.validate_actions,
-            overwrite=args.overwrite,
-            shuffle=args.shuffle,
-            progress_interval=args.progress_interval,
-            start_dir=Path.cwd(),
-        )
-    except (RuntimeError, ValueError) as exc:
-        raise SystemExit(f"CCPD endgame conversion failed: {exc}") from exc
-    print(json.dumps(summary, indent=2, ensure_ascii=False))
-    return 0
-
-
-def _cmd_generate_xiangqi_capture(args: argparse.Namespace) -> int:
-    from minibench.datasets.xiangqi.simple_capture_generation import (
-        generate_xiangqi_capture_tasks,
-    )
-
-    try:
-        summary = generate_xiangqi_capture_tasks(
-            output=args.output,
-            count=args.count,
-            seed=args.seed,
-            prefix=args.prefix,
-            piece_types=_parse_csv_arg(args.piece_types),
-            difficulties=_parse_csv_arg(args.difficulties),
-            max_attempts=args.max_attempts,
-            overwrite=args.overwrite,
-            progress_interval=args.progress_interval,
-        )
-    except (RuntimeError, ValueError) as exc:
-        raise SystemExit(f"xiangqi capture task generation failed: {exc}") from exc
-    print(json.dumps(summary, indent=2, ensure_ascii=False))
-    return 0
 
 
 def _cmd_evaluate_one_stroke(args: argparse.Namespace) -> int:
@@ -717,7 +568,12 @@ def _resolve_xiangqi_family(name: str) -> str:
 def _xiangqi_config_with_overrides(args: argparse.Namespace, family: str) -> dict[str, Any]:
     config = deepcopy(load_experiment_config(XIANGQI_CONFIGS[family]))
     task = config["task"]
-    sampling = task["sampling"]
+    sampling = {}
+    if any(getattr(args, name, None) is not None for name in ("sample_count", "sample_seed")):
+        sampling = task.setdefault("sampling", {
+            "enabled": True, "seed": 42, "count": 10,
+            "strategy": "paired-stratified" if family == "xiangqi-rule-variants" else "stratified",
+        })
     if getattr(args, "sample_count", None) is not None:
         sampling["count"] = args.sample_count
         sampling["enabled"] = True
@@ -731,6 +587,17 @@ def _xiangqi_config_with_overrides(args: argparse.Namespace, family: str) -> dic
     provider = config["provider"]
     evaluation = config["evaluation"]
     run = config["run"]
+    family_options = {
+        "history_mode": {"xiangqi-history"},
+        "input_modes": {"xiangqi-multimodal"},
+        "oracle_depth": {"xiangqi-rule-variants"},
+        "pikafish_depth": set(XIANGQI_CONFIGS) - {"xiangqi-rule-variants"},
+        "pikafish_timeout": set(XIANGQI_CONFIGS) - {"xiangqi-rule-variants"},
+    }
+    for option, families in family_options.items():
+        if (getattr(args, option, None) is not None and family not in families
+                and not hasattr(args, "tasks")):
+            raise SystemExit(f"--{option.replace('_', '-')} is not supported for {family}")
     for attribute, key, target in (
         ("agent", "name", agent),
         ("max_tokens", "max_tokens", agent),
@@ -743,14 +610,13 @@ def _xiangqi_config_with_overrides(args: argparse.Namespace, family: str) -> dic
         ("history_mode", "history_mode", evaluation),
         ("pikafish_depth", "pikafish_depth", evaluation),
         ("pikafish_timeout", "pikafish_timeout", evaluation),
-        ("search_depth", "search_depth", evaluation),
-        ("max_plies", "max_plies", evaluation),
+        ("oracle_depth", "oracle_depth", evaluation),
     ):
         value = getattr(args, attribute, None)
-        if value is not None:
+        if value is not None and (attribute not in family_options or family in family_options[attribute]):
             target[key] = value
     input_modes = getattr(args, "input_modes", None)
-    if input_modes is not None:
+    if input_modes is not None and family == "xiangqi-multimodal":
         evaluation["input_modes"] = list(_parse_csv_arg(input_modes))
     return config
 
@@ -802,21 +668,6 @@ def _cmd_build_xiangqi_gallery(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_migrate_xiangqi_v2(args: argparse.Namespace) -> int:
-    from minibench.datasets.xiangqi.migration import migrate_xiangqi_v2
-
-    try:
-        report = migrate_xiangqi_v2(
-            args.input,
-            args.output,
-            dry_run=args.dry_run,
-        )
-    except (FileExistsError, ValueError) as exc:
-        raise SystemExit(f"Xiangqi migration failed: {exc}") from exc
-    print(json.dumps(report, indent=2, ensure_ascii=False))
-    return 0
-
-
 def _add_xiangqi_run_overrides(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--agent", choices=STATIC_GENERATIVE_AGENT_CHOICES, default=None)
     parser.add_argument("--provider", choices=PROVIDER_CHOICES, default=None)
@@ -835,8 +686,7 @@ def _add_xiangqi_run_overrides(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--input-modes", default=None)
     parser.add_argument("--pikafish-depth", type=int, default=None)
     parser.add_argument("--pikafish-timeout", type=float, default=None)
-    parser.add_argument("--search-depth", type=int, default=None)
-    parser.add_argument("--max-plies", type=int, default=None)
+    parser.add_argument("--oracle-depth", type=int, default=None, help="C2 fixed oracle depth (3).")
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--run-name", default=None)
 
@@ -897,252 +747,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gallery.add_argument("--output", type=Path, required=True)
     gallery.set_defaults(func=_cmd_build_xiangqi_gallery)
-
-    migrate = subparsers.add_parser(
-        "migrate-xiangqi-v2", help="Safely migrate Xiangqi 0.1.x data or run output."
-    )
-    migrate.add_argument("--input", type=Path, required=True)
-    migrate.add_argument("--output", type=Path, required=True)
-    migrate.add_argument("--dry-run", action="store_true")
-    migrate.set_defaults(func=_cmd_migrate_xiangqi_v2)
-
-    evaluate_xiangqi = subparsers.add_parser(
-        "evaluate-xiangqi",
-        help="Run Xiangqi environment benchmark evaluation.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--xiangqi-tasks",
-        type=Path,
-        default=None,
-        help=(
-            "Path to Xiangqi tasks JSONL. Defaults to the schema-v2 "
-            "mate-in-one corpus."
-        ),
-    )
-    evaluate_xiangqi.add_argument(
-        "--agent",
-        choices=STATIC_GENERATIVE_AGENT_CHOICES,
-        default="passthrough",
-    )
-    _add_provider_args(evaluate_xiangqi, max_tokens=128)
-    _add_run_args(evaluate_xiangqi)
-    evaluate_xiangqi.add_argument(
-        "--opponent",
-        choices=["none", "pikafish"],
-        default=None,
-        help="Override each task's opponent. Defaults to the task JSONL value.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--pikafish-path",
-        type=Path,
-        default=None,
-        help="Path to the compiled Pikafish executable. Also supports PIKAFISH_PATH.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--pikafish-eval-file",
-        type=Path,
-        default=None,
-        help="Path to pikafish.nnue. Also supports PIKAFISH_EVAL_FILE.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--pikafish-depth",
-        type=int,
-        default=8,
-        help="Search depth for Pikafish opponent moves when movetime is not set.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--pikafish-movetime-ms",
-        type=int,
-        default=None,
-        help="Fixed search time per Pikafish move, in milliseconds.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--pikafish-timeout",
-        type=float,
-        default=30.0,
-        help="Timeout in seconds while waiting for Pikafish UCI responses.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--progress",
-        action="store_true",
-        help="Show Xiangqi evaluation progress on stderr.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--score-agent-moves",
-        action="store_true",
-        help="Use Pikafish to score each agent move and add per-task engine scores.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--score-depth",
-        type=int,
-        default=None,
-        help="Pikafish depth for move scoring. Defaults to --pikafish-depth.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--score-movetime-ms",
-        type=int,
-        default=None,
-        help="Fixed Pikafish movetime for move scoring, in milliseconds.",
-    )
-    evaluate_xiangqi.add_argument(
-        "--score-loss-cap-cp",
-        type=int,
-        default=600,
-        help="Centipawn loss mapped to zero move score. Default: 600.",
-    )
-    evaluate_xiangqi.set_defaults(func=_cmd_evaluate_xiangqi)
-
-    generate_xiangqi_pikafish = subparsers.add_parser(
-        "generate-xiangqi-pikafish",
-        help="Generate Pikafish-opponent Xiangqi tasks from CCPD FEN records.",
-    )
-    generate_xiangqi_pikafish.add_argument(
-        "--ccpd-root",
-        type=Path,
-        required=True,
-        help="Path to Chinese-Chess-Practical-Dataset or its Dataset directory.",
-    )
-    generate_xiangqi_pikafish.add_argument(
-        "--output",
-        type=Path,
-        default=Path("data/xiangqi/ccpd_pikafish_60.jsonl"),
-    )
-    generate_xiangqi_pikafish.add_argument("--per-category", type=int, default=20)
-    generate_xiangqi_pikafish.add_argument("--seed", type=int, default=20260702)
-    generate_xiangqi_pikafish.add_argument("--prefix", default="xq-ccpd")
-    generate_xiangqi_pikafish.add_argument("--max-candidates", type=int, default=None)
-    generate_xiangqi_pikafish.add_argument(
-        "--pikafish-path",
-        type=Path,
-        default=None,
-        help="Path to the compiled Pikafish executable. Also supports PIKAFISH_PATH.",
-    )
-    generate_xiangqi_pikafish.add_argument(
-        "--pikafish-eval-file",
-        type=Path,
-        default=None,
-        help="Path to pikafish.nnue. Also supports PIKAFISH_EVAL_FILE.",
-    )
-    generate_xiangqi_pikafish.add_argument("--pikafish-depth", type=int, default=8)
-    generate_xiangqi_pikafish.add_argument("--pikafish-timeout", type=float, default=30.0)
-    generate_xiangqi_pikafish.add_argument("--tactical-mate-max", type=int, default=8)
-    generate_xiangqi_pikafish.add_argument("--advantage-cp", type=int, default=500)
-    generate_xiangqi_pikafish.add_argument(
-        "--survival-cp",
-        type=int,
-        default=500,
-        help="Magnitude of disadvantage threshold; 500 means score <= -500.",
-    )
-    generate_xiangqi_pikafish.add_argument("--tactical-max-steps", type=int, default=16)
-    generate_xiangqi_pikafish.add_argument("--survival-max-steps", type=int, default=12)
-    generate_xiangqi_pikafish.add_argument("--allow-partial", action="store_true")
-    generate_xiangqi_pikafish.add_argument("--overwrite", action="store_true")
-    generate_xiangqi_pikafish.add_argument(
-        "--include-matches",
-        action="store_true",
-        help="Also scan ordinary full-game records. Defaults to skipping them for speed.",
-    )
-    generate_xiangqi_pikafish.add_argument(
-        "--progress-interval",
-        type=int,
-        default=100,
-        help="Print progress to stderr after this many new engine analyses; 0 disables it.",
-    )
-    generate_xiangqi_pikafish.add_argument(
-        "--shuffle",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-    )
-    generate_xiangqi_pikafish.set_defaults(func=_cmd_generate_xiangqi_pikafish)
-
-    generate_ccpd_endgames = subparsers.add_parser(
-        "generate-ccpd-endgames",
-        help="Convert CCPD endgame FEN records into Pikafish-opponent Xiangqi tasks.",
-    )
-    generate_ccpd_endgames.add_argument(
-        "--ccpd-root",
-        type=Path,
-        required=True,
-        help="Path to Chinese-Chess-Practical-Dataset or its Dataset directory.",
-    )
-    generate_ccpd_endgames.add_argument(
-        "--output",
-        type=Path,
-        default=Path("data/xiangqi/ccpd_endgames.jsonl"),
-    )
-    generate_ccpd_endgames.add_argument("--limit", type=int, default=None)
-    generate_ccpd_endgames.add_argument("--seed", type=int, default=20260702)
-    generate_ccpd_endgames.add_argument("--prefix", default="xq-ccpd-endgame")
-    generate_ccpd_endgames.add_argument(
-        "--pikafish-path",
-        type=Path,
-        default=None,
-        help="Path to the compiled Pikafish executable. Also supports PIKAFISH_PATH.",
-    )
-    generate_ccpd_endgames.add_argument(
-        "--pikafish-eval-file",
-        type=Path,
-        default=None,
-        help="Path to pikafish.nnue. Also supports PIKAFISH_EVAL_FILE.",
-    )
-    generate_ccpd_endgames.add_argument("--pikafish-depth", type=int, default=8)
-    generate_ccpd_endgames.add_argument("--pikafish-timeout", type=float, default=30.0)
-    generate_ccpd_endgames.add_argument("--max-steps", type=int, default=16)
-    generate_ccpd_endgames.add_argument(
-        "--engine-label",
-        action="store_true",
-        help="Run Pikafish once per endgame to add static score labels. Slower.",
-    )
-    generate_ccpd_endgames.add_argument(
-        "--validate-actions",
-        action="store_true",
-        help="Use gym-xiangqi to reject positions with no safe legal actions. Slower.",
-    )
-    generate_ccpd_endgames.add_argument("--overwrite", action="store_true")
-    generate_ccpd_endgames.add_argument(
-        "--progress-interval",
-        type=int,
-        default=25,
-        help="Print progress to stderr after this many analyzed endgames; 0 disables it.",
-    )
-    generate_ccpd_endgames.add_argument(
-        "--shuffle",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-    )
-    generate_ccpd_endgames.set_defaults(func=_cmd_generate_ccpd_endgames)
-
-    generate_xiangqi_capture = subparsers.add_parser(
-        "generate-xiangqi-capture",
-        help="Generate one-move Xiangqi capture-general tasks.",
-    )
-    generate_xiangqi_capture.add_argument(
-        "--output",
-        type=Path,
-        default=Path("data/xiangqi/tasks_generated.jsonl"),
-    )
-    generate_xiangqi_capture.add_argument("--count", type=int, default=100)
-    generate_xiangqi_capture.add_argument("--seed", type=int, default=20260702)
-    generate_xiangqi_capture.add_argument("--prefix", default="xq-capture-generated")
-    generate_xiangqi_capture.add_argument(
-        "--piece-types",
-        default="rook,cannon,horse,soldier",
-        help="Comma-separated subset of: rook, cannon, horse, soldier.",
-    )
-    generate_xiangqi_capture.add_argument(
-        "--difficulties",
-        default="easy,medium,hard",
-        help="Comma-separated subset of: easy, medium, hard.",
-    )
-    generate_xiangqi_capture.add_argument("--max-attempts", type=int, default=None)
-    generate_xiangqi_capture.add_argument("--overwrite", action="store_true")
-    generate_xiangqi_capture.add_argument(
-        "--progress-interval",
-        type=int,
-        default=100,
-        help="Print progress every N candidate attempts; 0 disables it.",
-    )
-    generate_xiangqi_capture.set_defaults(func=_cmd_generate_xiangqi_capture)
 
     evaluate_one_stroke = subparsers.add_parser(
         "evaluate-one-stroke",

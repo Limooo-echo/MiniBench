@@ -40,14 +40,6 @@ class PikafishError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class PikafishChoice:
-    fen: str
-    uci_move: str
-    action: int
-    info_lines: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class PikafishAnalysis:
     fen: str
     bestmove: str
@@ -162,37 +154,6 @@ def uci_to_square(square: str) -> tuple[int, int]:
         raise ValueError(f"invalid UCI square: {square}")
 
     return 9 - rank, FILES.index(file_name)
-
-
-def action_to_uci(action: int) -> str:
-    from gym_xiangqi.utils import action_space_to_move
-
-    _piece_id, start, end = action_space_to_move(action)
-    start_row, start_col = int(start[0]), int(start[1])
-    end_row, end_col = int(end[0]), int(end[1])
-    return f"{square_to_uci(start_row, start_col)}{square_to_uci(end_row, end_col)}"
-
-
-def uci_to_action(env, uci_move: str) -> int:
-    from gym_xiangqi.utils import action_space_to_move
-
-    from minibench.datasets.xiangqi.env import legal_actions
-
-    if len(uci_move) < 4:
-        raise ValueError(f"invalid UCI move: {uci_move}")
-
-    start = uci_to_square(uci_move[:2])
-    end = uci_to_square(uci_move[2:4])
-
-    for action in legal_actions(env):
-        _piece_id, action_start, action_end = action_space_to_move(action)
-        candidate_start = (int(action_start[0]), int(action_start[1]))
-        candidate_end = (int(action_end[0]), int(action_end[1]))
-
-        if candidate_start == start and candidate_end == end:
-            return int(action)
-
-    raise ValueError(f"Pikafish move {uci_move} is not legal in the gym-xiangqi state")
 
 
 def find_pikafish_executable(start_dir: str | Path | None = None) -> Path | None:
@@ -347,29 +308,6 @@ class PikafishEngine:
     def ready(self) -> None:
         self._send("isready")
         self._read_until(lambda line: line.strip() == "readyok", "readyok")
-
-    def choose(
-        self,
-        env,
-        *,
-        side_to_move: str,
-        depth: int | None = 8,
-        movetime_ms: int | None = None,
-    ) -> PikafishChoice:
-        fen = board_to_pikafish_fen(env.state, side_to_move=side_to_move)
-        uci_move, info_lines = self.bestmove_for_fen(
-            fen,
-            depth=depth,
-            movetime_ms=movetime_ms,
-        )
-        action = uci_to_action(env, uci_move)
-
-        return PikafishChoice(
-            fen=fen,
-            uci_move=uci_move,
-            action=action,
-            info_lines=info_lines,
-        )
 
     def bestmove_for_fen(
         self,

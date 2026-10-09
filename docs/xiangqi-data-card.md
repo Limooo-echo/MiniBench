@@ -135,9 +135,9 @@ python scripts/annotate_xiangqi_d3.py --in-place
 python scripts/build_xiangqi_m2_from_d3.py --d3 data/xiangqi/mate_in_one/tasks.jsonl --output data/xiangqi/multimodal/tasks.jsonl
 python scripts/build_xiangqi_c2.py --candidates data/xiangqi/rule_variants/candidates.json --output data/xiangqi/rule_variants/tasks.jsonl
 python scripts/freeze_xiangqi_evaluation.py
-python scripts/write_xiangqi_repair_manifest.py
-python scripts/validate_xiangqi_data.py --workers 4 --output data/xiangqi/independent_validation.json
-python scripts/audit_xiangqi_release.py --technical --output data/xiangqi/release_audit.json
+mkdir -p output/xiangqi-checks
+python scripts/validate_xiangqi_data.py --workers 4 --output output/xiangqi-checks/independent-validation.json
+python scripts/audit_xiangqi_release.py --technical --validation-report output/xiangqi-checks/independent-validation.json --output output/xiangqi-checks/release-audit.json
 python -m unittest discover -s tests
 python scripts/accept_xiangqi_protocol.py --output-dir output/acceptance/new-check --pikafish-path "$PIKAFISH_PATH"
 python scripts/run_xiangqi_smoke.py --prepare-only
@@ -165,7 +165,7 @@ extraction to finish). A matching checkpoint can reuse completed engine certific
 ```bash
 python scripts/extract_ccpd_positions.py --source "$CCPD_ROOT" --output tmp/ccpd-h2-focused.jsonl --include-subdir Dataset/殺局_殺法_練習題 --include-subdir Dataset/殘局 --tail-plies 32
 python scripts/extract_ccpd_positions.py --source "$CCPD_ROOT" --output tmp/ccpd-h2-fullgame.jsonl --include-subdir Dataset/全盤戰術 --include-subdir Dataset/中局 --tail-plies 48
-python scripts/build_xiangqi_h2.py --existing data/xiangqi/legacy/xiangqi-corpus-rebuild-2026-08-31/history/tasks.jsonl --pool tmp/ccpd-h2-focused.jsonl --pool tmp/ccpd-h2-fullgame.jsonl --source-root "$CCPD_ROOT" --output data/xiangqi/history/tasks.jsonl --report data/xiangqi/history/validation_report.json --checkpoint tmp/h2-validation.checkpoint.jsonl --workers 8 --seed 20260919 --depth-a 16 --depth-b 20 --timeout 120 --pikafish "$PIKAFISH_PATH"
+python scripts/build_xiangqi_h2.py --existing data/xiangqi/history/tasks.jsonl --pool tmp/ccpd-h2-focused.jsonl --pool tmp/ccpd-h2-fullgame.jsonl --source-root "$CCPD_ROOT" --output data/xiangqi/history/tasks.jsonl --report data/xiangqi/history/validation_report.json --checkpoint tmp/h2-validation.checkpoint.jsonl --workers 8 --seed 20260919 --depth-a 16 --depth-b 20 --timeout 120 --pikafish "$PIKAFISH_PATH"
 ```
 
 H2 excludes current D3/C2 FENs by default, records the excluded dataset hashes,
@@ -178,13 +178,14 @@ hashes; code changes require explicit `--revalidate-resume`. H2's exact generati
 configuration, pools, rejected old IDs and both engine routes are in its validation
 report; `python scripts/build_xiangqi_h2.py --help` documents rebuilding with a new
 checkpoint. The original 2026-08-31 files are preserved under `data/xiangqi/legacy/`.
-The old ID migration command verifies/uses that archive only. Changed boards or
+Archived files and repair manifests are historical evidence, not runtime inputs.
+Old migration and repair-ledger generators have been removed. Changed boards or
 goals (including H2 half-move limits) receive new IDs; no old answer is attached to
 a replacement board. `data/xiangqi/repair_manifest.json` records retained, retired
 and added IDs with per-task retirement reasons and immutable old-file hashes.
 
 `config/scoring/manifest.example.yaml` uses current data and frozen selections.
-`manifest.legacy-v1.example.yaml` is for archived results only. Empty `runs` means
+Only current-schema configurations are supported. Empty `runs` means
 missing evaluations and does not create a ranking. The strict external provenance
 audit additionally reports the repository's still-undeclared top-level licence;
 this repair does not choose a licence. Public CCPD may overlap training data, and

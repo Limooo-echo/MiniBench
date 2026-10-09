@@ -166,8 +166,8 @@ def _sensitivity_lines(result: dict) -> list[str]:
 def _markdown(result: dict) -> str:
     lines = ["# MiniBench 四维离线评分", "", f"实验清单：`{result['suite_id']}`；评分版本：`{SCORING_VERSION}`。", "",
              "本报告只读取已有题目和结果，没有调用模型。维度依次为直接解题 D、规则变化 R、历史信息 H、图像输入 V。", "",
-             r"单题公式：$s=Y+(1-Y)\kappa P$；先逐题计算，再按重复运行、题目、难度、题型、模式和任务逐层汇总。", "",
-             f"部分分上限 κ = {result['scoring_config']['partial_credit_cap']}；严格得分仅使用 Y。", "",
+             r"单题公式：$s=Y+(1-Y)P$；每题每个实验条件只运行一次，按题目、难度、题型、模式和任务逐层汇总。", "",
+             "过程分不放缩，κ 固定为 1；各维度内参与任务等权；严格得分仅使用 Y。", "",
              "覆盖不足时分数为 —，不补零或重新分配权重。历史和图像维度不代表独立测得了记忆或识图能力。", "",
              "## 四维得分", "", "| 模型组 | 架构 | D | R | H | V |", "|---|---|---:|---:|---:|---:|"]
     for profile, data in result["profiles"].items():
@@ -196,7 +196,7 @@ def _markdown(result: dict) -> str:
                          + _cell(json.dumps({"statuses": diag["statuses"], "reasons": diag["reasons"], "metrics": diag["metrics"]}, ensure_ascii=False, sort_keys=True)))
     lines += ["", *[f"- {_cell(w)}" for w in result["warnings"]], "",
               f"另有 {len(result['exclusions'])} 项不属于固定题目或模式（含标准规则对照），逐项原因保存在 scores.json。", "",
-              "## 权重变化检查", "", "主权重、参与任务等权、每个正权重分别上下调整 20% 后归一化，与部分分上限 0、0.25、0.50 组合计算。", "",
+              "## 权重变化检查", "", "正式评分采用参与任务等权，过程分权重固定为 1。辅助敏感性检查仅将各正任务权重上下调整 20% 后归一化，不改变过程分权重。", "",
               "分数范围与架构顺序变化保存在 scores.json 的 profiles.<模型组>.sensitivity。不跨模型组排名，也不使用雷达图面积排名。", "",
               "## 已记录成本", "", "| 模型组 / 架构 | 已记录 token | 调用用量覆盖 | 已记录调用次数 | 已记录任务时间（秒） |", "|---|---:|---:|---:|---:|"]
     control_position = lines.index("## 权重变化检查")

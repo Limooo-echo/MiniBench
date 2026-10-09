@@ -10,7 +10,6 @@ from minibench.assets.fonts import font_path
 from minibench.datasets.xiangqi.multimodal import render_board_png
 from minibench.datasets.xiangqi.schema import (
     FAMILY_PATHS,
-    LEGACY_FAMILY_NAMES,
     XIANGQI_FAMILIES,
     fen_to_board,
     load_records,
@@ -29,13 +28,6 @@ PIECE_TEXT = {
 
 def _require_family(family: str) -> str:
     normalized = family.strip()
-    legacy_key = normalized.upper()
-    if legacy_key in LEGACY_FAMILY_NAMES:
-        replacement = LEGACY_FAMILY_NAMES[legacy_key]
-        raise ValueError(
-            f"legacy task name {family!r} is not supported; use {replacement!r}. "
-            "To migrate old files, run: minibench migrate-xiangqi-v2 ..."
-        )
     if normalized not in XIANGQI_FAMILIES:
         raise ValueError(
             f"unknown Xiangqi task {family!r}; choose one of "

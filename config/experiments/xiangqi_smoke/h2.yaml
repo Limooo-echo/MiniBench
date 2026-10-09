@@ -2,11 +2,6 @@ task:
   prompt_version: xiangqi-reasoning-v2
   family: xiangqi-history
   path: data/xiangqi/history/tasks.jsonl
-  sampling:
-    enabled: false
-    seed: 42
-    count: 30
-    strategy: stratified
   selection:
     path: data/xiangqi/evaluation_samples/smoke/h2.jsonl
     sha256: 98a023e8a664f9659f154194bfd09729f82914160977423b12d803d2d286e6e4

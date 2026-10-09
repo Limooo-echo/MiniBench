@@ -24,7 +24,7 @@ class ScoringSuiteTests(unittest.TestCase):
         self.manifest_path = self.inputs / "suite.yaml"
         self.weights_path = self.inputs / "weights.yaml"
         self.weights_path.write_text(yaml.safe_dump({"weights": DEFAULT_WEIGHTS,
-            "partial_credit_cap": .25, "bootstrap_samples": 0, "seed": 20260909}), encoding="utf-8")
+            "partial_credit_cap": 1, "bootstrap_samples": 0, "seed": 20260909}), encoding="utf-8")
         self.model = {"provider": "fixture", "name": "offline-model-v1"}
         self.config = {"kind": "passthrough", "temperature": 0}
         self.protocol = {"name": "original-v1", "max_steps": 1}
@@ -82,11 +82,11 @@ class ScoringSuiteTests(unittest.TestCase):
     def test_verified_answers_produce_hand_checked_task_score_and_fixed_axis_coverage(self):
         self.experiment()
         result = self.run_suite()
-        self.assertAlmostEqual(self.task_score(result, "zebra", "D")["score"], (1 + .25 * .25) / 2)
+        self.assertAlmostEqual(self.task_score(result, "zebra", "D")["score"], (1 + .25) / 2)
         self.assertAlmostEqual(self.task_score(result, "zebra", "D")["strict_score"], .5)
         direct = self.architecture(result)["dimensions"]["D"]
         self.assertIsNone(direct["score"])
-        self.assertAlmostEqual(direct["coverage"], .35)
+        self.assertAlmostEqual(direct["coverage"], .25)
         self.assertEqual(result["radars"], [])
         self.assertEqual(set(result["sources"][0]), {"experiment", "path", "sha256", "selected_tasks", "modes"})
 
@@ -136,7 +136,7 @@ class ScoringSuiteTests(unittest.TestCase):
         self.assertIsNone(cell["score"])
         self.assertEqual(cell["expected_slots"], 2)
         self.assertAlmostEqual(cell["coverage"], .5)
-        self.assertAlmostEqual(self.architecture(result)["dimensions"]["V"]["coverage"], .35 * .5)
+        self.assertAlmostEqual(self.architecture(result)["dimensions"]["V"]["coverage"], (1 / 3) * .5)
         self.assertTrue(any(e.get("mode") == "text" for e in result["exclusions"]))
         rows = [json.loads(line) for line in (self.base / "output/item_scores.jsonl").read_text(encoding="utf-8").splitlines()]
         missing = next(row for row in rows if row["mode"] == "latin-piece-image")
@@ -185,17 +185,14 @@ class ScoringSuiteTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate run/repeat"):
             self.run_suite()
 
-    def test_declared_missing_repeat_reduces_coverage_without_reweighting(self):
+    def test_multiple_main_runs_are_rejected_even_when_one_is_missing(self):
         exp = self.experiment()
         absent = copy.deepcopy(exp["runs"][0])
         absent.update(repeat="2", predictions="not-created.jsonl")
         exp["runs"].append(absent)
-        result = self.run_suite()
-        cell = self.task_score(result, "zebra", "D")
-        self.assertEqual(cell["expected_slots"], 4)
-        self.assertEqual(cell["coverage"], .5)
-        self.assertIsNone(cell["score"])
-        self.assertTrue(any("not-created.jsonl" in warning for warning in result["warnings"]))
+        with self.assertRaisesRegex(ValueError, "only one main run"):
+            self.run_suite()
+        self.assertFalse((self.base / "output").exists())
 
     def test_output_must_be_empty_and_existing_contents_are_not_touched(self):
         self.experiment()
@@ -220,9 +217,9 @@ class ScoringSuiteTests(unittest.TestCase):
         self.run_suite()
         with (self.base / "output/task_scores.csv").open(encoding="utf-8-sig", newline="") as handle:
             rows = {row["item_id"]: row for row in csv.DictReader(handle)}
-        self.assertAlmostEqual(float(rows["z1"]["axis_weight"]), .175)
-        self.assertAlmostEqual(float(rows["z1"]["contribution"]), 17.5)
-        self.assertAlmostEqual(float(rows["z2"]["contribution"]), 100 * .175 * .25 * .25)
+        self.assertAlmostEqual(float(rows["z1"]["axis_weight"]), .125)
+        self.assertAlmostEqual(float(rows["z1"]["contribution"]), 12.5)
+        self.assertAlmostEqual(float(rows["z2"]["contribution"]), 100 * .125 * .25)
         self.assertEqual(rows["z2"]["y"], "0.0")
 
     def test_unknown_costs_are_null_even_if_legacy_usage_is_zero_filled(self):
@@ -405,7 +402,7 @@ class ScoringSuiteTests(unittest.TestCase):
         exp["runs"][0]["provenance"]["agent_config"] = copy.deepcopy(override)
         result = self.run_suite()
         self.assertEqual(self.task_score(result, "zebra", "D")["coverage"], 1)
-        self.assertAlmostEqual(self.task_score(result, "zebra", "D")["score"], .53125)
+        self.assertAlmostEqual(self.task_score(result, "zebra", "D")["score"], .625)
         self.assertNotIn("provenance_mismatch:agent_config", result["diagnostics"][0]["reasons"])
 
     def test_experiment_config_override_rejects_unknown_experiment(self):
@@ -421,7 +418,7 @@ class ScoringSuiteTests(unittest.TestCase):
         repeated = copy.deepcopy(exp["runs"][0])
         repeated["repeat"] = "2"
         exp["runs"].append(repeated)
-        with self.assertRaisesRegex(ValueError, "same predictions file cannot represent multiple repeats"):
+        with self.assertRaisesRegex(ValueError, "only one main run"):
             self.run_suite()
         self.assertFalse((self.base / "output").exists())
 

@@ -53,7 +53,7 @@ def main():
             if key != "c2":
                 config["evaluation"]["pikafish_binary_sha256"]=engine["binary_sha256"]
                 config["evaluation"]["pikafish_nnue_sha256"]=engine["nnue_sha256"]
-            config["task"]["sampling"]["enabled"]=False
+            config["task"].pop("sampling", None)
             config["task"]["selection"]={k:sample["tasks"][key][k] for k in ("path","sha256")}
             config["task"]["prompt_version"]=PROTOCOL_VERSION
             config["task"].pop("task_ids",None)

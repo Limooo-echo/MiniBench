@@ -44,12 +44,12 @@ class TaskFamilySpec:
 
 
 def _load_xiangqi_task_objects(path: str | Path | None, family: str) -> list[Any]:
-    from minibench.datasets.xiangqi.dataset import xiangqi_task_from_v2_record
+    from minibench.datasets.xiangqi.dataset import xiangqi_task_from_dict
     from minibench.datasets.xiangqi.schema import FAMILY_PATHS, load_records
 
     source = Path(path) if path is not None else FAMILY_PATHS[family]
     return [
-        xiangqi_task_from_v2_record(record)
+        xiangqi_task_from_dict(record)
         for record in load_records(source, expected_family=family)
     ]
 
@@ -515,7 +515,7 @@ def _write_xiangqi_run_metadata(
     dependencies: dict[str, str] = {}
     for distribution in (
         "Pillow", "matplotlib", "networkx", "numpy", "PyYAML",
-        "gym-xiangqi", "mahjong", "datasets",
+        "mahjong", "datasets",
     ):
         try:
             dependencies[distribution] = version(distribution)
@@ -732,6 +732,10 @@ def _evaluate(
     evaluation_config: dict[str, Any],
     on_result: Callable[[Any], None] | None = None,
 ) -> list[Any]:
+    if family.startswith("xiangqi-"):
+        from minibench.datasets.xiangqi.runtime import validate_evaluation_config
+
+        validate_evaluation_config(family, evaluation_config)
     if family == "xiangqi-mate-in-one":
         return spec.evaluate_tasks(
             tasks,
@@ -748,13 +752,7 @@ def _evaluate(
             tasks,
             agent,
             on_result=on_result,
-            max_steps=int(evaluation_config.get("max_plies", 12)),
-            opponent_depth=int(evaluation_config.get("opponent_depth", 2)),
-            oracle_depth=int(
-                evaluation_config.get(
-                    "oracle_depth", evaluation_config.get("search_depth", 3)
-                )
-            ),
+            oracle_depth=int(evaluation_config.get("oracle_depth", 3)),
         )
     if family == "xiangqi-history":
         return spec.evaluate_tasks(
@@ -773,16 +771,11 @@ def _evaluate(
             "input_modes",
             ("text", "chinese-piece-image", "latin-piece-image"),
         )
-        if isinstance(modes, str):
-            modes = tuple(part.strip() for part in modes.split(",") if part.strip())
         return spec.evaluate_tasks(
             tasks,
             agent,
             on_result=on_result,
             modes=tuple(modes),
-            opponent_depth=int(evaluation_config.get("opponent_depth", 4)),
-            optimal_depth=int(evaluation_config.get("optimal_depth", 3)),
-            max_steps=int(evaluation_config.get("max_plies", 20)),
             pikafish_path=evaluation_config.get("pikafish_path"),
             pikafish_binary_sha256=evaluation_config.get("pikafish_binary_sha256"),
             pikafish_nnue_sha256=evaluation_config.get("pikafish_nnue_sha256"),

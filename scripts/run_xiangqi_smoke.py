@@ -109,7 +109,7 @@ def prepare_suite(suite_dir: Path, tasks: list[str], *, model: str | None = None
         elif key == "c2":
             evaluation["oracle_depth"] = 3
         elif key == "m2":
-            evaluation.update(max_plies=1, verify_with_pikafish=True, step_dir=str(suite_dir / "m2-input-images"))
+            evaluation.update(verify_with_pikafish=True, step_dir=str(suite_dir / "m2-input-images"))
         config = validate_experiment_config(config)
         saved_config = suite_dir / "configs" / f"{key}.json"
         _write_json(saved_config, config)

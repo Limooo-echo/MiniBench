@@ -288,7 +288,7 @@ def evaluate_history_tasks(
                 if history_mode == "move-history-only" and not callable(getattr(agent, "generate_messages", None)):
                     raise ValueError("H2 move-history-only requires generate_messages() with complete history")
                 stage = "judge"
-                agent_side = 1 if (task.agent_color or ("red" if task.agent_side == "ally" else "black")) == "red" else -1
+                agent_side = 1 if task.agent_color == "red" else -1
                 side = 1 if task.side_to_move == "ally" else -1
                 board = VariantBoard(task.board, [])
                 initial_board = board_state_text(board.board)
@@ -469,12 +469,11 @@ def summarize_history(results: list[HistoryResult]) -> dict[str, Any]:
     return {
         **summary, "unique_tasks": len({r.task_id for r in results}), "primary_metric": "strict_checkmate_success_rate",
         "opponent_policy": "fixed Pikafish opponent; reference distance is not a proved shortest mate",
-        "overall_score": summary["avg_score"],
         "cp_loss_diagnostics": {"unit": "Pikafish centipawns; mate scores use a 10,000 sentinel",
                                 "cap_for_reporting": HISTORY_CP_LOSS_CAP, **_history_loss_diagnostics(results)},
         "paired_comparison": _paired_history_comparison(results),
         "by_mode": {mode: bucket([r for r in results if r.history_mode == mode]) for mode in sorted({r.history_mode for r in results})},
-        "mate_horizon_metadata": horizons, "by_difficulty": by_diff, "by_legacy_difficulty_metadata": by_diff,
+        "mate_horizon_metadata": horizons, "by_difficulty": by_diff,
         "metrics": summarize_metrics(results),
     }
 

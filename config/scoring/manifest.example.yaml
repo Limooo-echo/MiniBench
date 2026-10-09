@@ -103,7 +103,6 @@ experiments:
     evaluation:
       pikafish_depth: 8
       pikafish_timeout: 60.0
-      max_plies: 1
       pikafish_binary_sha256: 0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3
       pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
   runs: []
@@ -121,7 +120,6 @@ experiments:
     release_id: xiangqi-2026-09-19-r1
     evaluation:
       oracle_depth: 3
-      max_plies: 1
   runs: []
   selection:
     path: ../../data/xiangqi/evaluation_samples/formal/c2.jsonl
@@ -159,7 +157,6 @@ experiments:
       - text
       - chinese-piece-image
       - latin-piece-image
-      max_plies: 1
       verify_with_pikafish: true
       pikafish_depth: 8
       pikafish_timeout: 60.0

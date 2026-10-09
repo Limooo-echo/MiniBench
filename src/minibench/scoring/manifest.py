@@ -10,10 +10,10 @@ from typing import Any
 import yaml
 
 DEFAULT_WEIGHTS = {
-    "zebra": {"D": .35, "R": .40, "H": .35, "V": 0.0},
-    "one_stroke": {"D": .30, "R": 0.0, "H": .35, "V": .40},
-    "xiangqi": {"D": .20, "R": .35, "H": .20, "V": .35},
-    "mahjong": {"D": .15, "R": .25, "H": .10, "V": .25},
+    "zebra": {"D": .25, "R": 1 / 3, "H": .25, "V": 0.0},
+    "one_stroke": {"D": .25, "R": 0.0, "H": .25, "V": 1 / 3},
+    "xiangqi": {"D": .25, "R": 1 / 3, "H": .25, "V": 1 / 3},
+    "mahjong": {"D": .25, "R": 1 / 3, "H": .25, "V": 1 / 3},
 }
 # Modes are measurement conditions, not architecture hyperparameters.
 CONDITIONS = {
@@ -78,9 +78,12 @@ def load_weights(path: Path | None) -> dict:
     for dim in "DRHV":
         if not math.isclose(sum(w[dim] for w in weights.values()), 1.0, abs_tol=1e-9):
             raise ValueError(f"{dim} weights must sum to one")
-    cap = config.get("partial_credit_cap", .25)
-    if isinstance(cap, bool) or not isinstance(cap, (int, float)) or not math.isfinite(cap) or not 0 <= cap <= 1:
-        raise ValueError("partial_credit_cap must be between zero and one")
+    cap = config.get("partial_credit_cap", 1.0)
+    if isinstance(cap, bool) or not isinstance(cap, (int, float)) or cap != 1:
+        raise ValueError("partial_credit_cap is fixed at 1; process credit must not be scaled")
+    if any(not math.isclose(weights[t][d], DEFAULT_WEIGHTS[t][d], abs_tol=1e-9)
+           for t in DEFAULT_WEIGHTS for d in "DRHV"):
+        raise ValueError("task weights must be equal within each dimension")
     samples = config.get("bootstrap_samples", 2000)
     seed = config.get("seed", 20260909)
     if type(samples) is not int or samples < 0 or type(seed) is not int or seed < 0:
@@ -304,6 +307,7 @@ def load_suite(path: Path) -> dict:
             raise ValueError(f"{exp_id}: runs must be a list")
         run_index: dict[tuple, list] = {}
         seen_runs = set()
+        seen_main_runs = set()
         seen_prediction_files = set()
         for run in runs:
             if run.get("role", "main") not in {"main", "diagnostic"}:
@@ -315,6 +319,10 @@ def load_suite(path: Path) -> dict:
             if (*key, repeat) in seen_runs:
                 raise ValueError(f"{exp_id}: duplicate run/repeat {key}/{repeat}")
             seen_runs.add((*key, repeat))
+            if run.get("role", "main") == "main":
+                if key in seen_main_runs:
+                    raise ValueError(f"{exp_id}: only one main run per profile/architecture is allowed")
+                seen_main_runs.add(key)
             prediction_identity = (*key, str(_path(path.parent, run.get("predictions"))))
             if prediction_identity in seen_prediction_files:
                 raise ValueError(f"{exp_id}: same predictions file cannot represent multiple repeats")

@@ -8,12 +8,9 @@ import unittest
 from minibench.scoring.aggregate import aggregate_suite
 
 
-WEIGHTS = {
-    "zebra": {"D": .35, "R": .40, "H": .35, "V": 0},
-    "one_stroke": {"D": .30, "R": 0, "H": .35, "V": .40},
-    "xiangqi": {"D": .20, "R": .35, "H": .20, "V": .35},
-    "mahjong": {"D": .15, "R": .25, "H": .10, "V": .25},
-}
+from minibench.scoring.manifest import DEFAULT_WEIGHTS
+
+WEIGHTS = DEFAULT_WEIGHTS
 
 
 def row(item, *, task="zebra", dimension="D", architecture="a", y=1, p=0, **extra):
@@ -48,7 +45,7 @@ class ScoringAggregateTests(unittest.TestCase):
                 for t in WEIGHTS for j, d in enumerate("DRHV") if WEIGHTS[t][d] > 0
                 for i in range(100)]
         result = aggregate_suite(rows, WEIGHTS, bootstrap_samples=0)
-        for expected, actual in zip([72.25, 64.5, 62.2, 61], architecture(result)["vector"]):
+        for expected, actual in zip([71.25, 65, 60.5, 185 / 3], architecture(result)["vector"]):
             self.assertAlmostEqual(expected, actual)
         for dimension in "DRHV":
             self.assertAlmostEqual(1, sum(r["axis_weight"] for r in result["item_scores"]
@@ -60,25 +57,25 @@ class ScoringAggregateTests(unittest.TestCase):
         result = aggregate_suite(rows, WEIGHTS, bootstrap_samples=10)
         self.assertEqual([100, 100, 100, 100], architecture(result)["vector"])
         for axis in architecture(result)["dimensions"].values():
-            self.assertEqual([100, 100], axis["ci95"])
+            for bound in axis["ci95"]:
+                self.assertAlmostEqual(100, bound)
 
     def test_gate_is_applied_before_averaging(self):
         rows = [row(0, y=1, p=1), row(1, y=0, p=.4)]
         before = deepcopy(rows)
         result = aggregate_suite(rows, WEIGHTS, bootstrap_samples=0)
-        self.assertAlmostEqual(.55, task_score(result)["score"])
-        self.assertNotAlmostEqual(.5 + (1 - .5) * .25 * .7, task_score(result)["score"])
+        self.assertAlmostEqual(.7, task_score(result)["score"])
+        self.assertNotAlmostEqual(.5 + (1 - .5) * .7, task_score(result)["score"])
         self.assertEqual(rows, before)
-        self.assertAlmostEqual(100 * .35 * .55,
+        self.assertAlmostEqual(100 * .25 * .7,
                                sum(r["contribution"] for r in result["item_scores"]))
 
-    def test_repeats_items_and_modes_are_equal_at_each_level(self):
-        rows = [row(0, repeat_id=str(i), y=int(i == 0)) for i in range(3)]
-        rows += [row(1, y=1), row(2, y=0, mode="other")]
+    def test_items_and_modes_are_equal_at_each_level(self):
+        rows = [row(0, y=0), row(1, y=1), row(2, y=0, mode="other")]
         result = aggregate_suite(rows, WEIGHTS, bootstrap_samples=0)
-        self.assertAlmostEqual(1 / 3, task_score(result)["score"])
+        self.assertAlmostEqual(1 / 4, task_score(result)["score"])
         by_id = {r["item_id"]: r for r in result["item_scores"]}
-        self.assertAlmostEqual(1 / 12, by_id["0"]["within_task_weight"])
+        self.assertAlmostEqual(1 / 4, by_id["0"]["within_task_weight"])
         self.assertAlmostEqual(1 / 4, by_id["1"]["within_task_weight"])
         self.assertAlmostEqual(1 / 2, by_id["2"]["within_task_weight"])
 
@@ -101,16 +98,15 @@ class ScoringAggregateTests(unittest.TestCase):
         self.assertAlmostEqual(.5, cell["strict_score"])
         self.assertIsNone(result["item_scores"][0]["contribution"])
         self.assertEqual(0, result["item_scores"][0]["strict_contribution"])
-        strict = aggregate_suite([row(0, y=0, p=None), row(1, y=1, p=None)],
-                                 WEIGHTS, partial_credit_cap=0, bootstrap_samples=0)
-        self.assertAlmostEqual(.5, task_score(strict)["score"])
+        with self.assertRaisesRegex(ValueError, "fixed at 1"):
+            aggregate_suite([row(0)], WEIGHTS, partial_credit_cap=.25, bootstrap_samples=0)
 
-    def test_missing_task_and_missing_repeat_never_renormalize(self):
-        rows = [row(0, y=1), row(0, repeat_id="1", y=None, p=None)]
+    def test_missing_task_and_missing_item_never_renormalize(self):
+        rows = [row(0, y=1), row(1, y=None, p=None)]
         result = aggregate_suite(rows, WEIGHTS, bootstrap_samples=0)
         axis = architecture(result)["dimensions"]["D"]
         self.assertIsNone(axis["score"])
-        self.assertAlmostEqual(.35 / 2, axis["coverage"])
+        self.assertAlmostEqual(.25 / 2, axis["coverage"])
         self.assertIsNone(task_score(result)["score"])
         self.assertEqual(["zebra", "one_stroke", "xiangqi", "mahjong"], axis["missing_tasks"])
 
@@ -136,7 +132,7 @@ class ScoringAggregateTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     aggregate_suite(rows, weights, bootstrap_samples=0)
 
-    def test_sensitivity_detects_rank_reversal_from_partial_credit(self):
+    def test_sensitivity_keeps_process_weight_fixed(self):
         rows = []
         for task in WEIGHTS:
             rows += [row(i, task=task, architecture="a", y=int(i < 4)) for i in range(10)]
@@ -144,12 +140,11 @@ class ScoringAggregateTests(unittest.TestCase):
         result = aggregate_suite(rows, WEIGHTS, bootstrap_samples=0)
         sensitivity = result["profiles"]["model-v1"]["sensitivity"]
         direct = next(p for p in sensitivity["pairwise"] if p["dimension"] == "D")
-        self.assertTrue(direct["rank_reversal"])
-        self.assertIn({"weight_scheme": "main", "partial_credit_cap": .5},
-                      direct["reversal_scenarios"])
-        self.assertEqual(30, sensitivity["ranges"]["a"]["D"]["total_scenarios"])
-        self.assertAlmostEqual(0, sensitivity["ranges"]["b"]["D"]["min"])
-        self.assertAlmostEqual(50, sensitivity["ranges"]["b"]["D"]["max"])
+        self.assertFalse(direct["rank_reversal"])
+        self.assertEqual({1.0}, {s["partial_credit_cap"] for s in sensitivity["scenarios"]})
+        self.assertEqual(10, sensitivity["ranges"]["a"]["D"]["total_scenarios"])
+        self.assertAlmostEqual(100, sensitivity["ranges"]["b"]["D"]["min"])
+        self.assertAlmostEqual(100, sensitivity["ranges"]["b"]["D"]["max"])
 
     def test_matched_bootstrap_is_paired_and_deterministic(self):
         rows = [row(i, task=t, architecture=a, y=i % 2)
@@ -195,7 +190,7 @@ class ScoringAggregateTests(unittest.TestCase):
         self.assertIsNone(architecture(result)["dimensions"]["D"]["ci95"])
 
     def test_repeats_cannot_point_at_different_originals(self):
-        with self.assertRaisesRegex(ValueError, "source_id"):
+        with self.assertRaisesRegex(ValueError, "duplicate expected observation"):
             aggregate_suite([row(0), row(0, repeat_id="1", source_id="other")],
                             WEIGHTS, bootstrap_samples=0)
 

@@ -1,3 +1,3 @@
 """Offline, evidence-backed four-dimensional scoring; no experiment execution."""
 
-SCORING_VERSION = "1.0.0"
+SCORING_VERSION = "2.0.0"

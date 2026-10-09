@@ -255,7 +255,7 @@ def prepare_web_session(suite_dir: Path, session_dir: Path, names: list[str], *,
         if key == "m2":
             if m2_modes is not None:
                 evaluation["input_modes"] = list(m2_modes)
-            evaluation.update(max_plies=1, verify_with_pikafish=True, step_dir=str(run_dir / "rendered-inputs"))
+            evaluation.update(verify_with_pikafish=True, step_dir=str(run_dir / "rendered-inputs"))
         _write_json(run_dir / "resolved_config.json", config)
         _write_json(run_dir / "run_metadata.json", {
             "protocol_version": PROTOCOL_VERSION, "agent_adapter": plan["agent_adapter"],

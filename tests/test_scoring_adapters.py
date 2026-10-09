@@ -163,21 +163,23 @@ class ScoringAdapterTests(unittest.TestCase):
         self.assertEqual(result["p"], 0)
         self.assertTrue(result["evidence"]["zero_denominator"])
 
-    def test_mahjong_visual_empty_table_is_required_region(self):
+    def test_mahjong_visual_transcription_does_not_add_process_credit(self):
         task = {"id": "m", "goal": "winning_tiles", "hand": HAND, "tags": ["visual"]}
         record = answer({"hand": HAND, "winning_tiles": ["1m"]})
         result = self.score("mahjong", record, task, "V", "image")
-        self.assertEqual(result["p"], .5)
-        self.assertEqual(result["evidence"]["region_scores"], {"hand": 1, "visible_tiles": 0})
+        self.assertEqual(result["p"], 0)
+        self.assertEqual(result["evidence"]["method"], "winning_tile_set_f1")
         record = answer({"hand": HAND, "visible_tiles": [], "winning_tiles": ["1m"]})
-        self.assertEqual(self.score("mahjong", record, task, "V", "image")["p"], 1)
+        self.assertEqual(self.score("mahjong", record, task, "V", "image")["p"], 0)
 
-    def test_mahjong_visual_duplicate_hand_uses_multiset_not_set(self):
+    def test_mahjong_visual_and_text_use_identical_goal_scoring(self):
         task = {"id": "m", "goal": "winning_tiles", "hand": HAND, "tags": ["visual"]}
         predicted = list(dict.fromkeys(HAND))
         result = self.score("mahjong", answer({"hand": predicted, "visible_tiles": [],
-                                               "winning_tiles": ["1m"]}), task, "V", "image")
-        self.assertAlmostEqual(result["p"], (2 * len(predicted) / (len(predicted) + len(HAND)) + 1) / 2)
+                                               "winning_tiles": ["E"]}), task, "V", "image")
+        text = self.score("mahjong", answer({"winning_tiles": ["E"]}), task)
+        self.assertEqual((result["y"], result["p"]), (text["y"], text["p"]))
+        self.assertEqual((result["y"], result["p"]), (1, 1))
 
     def test_xiangqi_legal_failed_65_does_not_receive_partial_credit(self):
         result = self.score("xiangqi_mate_in_one", {"is_legal": True, "goal_achieved": False,
@@ -216,10 +218,10 @@ class ScoringAdapterTests(unittest.TestCase):
         self.assertEqual(result["status"], "invalid")
         self.assertIn("invalid_answer_format", result["reasons"])
 
-    def test_solo_action_error_is_task_failure_and_moves_are_episode_mean(self):
+    def test_solo_missing_log_keeps_outcome_and_legacy_move_diagnostics(self):
         result = self.score("mahjong_solo", {"success": False, "action_errors": ["invalid_discard"],
                                             "move_scores": [.1, .9], "score": .7})
-        self.assertEqual((result["y"], result["p"]), (0, 0))
+        self.assertEqual((result["y"], result["p"]), (0, None))
         self.assertEqual(result["diagnostics"]["episode_move_mean"], .5)
 
     def test_adapter_does_not_mutate_inputs(self):

@@ -204,6 +204,11 @@ def validate_experiment_config(
         choices = ", ".join(sorted(TASK_FAMILIES))
         raise ValueError(f"{source}: task.family must be one of: {choices}")
 
+    if family.startswith("xiangqi-"):
+        from minibench.datasets.xiangqi.runtime import validate_evaluation_config
+
+        validate_evaluation_config(family, raw.get("evaluation", {}))
+
     if family == "one_stroke":
         from minibench.factory.experiments import _one_stroke_selected_modes
 

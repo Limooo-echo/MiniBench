@@ -13,6 +13,7 @@ from minibench.agents.direct import DirectAgent
 from minibench.core.agent import ReasoningConfig
 from minibench.core.runtime import StrictJSONObjectError
 from minibench.datasets.xiangqi.dataset import XiangqiTask
+from minibench.datasets.xiangqi.schema import board_to_fen
 from minibench.datasets.xiangqi import mate_in_one as d3, history as h2, multimodal as m2, rule_variants as c2
 from minibench.datasets.xiangqi.variants.board import VariantBoard
 
@@ -30,12 +31,14 @@ def board_fixture(*, with_pawn=False):
 
 def task_fixture(**changes):
     task = XiangqiTask(id="runtime-unit", board=board_fixture(), side_to_move="ally", agent_side="ally",
-                       opponent="pikafish", max_steps=3, goal="agent_win", tags=(), difficulty="short", oracle={})
+                       max_steps=3, tags=(), difficulty="short", oracle={}, schema_version=2,
+                       family="xiangqi-history", fen=board_to_fen(board_fixture()), agent_color="red")
     return replace(task, **changes)
 
 
 def dict_fixture(**changes):
-    return {"id": "runtime-unit", "board": board_fixture(), "rules": [], "ruleset": "standard", **changes}
+    return {"id": "runtime-unit", "scenario_id": "runtime-unit", "difficulty": "unit",
+            "agent_color": "red", "board": board_fixture(), "rules": [], "ruleset": "standard", **changes}
 
 
 class FixedAgent:
@@ -261,7 +264,7 @@ class RuntimeErrorsTests(unittest.TestCase):
         self.assertEqual((wrong.status, wrong.success), ("ok", False))
         self.assertEqual(oracle.call_args.args[2], 3)
         with self.assertRaisesRegex(ValueError, "depth 3"):
-            c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent(), search_depth=2)
+            c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent(), oracle_depth=2)
 
     def test_c2_judge_and_model_errors_are_missing(self):
         with patch.object(c2, "score_moves", side_effect=RuntimeError("judge crashed")):

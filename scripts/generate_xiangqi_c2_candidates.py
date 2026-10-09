@@ -152,14 +152,10 @@ def main():
     state_path = args.output.with_suffix(".state.json")
     resumed_scanned = 0
     if args.resume:
-        if state_path.is_file():
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            previous, accepted = state["report"], state["candidates"]
-        else:
-            if not args.revalidate_resume:
-                raise ValueError("legacy checkpoint requires --revalidate-resume")
-            previous = json.loads(args.report.read_text(encoding="utf-8"))
-            accepted = json.loads(args.output.read_text(encoding="utf-8"))
+        if not state_path.is_file():
+            raise ValueError("current atomic checkpoint is missing; generate into new output paths")
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        previous, accepted = state["report"], state["candidates"]
         if previous.get("blocked_disagreement"):
             raise ValueError("independent disagreement blocked this run; repair and regenerate into new output paths")
         if previous["counts"] != {k:len(v) for k,v in accepted.items()}:

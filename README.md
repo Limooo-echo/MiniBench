@@ -16,7 +16,9 @@ minibench score-suite --manifest config/scoring/manifest.example.yaml --weights 
 
 示例清单固定了原题文件及 SHA-256，`runs` 留空，运行后会如实报告缺失覆盖。填入已保存的逐题结果及其原始配置来源后再发布正式比较；不要用当前配置推断旧实验。输出目录须为空或尚不存在。
 
-完整公式、权重理由、逐题评分与清单字段见 [评分设计说明](docs/scoring-design.md)，实施和验收记录见 [评分实施记录](docs/scoring-plan.md)。
+评分版本 2.0.0 使用 `s = Y + (1 - Y) × P`，过程分不放缩，每题每条件运行一次，维度内任务等权。连续麻将按给定牌墙逐步计算最早和牌动作集，过程分为命中步数 / 总动作步数；麻将图像题与文字题使用相同目标和过程分标准。旧缩放或人工权重配置需要更新。
+
+完整公式、等权说明、逐题评分与清单字段见 [评分设计说明](docs/scoring-design.md)，实施和验收记录见 [评分实施记录](docs/scoring-plan.md)。
 
 ## 1. 在 WSL Ubuntu 中安装
 
@@ -248,6 +250,10 @@ minibench run-config config/experiments/zebra_history.yaml
 四类各 250 条数据已重新审核；修复内容、旧题替换原因和验收证据见
 [象棋修复报告](docs/xiangqi-repair-report.md)。
 
+象棋现在只维护这四类任务及其出题、验证、可视化链路；只接收 schema v2 的
+FEN 数据。旧吃将题、残局生存、通用对局、Gym action-index 接口和迁移工具已移除。
+`data/xiangqi/legacy/`、旧题库文件和历史 `runs/` 保留作存档，不会自动转成当前实验。
+
 | 配置 | 公开 family | 内容 |
 | --- | --- | --- |
 | `xiangqi_mate_in_one.yaml` | `xiangqi-mate-in-one` | 严格一步将死，接受全部合法答案 |
@@ -257,18 +263,31 @@ minibench run-config config/experiments/zebra_history.yaml
 
 D3/M2 用精确棋规判定将死，Pikafish 只提供诊断；H2 需要固定的对手引擎。
 本版使用的引擎与 NNUE 指纹在 `data/xiangqi/provenance.json`，配置会校验它们。
-本地已验收的 Windows universal 引擎可通过 WSL 使用（新克隆需按 provenance
-取得同一发行资产；不要直接用不同版本引擎替代）：
+本地已验收的 Windows universal 引擎可原生运行；通过 WSL 启动它需要启用
+Windows 程序互通。新克隆需按 provenance 取得同一发行资产，不要直接用不同
+版本引擎替代。以下为 WSL/Bash 示例：
 
 ```bash
 export PIKAFISH_PATH="$PWD/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe"
-python scripts/validate_xiangqi_data.py --workers 6 --output data/xiangqi/independent_validation.json
-python scripts/audit_xiangqi_release.py --technical --output data/xiangqi/release_audit.json
+mkdir -p output/xiangqi-checks
+python scripts/validate_xiangqi_data.py --workers 6 --output output/xiangqi-checks/independent-validation.json
+python scripts/audit_xiangqi_release.py --technical --validation-report output/xiangqi-checks/independent-validation.json --output output/xiangqi-checks/release-audit.json
 python scripts/run_xiangqi_smoke.py --prepare-only --pikafish-path "$PIKAFISH_PATH"
 ```
 
 以上命令不调用语言模型。`--strict` 还检查外部来源声明，原仓库未声明顶级许可证的状态
 仍会被报告。数据数量、规则、配对、哈希或来源有分歧时，技术门禁会失败。
+源码变动后须重新验证；原 `data/xiangqi/independent_validation.json` 是历史证据，
+不要把它的旧源码指纹当成当前代码已通过验收。
+
+如果 WSL 启动 `.exe` 报 `Exec format error`，可使用已安装项目依赖的 Windows
+Python，在 PowerShell 中做真实引擎离线验收（输出目录必须是新的）：
+
+```powershell
+$env:PYTHONPATH = "src"
+$env:PIKAFISH_PATH = (Resolve-Path "tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe").Path
+python scripts/accept_xiangqi_protocol.py --output-dir output/acceptance/xiangqi-new-check --pikafish-path $env:PIKAFISH_PATH
+```
 
 小样本名单已冻结：D3/H2/M2 各 6 个局面，C2 三个配对场景（12 条规则条件）。
 正式配置固定为 D3/H2/M2 各 30 个局面，C2 十个场景；不会每次重新抽题。
@@ -286,6 +305,21 @@ minibench run-config config/experiments/xiangqi_multimodal.yaml
 `task.selection` 不能同时设置抽样、limit 或 task_ids；探索性重选题时，应复制 YAML
 并明确移除 selection，记录自己的名单，避免混入正式对照。
 同名结果禁止覆盖，下一次实验应使用新的 run_name 或输出目录。
+
+当前配置只填写实际生效的参数：C2 为 `oracle_depth: 3`；H2 为历史模式和固定
+Pikafish；D3/M2 的引擎参数仅用于诊断；M2 另有三种 `input_modes` 与可选图片输出。
+回合上限来自题目本身，不能用 `evaluation.max_plies` 或 CLI 覆盖。
+`search_depth`、`opponent_depth`、`optimal_depth`、旧图片模式名等会直接报错。
+正式和 smoke YAML 均直接引用冻结名单，不再附带未启用的抽样参数。
+
+代码职责也收拢到一条链路：`schema.py` / `dataset.py` 加载当前数据；
+`mate_in_one.py`、`rule_variants.py`、`history.py`、`multimodal.py` 各管一类评测；
+`variants/` 管现有棋规与搜索，`engines/pikafish.py` 管 UCI 引擎；
+`reference.py` / `validation.py` 管独立复验，`presentation.py` 管查看与离线图库。
+`visualization/xiangqi_vis.py` 的单题与轨迹 PNG/GIF 复用 M2 绘图，图表使用当前
+难度名，并将缺失诊断标为 missing，不当成零分。
+出题入口保留在 `scripts/annotate_xiangqi_d3.py`、`build_xiangqi_c2.py`、
+`build_xiangqi_h2.py` 和 `build_xiangqi_m2_from_d3.py`，完整命令见数据卡。
 
 网页版流程复用已准备的配置和名单：
 
@@ -616,9 +650,6 @@ provider:
 evaluation:
   input_modes:
     - text
-  opponent_depth: 4
-  optimal_depth: 3
-  max_plies: 20
 ```
 
 然后运行：
@@ -651,18 +682,21 @@ agent:
   max_tokens: 512
 ```
 
-先用一题验证：
+按正式冻结题单运行 CoT 图片条件（不是一题）：
 
 ```bash
 minibench run-task xiangqi-multimodal \
   --agent cot \
   --provider qwen \
   --model qwen3.8-max \
-  --sample-count 1 \
-  --input-modes chinese-piece-image
+  --input-modes chinese-piece-image \
+  --run-name xiangqi-m2-qwen-cot-image-new
 ```
 
 该 CLI 命令继承正式 YAML 中的 `DASHSCOPE_API_KEY` 和其他评测设置；完整自定义仍建议运行刚复制的 YAML。
+若只想试一题，在复制的 YAML 中删除 `task.selection`，显式设置
+`task.sampling: {enabled: true, count: 1, seed: 42, strategy: stratified}`，
+并换一个 `run.run_name`。不要改写冻结题单。
 
 ## 7. 结果、复现与离线运行
 
@@ -691,20 +725,8 @@ agent:
 
 存在 `predictions` 时会使用确定性的 prediction-file agent，不访问 API。
 
-旧象棋 0.1.x 数据或 run 目录必须显式迁移：
-
-```bash
-minibench migrate-xiangqi-v2 \
-  --input old-run \
-  --output migrated-run \
-  --dry-run
-
-minibench migrate-xiangqi-v2 \
-  --input old-run \
-  --output migrated-run
-```
-
-迁移映射位于 `data/xiangqi/migration_v1_to_v2.json`；工具不会改写 `raw_output` 或模型自由文本。
+象棋不再提供旧格式迁移或旧配置兼容。历史数据与结果原样保留；新实验只使用当前
+四份正式 YAML 或 `config/experiments/xiangqi_smoke/` 的四份小样本 YAML。
 
 ## 8. 常见错误
 

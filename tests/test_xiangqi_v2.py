@@ -20,7 +20,6 @@ from minibench.datasets.xiangqi.mate_in_one import (
     _extract_mate_in_one_uci,
     d3_position_features,
 )
-from minibench.datasets.xiangqi.migration import migrate_xiangqi_v2
 from minibench.datasets.xiangqi.presentation import build_gallery, inspect_record
 from minibench.datasets.xiangqi.rule_variants import (
     _extract_uci as _extract_c2_uci,
@@ -162,12 +161,6 @@ class XiangqiV2DataTests(unittest.TestCase):
         self.assertEqual({record["ruleset"] for record in records}, set(RULESETS))
         scenario_ids = {record["scenario_id"] for record in records}
         self.assertEqual(len(scenario_ids), 70)
-        mapping = json.loads(
-            Path("data/xiangqi/migration_v1_to_v2.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(len(mapping["task_ids"]), 1000)
-        self.assertEqual(len(set(mapping["task_ids"].values())), 1000)
-        self.assertEqual(len(mapping["scenario_ids"]), 70)
 
     @patch("minibench.datasets.xiangqi.rule_variants.score_moves", return_value=[])
     def test_rule_variant_candidates_include_standard_only_moves(self, _score_moves):
@@ -198,7 +191,6 @@ class XiangqiV2DataTests(unittest.TestCase):
         result = evaluate_rule_variant_task(
             task,
             StandardOnlyMoveAgent(),
-            max_steps=1,
         )
         self.assertEqual(result.steps[0]["uci"], standard_only_uci)
         self.assertIn("variant_violation", result.reasons)
@@ -229,48 +221,6 @@ class XiangqiV2DataTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertNotIn("WINNING STATUS", source)
-
-    def test_migration_manifest_matches_immutable_legacy_revision(self):
-        mapping = json.loads(
-            Path("data/xiangqi/migration_v1_to_v2.json").read_text(encoding="utf-8")
-        )
-        archive = Path("data/xiangqi/legacy") / mapping["dataset_revision"]
-        by_id = {
-            record["id"]: record
-            for path in archive.glob("*/tasks.jsonl")
-            for record in (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
-        }
-        self.assertTrue(by_id)
-        projections = []
-        for old_id, new_id in sorted(mapping["task_ids"].items()):
-            record = by_id[new_id]
-            projection = {
-                "old_id": old_id,
-                "new_id": new_id,
-                **{
-                    key: record[key]
-                    for key in (
-                        "fen",
-                        "agent_color",
-                        "goal",
-                        "max_plies",
-                        "difficulty",
-                        "piece_count",
-                        "oracle",
-                    )
-                },
-            }
-            for key in ("scenario_id", "ruleset"):
-                if key in record:
-                    projection[key] = record[key]
-            projections.append(projection)
-        serialized = json.dumps(
-            projections,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode()
-        self.assertEqual(sha256(serialized).hexdigest(), mapping["semantic_sha256"])
 
     def test_sampling_is_seeded_and_preserves_family_design(self):
         expected_sizes = {
@@ -325,20 +275,15 @@ class XiangqiV2DataTests(unittest.TestCase):
         for family, config_path in CONFIG_PATHS.items():
             config = load_experiment_config(config_path)
             self.assertEqual(config["task"]["prompt_version"], "xiangqi-reasoning-v2")
-            self.assertFalse(config["task"]["sampling"]["enabled"])
+            self.assertNotIn("sampling", config["task"])
             selection = config["task"]["selection"]
             self.assertEqual(sha256(Path(selection["path"]).read_bytes()).hexdigest(), selection["sha256"])
             if family == "xiangqi-history":
-                self.assertEqual(config["task"]["sampling"]["count"], 30)
-                self.assertEqual(config["task"]["sampling"]["strategy"], "stratified")
                 self.assertEqual(config["evaluation"]["history_mode"], "paired")
                 self.assertEqual(config["evaluation"]["pikafish_depth"], 16)
             if family == "xiangqi-rule-variants":
-                self.assertEqual(config["task"]["sampling"]["strategy"], "paired-stratified")
                 self.assertIn("oracle_depth", config["evaluation"])
-                self.assertEqual(config["evaluation"]["max_plies"], 1)
             if family == "xiangqi-multimodal":
-                self.assertEqual(config["evaluation"]["max_plies"], 1)
                 self.assertTrue(config["evaluation"]["verify_with_pikafish"])
             self.assertEqual(config["agent"]["name"], "direct")
             self.assertEqual(config["provider"]["name"], "qwen")
@@ -352,7 +297,10 @@ class XiangqiV2DataTests(unittest.TestCase):
             for family in XIANGQI_FAMILIES:
                 config = load_experiment_config(CONFIG_PATHS[family])
                 config["task"].pop("selection", None)
-                config["task"]["sampling"].update(enabled=True, count=1)
+                config["task"]["sampling"] = {
+                    "enabled": True, "count": 1, "seed": 42,
+                    "strategy": "paired-stratified" if family == "xiangqi-rule-variants" else "stratified",
+                }
                 config["agent"]["predictions"] = str(predictions)
                 config["run"].update(output_dir=str(root), run_name=family)
                 original_spec = get_task_family_spec(family)
@@ -389,7 +337,7 @@ class XiangqiV2DataTests(unittest.TestCase):
                 self.assertEqual(metadata["selected_record_count"], 1 if family != "xiangqi-rule-variants" else 4)
 
 
-class XiangqiV2PresentationAndMigrationTests(unittest.TestCase):
+class XiangqiV2PresentationTests(unittest.TestCase):
     def test_inspect_terminal_json_and_png(self):
         task_id = "xiangqi-history-0001"
         terminal = inspect_record(
@@ -416,80 +364,9 @@ class XiangqiV2PresentationAndMigrationTests(unittest.TestCase):
         self.assertEqual(text.count('"schema_version":2'), 1000)
         self.assertIn("xiangqi-multimodal-m2-0250", text)
 
-    def test_old_task_name_is_rejected_with_migration_hint(self):
-        with self.assertRaisesRegex(ValueError, "migrate-xiangqi-v2"):
+    def test_only_current_family_names_are_supported(self):
+        with self.assertRaisesRegex(ValueError, "unknown Xiangqi task"):
             inspect_record("D3", "d3-0001", output_format="terminal")
-
-    def test_safe_result_migration_preserves_free_text(self):
-        raw_output = "keep d3-0001, img_cn, variant_a exactly as model text"
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "old.jsonl"
-            destination = root / "new.jsonl"
-            source.write_text(
-                json.dumps(
-                    {
-                        "task_id": "d3-0001",
-                        "mode": "img_cn",
-                        "raw_output": raw_output,
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            dry = migrate_xiangqi_v2(source, destination, dry_run=True)
-            self.assertFalse(destination.exists())
-            self.assertEqual(dry["unrecognized"], [])
-            migrate_xiangqi_v2(source, destination)
-            migrated = json.loads(destination.read_text(encoding="utf-8"))
-            self.assertEqual(migrated["task_id"], "xiangqi-mate-in-one-0001")
-            self.assertEqual(migrated["mode"], "chinese-piece-image")
-            self.assertEqual(migrated["raw_output"], raw_output)
-            with self.assertRaises(FileExistsError):
-                migrate_xiangqi_v2(source, destination)
-            with self.assertRaisesRegex(ValueError, "in-place"):
-                migrate_xiangqi_v2(source, source)
-
-    def test_unknown_id_is_reported(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "old.json"
-            source.write_text('{"task_id":"d3-9999"}\n', encoding="utf-8")
-            report = migrate_xiangqi_v2(
-                source, root / "new.json", dry_run=True
-            )
-            self.assertEqual(report["unrecognized"], ["d3-9999"])
-
-    def test_standard_run_directory_is_migrated_with_report(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "old-run"
-            destination = root / "new-run"
-            source.mkdir()
-            (source / "predictions.jsonl").write_text(
-                json.dumps({"task_id": "h2-0001", "history_mode": "full"})
-                + "\n",
-                encoding="utf-8",
-            )
-            (source / "summary.txt").write_text("human-readable summary\n", encoding="utf-8")
-
-            report = migrate_xiangqi_v2(source, destination)
-
-            prediction = json.loads(
-                (destination / "predictions.jsonl").read_text(encoding="utf-8")
-            )
-            self.assertEqual(prediction["task_id"], "xiangqi-history-0001")
-            self.assertEqual(prediction["history_mode"], "full-state")
-            self.assertEqual(
-                (destination / "summary.txt").read_text(encoding="utf-8"),
-                "human-readable summary\n",
-            )
-            saved_report = json.loads(
-                (destination / "migration-report.json").read_text(encoding="utf-8")
-            )
-            self.assertEqual(saved_report["converted"], report["converted"])
-            self.assertEqual(saved_report["unrecognized"], [])
-
 
 if __name__ == "__main__":
     unittest.main()

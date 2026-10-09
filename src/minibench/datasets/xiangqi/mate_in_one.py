@@ -21,7 +21,6 @@ from minibench.datasets.xiangqi.runtime import (
 from minibench.datasets.xiangqi.dataset import XiangqiTask
 from minibench.datasets.xiangqi.engines.pikafish import (
     PikafishEngine,
-    PikafishError,
     board_to_pikafish_fen,
     resolve_pikafish_executable,
 )
@@ -43,8 +42,6 @@ class MateInOneResult:
     cp_before: float | None
     cp_after: float | None
     cp_loss: float | None
-    agent_action: int
-    optimal_action: int
     agent_uci: str
     optimal_uci: str
     raw_output: str
@@ -179,29 +176,6 @@ def _parse_cp_from_info(info_lines) -> float | None:
     return None
 
 
-def _get_pikafish_eval(
-    engine: PikafishEngine, env, side_to_move: str, depth: int = 15
-) -> tuple[str | None, float | None, str]:
-    """Get Pikafish best move and evaluation (cp) for a position.
-
-    Returns (uci_move, cp, fen). uci_move and cp are None on error.
-    """
-    fen = board_to_pikafish_fen(env.state, side_to_move=side_to_move)
-    try:
-        uci_move, info_lines = engine.bestmove_for_fen(fen, depth=depth)
-    except (PikafishError, Exception) as exc:
-        msg = str(exc)
-        if "King can be captured" in msg or "Unsupported position" in msg:
-            print(f"      [SKIP] Illegal position: {fen}")
-        else:
-            print(f"      [ERROR] Pikafish: {msg[:120]}")
-        return None, None, fen
-
-    cp = _parse_cp_from_info(info_lines)
-
-    return uci_move, cp, fen
-
-
 def _ensure_engine_alive(engine: PikafishEngine) -> None:
     """Restart engine if the process has crashed."""
     if engine._process is not None and engine._process.poll() is None:
@@ -307,7 +281,7 @@ def evaluate_mate_in_one_tasks(
                 task_id=task.id or f"xiangqi-mate-in-one-{i + 1:04d}", difficulty=task.difficulty,
                 is_legal=is_legal, is_optimal=is_optimal, goal_achieved=goal_achieved,
                 cp_before=rounded(cp_before), cp_after=rounded(cp_after), cp_loss=rounded(cp_loss),
-                agent_action=-1, optimal_action=-1, agent_uci=agent_uci or "PARSE_FAIL",
+                agent_uci=agent_uci or "PARSE_FAIL",
                 optimal_uci=optimal_uci or "", raw_output=raw_output, tags=list(task.tags),
                 legality_score=float(is_legal),
                 correctness_score=(1.0 if goal_achieved else 0.5 if is_legal else 0.0) if goal_achieved is not None else None,

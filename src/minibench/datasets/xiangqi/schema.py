@@ -20,12 +20,6 @@ FAMILY_PATHS = {
     "xiangqi-history": Path("data/xiangqi/history/tasks.jsonl"),
     "xiangqi-multimodal": Path("data/xiangqi/multimodal/tasks.jsonl"),
 }
-LEGACY_FAMILY_NAMES = {
-    "D3": "xiangqi-mate-in-one",
-    "C2": "xiangqi-rule-variants",
-    "H2": "xiangqi-history",
-    "M2": "xiangqi-multimodal",
-}
 RULESETS = (
     "standard",
     "horse-no-leg-block",
@@ -302,8 +296,6 @@ def runtime_dict(record: dict[str, Any]) -> dict[str, Any]:
         board=board,
         side_to_move="ally" if side_to_move == "red" else "enemy",
         agent_side="ally" if record["agent_color"] == "red" else "enemy",
-        goal="agent_win",
-        max_steps=record["max_plies"],
     )
     if record["family"] == "xiangqi-rule-variants":
         payload["rules"] = internal_rules(record)

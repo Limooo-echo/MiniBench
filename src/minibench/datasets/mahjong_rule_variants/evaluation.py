@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 from time import strftime
@@ -46,6 +46,10 @@ class MahjongRuleVariantInstanceResult:
     final_hand: list[str]
     reasons: list[str]
     tags: tuple[str, ...]
+    process_score: float = 0.0
+    correct_steps: int = 0
+    total_steps: int = 0
+    step_scores: list[dict[str, Any]] = field(default_factory=list)
 
 
 def evaluate_mahjong_rule_variant_tasks(
@@ -298,6 +302,8 @@ def summarize_mahjong_rule_variants(
         "total": total,
         "success": success,
         "success_rate": success / total if total else 0.0,
+        "average_score": sum(result.score for result in results) / total if total else 0.0,
+        "average_process_score": sum(result.process_score for result in results) / total if total else 0.0,
         "illegal_tsumo_total": illegal_tsumo_total,
         "by_channel": by_channel,
         "by_reason": by_reason,
@@ -343,6 +349,10 @@ def write_mahjong_rule_variant_run(
                         "raw_outputs": result.raw_outputs,
                         "agent_actions": result.agent_actions,
                         "action_errors": result.action_errors,
+                        "process_score": result.process_score,
+                        "correct_steps": result.correct_steps,
+                        "total_steps": result.total_steps,
+                        "step_scores": result.step_scores,
                         "win_rule": result.win_rule,
                         "variant_only_win": result.variant_only_win,
                     },
@@ -382,6 +392,8 @@ def _make_result(
     final_hand: list[str],
     reasons: list[str],
 ) -> MahjongRuleVariantInstanceResult:
+    from minibench.datasets.mahjong_solo.oracle import score_episode
+    process = score_episode(task, raw_outputs, channel=task.channel)
     return MahjongRuleVariantInstanceResult(
         task_id=task.id,
         source_task_id=task.source_task_id,
@@ -389,7 +401,11 @@ def _make_result(
         active_rules=task.active_rules,
         observation_mode=observation_mode,
         success=success,
-        score=float(success),
+        score=1.0 if success else process["process_score"],
+        process_score=process["process_score"],
+        correct_steps=process["correct_steps"],
+        total_steps=process["total_steps"],
+        step_scores=process["steps"],
         win_rule=win_rule,
         variant_only_win=(
             success and task.channel != STANDARD_RULES and win_rule == task.channel

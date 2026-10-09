@@ -1,5 +1,10 @@
 # 象棋推理评测修复与验收记录
 
+此文记录 r1 的历史修复与当时验收结果。后续源码清理保留了题库、prompt 和
+agent 实现，但源码指纹已变化；当前命令和配置以 README／数据卡为准。
+独立验证应写入新的报告并通过 `audit_xiangqi_release.py --validation-report`
+显式使用，不覆盖本文链接的历史证据。
+
 数据版本：`xiangqi-2026-09-19-r1`。协议版本：`xiangqi-reasoning-v2`。
 修复基线为队友最新版 `eab452b069b40a1cfaec39fe2b3895d7503484f2`，在隔离分支 `codex/xiangqi-reasoning-fixes` 实施；按用户要求同步回原本地仓库，未 push，未运行付费语言模型评测。
 
@@ -38,7 +43,9 @@ H2 旧题中 200 条双深度证书有效。其中 14 条因参考距离变化�
 
 象棋在 D／R／H／V 的权重保持 **0.20／0.35／0.20／0.35**。已修复已知调用缺少用量状态时的覆盖率分母。缺失不补零、不重新分配原有权重；不完整维度保留缺失及覆盖率。
 
-[新版清单](../config/scoring/manifest.example.yaml) 与 [旧版归档清单](../config/scoring/manifest.legacy-v1.example.yaml) 均可载入，失效数据引用和哈希已修复。空 runs 不生成真实模型排名。
+当时已检查新版与旧版归档清单均可载入，失效数据引用和哈希已修复。
+后续清理已移除旧版归档清单；当前仅维护 [新版清单](../config/scoring/manifest.example.yaml)。
+空 runs 不生成真实模型排名。
 
 [冻结选题](../data/xiangqi/evaluation_samples/manifest.json)：小样本 D3/H2/M2 各 6 个局面、C2 3 场景；正式各 30 个局面、C2 10 场景。分别产生 48／220 个条件观测。D3/M2 同源配对；同一基础模型的各架构共用名单，各自默认架构配置应登记后复用。
 

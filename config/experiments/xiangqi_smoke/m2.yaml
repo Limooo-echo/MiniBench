@@ -2,11 +2,6 @@ task:
   prompt_version: xiangqi-reasoning-v2
   family: xiangqi-multimodal
   path: data/xiangqi/multimodal/tasks.jsonl
-  sampling:
-    enabled: false
-    seed: 42
-    count: 30
-    strategy: stratified
   selection:
     path: data/xiangqi/evaluation_samples/smoke/m2.jsonl
     sha256: ddaa18fda992d4b80654bb9e0919c2e69186c3d06079606a4221846f480e4509
@@ -27,7 +22,6 @@ evaluation:
   - text
   - chinese-piece-image
   - latin-piece-image
-  max_plies: 1
   verify_with_pikafish: true
   pikafish_depth: 8
   pikafish_timeout: 60.0

@@ -1,7 +1,7 @@
 """Deterministic, offline aggregation of a *predeclared* evaluation suite.
 
 The caller supplies every expected observation, including missing slots.  No
-group, repeat, or task weight is inferred from the subset of successful runs.
+group or task weight is inferred from the subset of successful runs.
 This module deliberately knows nothing about task runners or language models.
 """
 
@@ -42,6 +42,7 @@ def _score(y: float | None, p: float | None, cap: float) -> float | None:
 
 
 def _validate_weights(weights: dict) -> dict[str, dict[str, float]]:
+    from minibench.scoring.manifest import DEFAULT_WEIGHTS
     if set(weights) != set(TASKS):
         raise ValueError(f"weights must contain exactly {', '.join(TASKS)}")
     result = {}
@@ -58,6 +59,9 @@ def _validate_weights(weights: dict) -> dict[str, dict[str, float]]:
         if not math.isclose(sum(result[t][dimension] for t in TASKS), 1.0,
                             abs_tol=1e-12, rel_tol=0):
             raise ValueError(f"{dimension} task weights must sum to 1")
+    if any(not math.isclose(result[t][d], DEFAULT_WEIGHTS[t][d], abs_tol=1e-9)
+           for t in TASKS for d in DIMENSIONS):
+        raise ValueError("task weights must be equal within each dimension")
     return result
 
 
@@ -66,9 +70,10 @@ def _prepare(rows: list[dict], weights: dict, cap: float) -> list[dict]:
     identities = set()
     source_strata: dict[tuple[str, str], str] = {}
     fields = ("profile", "architecture", "task", "dimension", "mode", "group",
-              "difficulty", "item_id", "repeat_id")
+              "difficulty", "item_id")
     for original in rows:
         row = dict(original)
+        row["repeat_id"] = str(row.get("repeat_id", "1"))
         for field in fields:
             if field not in row or row[field] is None or str(row[field]) == "":
                 raise ValueError(f"each expected row needs {field}")
@@ -97,21 +102,19 @@ def _prepare(rows: list[dict], weights: dict, cap: float) -> list[dict]:
         row["strict_score"] = row["y"]
         prepared.append(row)
 
-    # Tree leaves are items.  Explicit expected repeats are the final level.
+    # Each item has exactly one observation per condition.  repeat_id is
+    # retained only as a source label for older saved run files.
     trees: dict[tuple, dict] = defaultdict(dict)
     for row in prepared:
         key = row["profile"], row["architecture"], row["task"], row["dimension"]
         tree = trees[key]
-        for level in ("mode", "group", "difficulty", "item_id"):
+        for level in ("mode", "group", "difficulty"):
             tree = tree.setdefault(row[level], {})
-        tree[row["repeat_id"]] = row
+        tree[row["item_id"]] = row
 
     def assign(node: dict, weight: float, depth: int, axis_weight: float) -> None:
         child_weight = weight / len(node)
-        if depth == 4:
-            sources = {r["source_id"] for r in node.values() if r["source_id"] is not None}
-            if len(sources) > 1:
-                raise ValueError("repeats of one item must share source_id")
+        if depth == 3:
             for row in node.values():
                 row["within_task_weight"] = child_weight
                 row["axis_weight"] = child_weight * axis_weight
@@ -176,7 +179,7 @@ def _axis(cells: dict, weights: dict, dimension: str) -> dict:
 
 def _signature(rows: list[dict], dimension: str, weights: dict) -> tuple:
     fields = ("task", "mode", "group", "difficulty", "item_id", "source_id",
-              "source_stratum", "repeat_id")
+              "source_stratum")
     return tuple(sorted(tuple(str(r.get(f)) for f in fields) for r in rows
                         if r["dimension"] == dimension and weights[r["task"]][dimension] > 0))
 
@@ -193,7 +196,7 @@ def _bootstrap(profile_rows: list[dict], architectures: dict, weights: dict,
     """Paired ordinary cluster bootstrap, with fixed upper-level weights.
 
     Each source is sampled once per draw, and its multiplicity applies to all
-    modes, variants, repeats and architectures.  Leaf means are recomputed;
+    modes, variants and architectures.  Leaf means are recomputed;
     mode/group/difficulty weights never depend on resampled observation counts.
     """
     # Split source strata by their complete fixed-leaf support.  This keeps
@@ -266,10 +269,8 @@ def _bootstrap(profile_rows: list[dict], architectures: dict, weights: dict,
                     numerator = np.zeros(samples, dtype=float)
                     denominator = np.zeros(samples, dtype=float)
                     for item in items.values():
-                        if len({r["source_id"] for r in item}) != 1:
-                            raise ValueError("repeats of one item must share source_id")
                         multiplicity = multipliers[item[0]["source_id"]]
-                        value = sum(_score(r["y"], r["p"], cap_value) for r in item) / len(item)
+                        value = _score(item[0]["y"], item[0]["p"], cap_value)
                         numerator += multiplicity * value
                         denominator += multiplicity
                     leaf_weight = sum(r["axis_weight"] for r in leaf)
@@ -326,7 +327,7 @@ def _weight_scenarios(weights: dict, dimension: str) -> list[tuple[str, dict[str
 
 def _sensitivity(profile_rows: list[dict], architectures: dict, weights: dict,
                  main_cap: float) -> dict:
-    caps = sorted({0.0, 0.25, 0.5, main_cap})
+    caps = [main_cap]
     cells = {}
     for architecture in architectures:
         for task in TASKS:
@@ -391,7 +392,7 @@ def _sensitivity(profile_rows: list[dict], architectures: dict, weights: dict,
     return {"ranges": ranges, "pairwise": pairwise, "scenarios": scenarios}
 
 
-def aggregate_suite(rows: list[dict], weights: dict, *, partial_credit_cap: float = .25,
+def aggregate_suite(rows: list[dict], weights: dict, *, partial_credit_cap: float = 1.0,
                     bootstrap_samples: int = 2000, seed: int = 20260909) -> dict:
     """Score every predeclared observation and aggregate within each profile.
 
@@ -402,8 +403,8 @@ def aggregate_suite(rows: list[dict], weights: dict, *, partial_credit_cap: floa
     """
     validated = _validate_weights(weights)
     cap = _unit(partial_credit_cap, "partial_credit_cap")
-    if cap is None:
-        raise ValueError("partial_credit_cap cannot be null")
+    if isinstance(partial_credit_cap, bool) or cap != 1.0:
+        raise ValueError("partial_credit_cap is fixed at 1; process credit must not be scaled")
     if isinstance(bootstrap_samples, bool) or not isinstance(bootstrap_samples, int) or bootstrap_samples < 0:
         raise ValueError("bootstrap_samples must be a nonnegative integer")
     prepared = _prepare(rows, validated, cap)
@@ -440,7 +441,7 @@ def aggregate_suite(rows: list[dict], weights: dict, *, partial_credit_cap: floa
         "profiles": profiles,
         "item_scores": prepared,
         "sensitivity": {"weight_schemes": ["main", "equal", "one_positive_weight_x0.8_or_x1.2_then_normalize"],
-                        "partial_credit_caps": sorted({0.0, 0.25, 0.5, cap}),
+                        "partial_credit_caps": [cap],
                         "results_location": "profiles.<profile>.sensitivity"},
         "uncertainty": {
             "method": "paired_stratified_original_source_cluster_bootstrap",
@@ -449,6 +450,6 @@ def aggregate_suite(rows: list[dict], weights: dict, *, partial_credit_cap: floa
             "minimum_valid_draw_fraction": 1.0,
             "source_stratum_refinement": "fixed_leaf_support_signature",
             "note": "Intervals describe sampled original tasks, not model run-to-run stability. "
-                    "Modes, variants and repeats of one source share the same bootstrap multiplicity.",
+                    "Modes and variants of one source share the same bootstrap multiplicity.",
         },
     }

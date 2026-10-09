@@ -80,7 +80,7 @@ def _error_reason(record: dict) -> str | None:
         for reason in reasons:
             if isinstance(reason, str) and reason.lower().startswith((
                 "error:", "api_error", "provider_error", "transport_error", "engine_error",
-                "evaluation_error", "scorer_error", "infrastructure_error", "llm_error", "pikafish_error",
+                "evaluation_error", "scorer_error", "infrastructure_error", "llm_error", "pikafish_error", "agent_request_error",
             )):
                 return reason
     return None
@@ -223,36 +223,8 @@ def _mahjong(record: dict, task: dict | None, dimension: str) -> dict:
     parsed_task = mahjong_task_from_dict(task) if task is not None else None
     if parsed_task is not None:
         y = float(validate_mahjong_answer(parsed_task, parsed)[0])
-    if dimension == "V":
-        if parsed_task is not None:
-            # Existing visual prompts require BOTH regions, even an empty table.
-            visual = "visual" in parsed_task.tags or parsed_task.image is not None
-            expected = {"hand": list(parsed_task.hand)}
-            if visual or parsed_task.visible_tiles:
-                expected["visible_tiles"] = list(parsed_task.visible_tiles)
-        else:
-            expected = record.get("expected_transcription")
-        if not isinstance(expected, dict) or not expected:
-            return _unavailable(record, "missing_required_transcription_regions", y)
-        scores = {}
-        for region in ("hand", "visible_tiles"):
-            if region not in expected:
-                continue
-            truth = expected[region]
-            if not isinstance(truth, list) or not all(isinstance(x, str) for x in truth):
-                return _unavailable(record, "invalid_expected_transcription", y)
-            predicted = parsed.get(region)
-            if not isinstance(predicted, list) or not all(isinstance(x, str) for x in predicted):
-                if not has_raw:
-                    return _unavailable(record, f"missing_transcription_log:{region}", y)
-                scores[region] = 0.0
-            else:
-                scores[region] = _counter_f1(Counter(predicted), Counter(truth))
-        if not scores:
-            return _unavailable(record, "missing_required_transcription_regions", y)
-        return _result(record, y, sum(scores.values()) / len(scores),
-                       status="ok" if y is not None else "missing",
-                       evidence={"method": "region_mean_tile_multiset_f1", "region_scores": scores})
+    # Image input changes only presentation.  Every goal uses the same outcome
+    # and process credit as its text counterpart; transcription is diagnostic.
     goal = task.get("goal") if task is not None else record.get("goal")
     expected = record.get("expected_answer")
     if goal is None and isinstance(expected, dict) and "winning_tiles" in expected:
@@ -294,6 +266,22 @@ def _mahjong(record: dict, task: dict | None, dimension: str) -> dict:
     return _unavailable(record, "missing_or_unsupported_mahjong_goal", y)
 
 
+def _mahjong_episode(record: dict, task: dict | None, family: str) -> dict:
+    from minibench.datasets.mahjong_solo.dataset import mahjong_solo_task_from_dict
+    from minibench.datasets.mahjong_solo.oracle import score_episode
+    from minibench.datasets.mahjong_rule_variants.rules import STANDARD_RULES
+    y = _outcome(record)
+    if task is None or not isinstance(record.get("raw_outputs"), list):
+        return _unavailable(record, "missing_original_task_or_complete_action_log", y)
+    channel = task.get("channel") if family == "mahjong_rule_variants" else STANDARD_RULES
+    if not isinstance(channel, str):
+        return _unavailable(record, "missing_active_rule_channel", y)
+    scored = score_episode(mahjong_solo_task_from_dict(task), record["raw_outputs"], channel=channel)
+    if not scored["complete"]:
+        return _unavailable(record, "incomplete_action_log", y)
+    return _result(record, float(scored["success"]), scored["process_score"], evidence=scored)
+
+
 def score_record(family: str, dimension: str, record: dict, task: dict | None, *, mode: str) -> dict:
     """Score one saved answer without generating answers, loading engines or writing files.
 
@@ -313,12 +301,14 @@ def score_record(family: str, dimension: str, record: dict, task: dict | None, *
             result = _one_stroke(record, task, dimension)
         elif family == "mahjong":
             result = _mahjong(record, task, dimension)
+        elif family in {"mahjong_solo", "mahjong_rule_variants"}:
+            result = _mahjong_episode(record, task, family)
         elif family in {"xiangqi_mate_in_one", "xiangqi_history"}:
             y = _outcome(record, "goal_achieved")
             result = _result(record, y, 0.0, status="ok" if y is not None else "missing",
                              reasons=[] if y is not None else ["missing_goal_outcome"],
                              evidence={"method": "binary_original_goal", "outcome_field": "goal_achieved"})
-        elif family in {"xiangqi_rule_variants", "xiangqi_multimodal", "mahjong_solo", "mahjong_rule_variants"}:
+        elif family in {"xiangqi_rule_variants", "xiangqi_multimodal"}:
             y = _outcome(record)
             result = _result(record, y, 0.0, status="ok" if y is not None else "missing",
                              reasons=[] if y is not None else ["missing_success_outcome"],

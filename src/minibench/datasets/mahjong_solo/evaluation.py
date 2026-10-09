@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 import re
@@ -59,6 +59,10 @@ class MahjongSoloInstanceResult:
     reasons: list[str]
     tags: tuple[str, ...]
     metrics: dict[str, object]
+    process_score: float = 0.0
+    correct_steps: int = 0
+    total_steps: int = 0
+    step_scores: list[dict[str, Any]] = field(default_factory=list)
 
 
 def evaluate_mahjong_solo_tasks(
@@ -463,6 +467,8 @@ def summarize_mahjong_solo(
         ),
         "success": success_count,
         "success_rate": success_count / total if total else 0.0,
+        "average_score": mean(result.score for result in results) if results else 0.0,
+        "average_process_score": mean(result.process_score for result in results) if results else 0.0,
         "illegal_tsumo_total": illegal_tsumo_total,
         "move_scored_total": sum(1 for result in results if result.move_scores),
         "per_move_average_score": mean(all_move_scores) if all_move_scores else None,
@@ -535,12 +541,18 @@ def _make_result(
     reasons: list[str],
     metrics: dict[str, object],
 ) -> MahjongSoloInstanceResult:
+    from minibench.datasets.mahjong_solo.oracle import score_episode
+    process = score_episode(task, raw_outputs)
     move_values = [float(item["move_score"]) for item in move_scores]
     return MahjongSoloInstanceResult(
         task_id=task.id,
         observation_mode=observation_mode,
         success=success,
-        score=1.0 if success else 0.0,
+        score=1.0 if success else process["process_score"],
+        process_score=process["process_score"],
+        correct_steps=process["correct_steps"],
+        total_steps=process["total_steps"],
+        step_scores=process["steps"],
         move_average_score=mean(move_values) if move_values else None,
         move_median_score=median(move_values) if move_values else None,
         draws=list(draws),

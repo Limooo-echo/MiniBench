@@ -102,20 +102,6 @@ def _extract_uci(raw: str) -> str | None:
 def _move_by_uci(moves: list[Move], uci: str | None) -> Move | None:
     return next((move for move in moves if move.to_uci() == uci), None)
 
-def _greedy_move(board: VariantBoard, side: int, agent_side: int, depth: int = 3) -> Move | None:
-    """贪心对手: 深度评分取第一 (与最优判定同深度, 保证对抗强度)."""
-    scored = score_moves(board, side, depth, agent_side)
-    if not scored:
-        return None
-    return scored[0][0]
-
-
-def _move_from_index(legal: list[Move], idx: int) -> Move | None:
-    if 1 <= idx <= len(legal):
-        return legal[idx - 1]
-    return None
-
-
 @dataclass
 class RuleVariantResult:
     id: str
@@ -142,12 +128,12 @@ class RuleVariantResult:
 
 
 def evaluate_rule_variant_task(
-    task: dict, agent: Agent, *, max_steps: int = 12, agent_side: int = 1,
-    search_depth: int | None = None, opponent_depth: int = 2, oracle_depth: int = 3,
+    task: dict, agent: Agent, *, oracle_depth: int = 3,
 ) -> RuleVariantResult:
     """The C2 protocol accepts every legal maximum-utility depth-three move."""
-    if (search_depth is not None and search_depth != 3) or oracle_depth != 3:
+    if isinstance(oracle_depth, bool) or oracle_depth != 3:
         raise ValueError("C2 reasoning protocol requires search depth 3")
+    agent_side = 1  # Current C2 records always ask Red to move.
     start = start_task_metrics(agent)
     steps, reasons = [], []
     status, error, raw, best_uci = "error", None, "", None
@@ -205,11 +191,9 @@ def evaluate_rule_variant_task(
         if raw or malformed:
             steps.append({"step_idx": 0, "actor": "agent", "raw_output": raw, "is_legal": legal,
                           "is_optimal": first_optimal, "uci": "PARSE_FAIL", "value_loss": value_loss})
-    difficulty = task.get("difficulty") or next(
-        (tag.split(":", 1)[1] for tag in task.get("tags", []) if tag.startswith("difficulty:")), "unknown")
     return RuleVariantResult(
-        id=task["id"], scenario_id=task.get("scenario_id", task["id"]), ruleset=task["ruleset"],
-        difficulty=difficulty, success=success, legality_rate=float(legal) if legal is not None else None,
+        id=task["id"], scenario_id=task["scenario_id"], ruleset=task["ruleset"],
+        difficulty=task["difficulty"], success=success, legality_rate=float(legal) if legal is not None else None,
         first_move_optimal=first_optimal, optimal_uci=best_uci, answer_correct=success,
         optimal_rate=float(first_optimal) if first_optimal is not None else None,
         avg_value_loss=rounded(value_loss, 3), value_quality_score=rounded(quality, 3), score=rounded(score, 3),
@@ -219,14 +203,12 @@ def evaluate_rule_variant_task(
 
 
 def evaluate_rule_variant_tasks(
-    tasks: list[dict], agent: Agent, *, max_steps: int = 12, search_depth: int | None = None,
-    opponent_depth: int = 2, oracle_depth: int = 3,
+    tasks: list[dict], agent: Agent, *, oracle_depth: int = 3,
     on_result: Callable[[RuleVariantResult], None] | None = None,
 ) -> list[RuleVariantResult]:
     results = []
     for task in tasks:
-        result = evaluate_rule_variant_task(task, agent, max_steps=max_steps, search_depth=search_depth,
-                                            opponent_depth=opponent_depth, oracle_depth=oracle_depth)
+        result = evaluate_rule_variant_task(task, agent, oracle_depth=oracle_depth)
         results.append(result)
         if on_result is not None:
             on_result(result)
@@ -288,7 +270,6 @@ def write_rule_variants_run(
     summary = summarize_rule_variants(results)
     summary["by_ruleset"] = {ruleset: summarize_rule_variants([r for r in results if r.ruleset == ruleset])
                               for ruleset in sorted({r.ruleset for r in results})}
-    summary.update(summary["by_ruleset"])
     (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     lines = ["Xiangqi Rule Variants Evaluation", f"Total: {summary['total']} Missing: {summary['missing']}"]
     for group, values in summary["by_ruleset"].items():

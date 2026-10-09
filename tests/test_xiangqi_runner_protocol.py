@@ -34,13 +34,15 @@ class RunnerProtocolTests(unittest.TestCase):
             source, selected, config_path = self.root / f"{key}-source.jsonl", self.root / f"{key}-selected.jsonl", self.root / f"{key}.yaml"
             source.write_text(json.dumps(other) + "\n" + json.dumps(record) + "\n")
             selected.write_text(json.dumps(record) + "\n")
-            config = {"task": {"family": family, "path": str(source), "sampling": {"enabled": False},
+            config = {"task": {"family": family, "path": str(source),
                                "selection": {"path": str(selected), "sha256": smoke._sha256(selected)}},
                       "agent": {"name": "direct"},
                       "provider": {"name": "qwen", "model": "fixture-model", "api_key_env": "NEVER_CALL_A_MODEL"},
-                      "evaluation": {"history_mode": "paired", "pikafish_depth": 8,
+                      "evaluation": {"pikafish_depth": 8,
                                      "pikafish_binary_sha256": "a" * 64, "pikafish_nnue_sha256": "b" * 64},
                       "run": {"output_dir": "runs", "run_name": key}}
+            if key == "h2":
+                config["evaluation"]["history_mode"] = "paired"
             config_path.write_text(yaml.safe_dump(config))
             self.families[key] = family, config_path, source, selected
         self.suite = self.root / "suite"

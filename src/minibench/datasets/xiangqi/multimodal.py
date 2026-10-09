@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import base64
-from collections import defaultdict
 from io import BytesIO
 import json
 from pathlib import Path
 import re
-import statistics
 from time import strftime
 from typing import Any, Callable, Sequence
 
@@ -40,10 +37,8 @@ from minibench.datasets.xiangqi.text_encoding import (
     piece_symbol,
 )
 from minibench.datasets.xiangqi.variants.board import Move, VariantBoard
-from minibench.datasets.xiangqi.variants.search import score_moves
 
 
-PIECE_NAME = {1: "K", 2: "A", 4: "B", 6: "N", 8: "R", 10: "C", 12: "P"}
 PIECE_CN = {
     1: "帅", -1: "将", 2: "仕", -2: "士", 4: "相", -4: "象",
     6: "马", -6: "馬", 8: "车", -8: "車", 10: "炮", -10: "砲",
@@ -64,7 +59,6 @@ XIANGQI_MULTIMODAL_INPUT_MODES = (
     "latin-piece-image",
 )
 XIANGQI_RENDERER_VERSION = 2
-VALUE_LOSS_CAP = 10_000.0
 M2_CP_LOSS_REPORT_CAP = 500.0
 UCI_MOVE_PATTERN = re.compile(r"\b([a-i][0-9][a-i][0-9])\b", re.IGNORECASE)
 COORDINATE_CONVENTION = "UCI a0a1 uses file a-i and rank 0-9; rank 0 is the bottom row."
@@ -146,15 +140,8 @@ def render_board_png(board: Sequence[Sequence[int]], mode: str) -> bytes:
     return buffer.getvalue()
 
 
-def render_board(board: Sequence[Sequence[int]], mode: str) -> str:
-    """Legacy compatibility API returning a base64-encoded PNG."""
-
-    return base64.b64encode(render_board_png(board, mode)).decode("ascii")
-
-
 def evaluate_xiangqi_multimodal_tasks(
     tasks: Sequence[dict[str, Any]], agent: Agent, *, modes: Sequence[str] = XIANGQI_MULTIMODAL_INPUT_MODES,
-    opponent_depth: int = 4, optimal_depth: int = 3, max_steps: int = 20,
     pikafish_path: str | Path | None = None, pikafish_depth: int = 8,
     pikafish_timeout: float = 60.0, verify_with_pikafish: bool = True,
     step_dir: str | Path | None = None, progress: Callable[[str], None] | None = None,
@@ -197,8 +184,7 @@ def evaluate_xiangqi_multimodal_tasks(
                     reset_agent(agent)
                     stage = "judge"
                     steps, success, reasons = _run_multimodal_game(
-                        task, agent, mode, opponent_depth=opponent_depth, optimal_depth=optimal_depth,
-                        max_steps=max_steps, step_root=step_root, pikafish=engine,
+                        task, agent, mode, step_root=step_root, pikafish=engine,
                         pikafish_depth=pikafish_depth, initial_analysis=initial_analysis,
                         diagnostics=diagnostics,
                     )
@@ -251,12 +237,10 @@ def _analysis_value_cp(analysis: PikafishAnalysis) -> float:
 
 
 def _agent_side(task: dict[str, Any]) -> int:
-    color = task.get("agent_color")
-    if color is not None:
-        if color not in {"red", "black"}:
-            raise ValueError(f"unsupported Xiangqi agent color: {color!r}")
-        return 1 if color == "red" else -1
-    return -1 if task.get("side_to_move") == "enemy" else 1
+    color = task["agent_color"]
+    if color not in {"red", "black"}:
+        raise ValueError(f"unsupported Xiangqi agent color: {color!r}")
+    return 1 if color == "red" else -1
 
 
 def _verified_mate_moves(task: dict[str, Any]) -> set[str]:
@@ -288,12 +272,12 @@ def _verify_m2_oracle(
 
 
 def summarize_xiangqi_multimodal(results: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    valid = [result for result in results if result.get("status", "ok") != "error"]
+    valid = [result for result in results if result["status"] != "error"]
     by_mode = {mode: [r for r in results if r["mode"] == mode] for mode in sorted({r["mode"] for r in results})}
     paired = summarize_paired_modes(valid, baseline_mode="text")
     mode_summary = {}
     for mode, items in by_mode.items():
-        known = [item for item in items if item.get("status", "ok") != "error"]
+        known = [item for item in items if item["status"] != "error"]
         losses = [item["engine_cp_loss"] for item in known if item.get("engine_cp_loss") is not None]
         mode_summary[mode] = {
             **status_counts(items), "success": sum(bool(item["success"]) for item in known),
@@ -337,8 +321,8 @@ def write_xiangqi_multimodal_run(
 
 
 def _run_multimodal_game(
-    task: dict[str, Any], agent: Agent, mode: str, *, opponent_depth: int, optimal_depth: int,
-    max_steps: int, step_root: Path | None, pikafish: PikafishEngine | None, pikafish_depth: int,
+    task: dict[str, Any], agent: Agent, mode: str, *,
+    step_root: Path | None, pikafish: PikafishEngine | None, pikafish_depth: int,
     initial_analysis: PikafishAnalysis | None, diagnostics: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], bool, list[str]]:
     diagnostics = diagnostics if diagnostics is not None else []
@@ -447,11 +431,6 @@ def _extract_uci(raw: str) -> str | None:
 
 def _move_by_uci(moves: Sequence[Move], uci: str | None) -> Move | None:
     return next((move for move in moves if move.to_uci() == uci), None)
-
-def _format_move(move: Move, board: VariantBoard) -> str:
-    piece = board.board[move.fr][move.fc]
-    return f"{PIECE_NAME.get(abs(_piece_base(piece)), '?')} {move.to_uci()}"
-
 
 def board_to_compact_with_coordinates(board: Sequence[Sequence[int]]) -> str:
     """Render the text condition with the same coordinate labels as images."""

@@ -15,7 +15,9 @@ REQUIRED_EXTERNAL_PROVENANCE = (
 )
 
 
-def audit_xiangqi_release(manifest_path: str | Path) -> dict[str, Any]:
+def audit_xiangqi_release(
+    manifest_path: str | Path, *, validation_report: str | Path | None = None,
+) -> dict[str, Any]:
     manifest_file = Path(manifest_path)
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
     repository_root = Path(__file__).resolve().parents[4]
@@ -78,7 +80,8 @@ def audit_xiangqi_release(manifest_path: str | Path) -> dict[str, Any]:
         fen: families for fen, families in cross_family.items()
         if fen not in expected_cross_family
     }
-    gate_path = manifest_file.parent / "independent_validation.json"
+    gate_path = (Path(validation_report) if validation_report is not None
+                 else manifest_file.parent / "independent_validation.json")
     gate_problems = []
     if gate_path.is_file():
         gate = json.loads(gate_path.read_text(encoding="utf-8"))
