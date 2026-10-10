@@ -23,9 +23,8 @@ from minibench.datasets.mahjong_rule_variants.prompting import (
     system_prompt_for_rule_channel,
 )
 from minibench.datasets.mahjong_rule_variants.rules import (
-    CYCLIC_SEQUENCES,
+    CYCLIC_ONE_TILE_SUBSTITUTION,
     MODIFIED_RULES,
-    NO_CROSS_SUIT_DUPLICATE_SEQUENCES,
     RED_DRAGON_WILDCARD,
     RULE_CHANNELS,
     STANDARD_RULES,
@@ -134,47 +133,51 @@ def make_task(channel, initial_hand, wall, task_id="variant-test"):
 class MahjongRuleVariantTests(unittest.TestCase):
     def test_standard_channel_uses_standard_winning_rules(self):
         winning_hand = "1m 2m 3m 4p 5p 6p 7s 8s 9s E E E N N".split()
-        cyclic_only_hand = "8m 9m 1m 2p 3p 4p 5s 6s 7s E E E N N".split()
+        cyclic_only_hand = "1s 2m 3m 4p 5p 6p 7s 8s 9s E E E N N".split()
 
         self.assertTrue(is_rule_variant_winning_hand(winning_hand, STANDARD_RULES))
         self.assertFalse(is_rule_variant_winning_hand(cyclic_only_hand, STANDARD_RULES))
 
-    def test_rule_one_rejects_same_sequence_across_suits(self):
-        hand = "1m 2m 3m 1p 2p 3p 4s 5s 6s E E E N N".split()
-
-        self.assertTrue(is_standard_winning_hand(hand))
-        self.assertFalse(
-            is_rule_variant_winning_hand(
-                hand,
-                NO_CROSS_SUIT_DUPLICATE_SEQUENCES,
-            )
-        )
-
-    def test_rule_one_allows_repeated_sequence_in_same_suit(self):
-        hand = "1m 2m 3m 1m 2m 3m 4p 5p 6p E E E N N".split()
-
-        self.assertTrue(
-            is_rule_variant_winning_hand(
-                hand,
-                NO_CROSS_SUIT_DUPLICATE_SEQUENCES,
-            )
-        )
-
-    def test_rule_two_accepts_cyclic_sequences(self):
-        hand = "8m 9m 1m 2p 3p 4p 5s 6s 7s E E E N N".split()
-
-        self.assertFalse(is_standard_winning_hand(hand))
-        self.assertTrue(is_rule_variant_winning_hand(hand, CYCLIC_SEQUENCES))
-
-    def test_rule_three_uses_red_dragon_as_wildcard(self):
+    def test_rule_one_uses_red_dragon_as_wildcard(self):
         hand = "1m 2m C 4p 5p 6p 7s 8s 9s E E E N N".split()
 
         self.assertFalse(is_standard_winning_hand(hand))
         self.assertTrue(is_rule_variant_winning_hand(hand, RED_DRAGON_WILDCARD))
 
-    def test_rule_channels_include_all_single_pair_and_triple_combinations(self):
-        self.assertEqual(len(RULE_CHANNELS), 8)
-        self.assertEqual(RULE_CHANNELS[0], STANDARD_RULES)
+    def test_rule_two_applies_each_directional_one_tile_substitution(self):
+        hands = (
+            "1s 2m 3m 4p 5p 6p 7s 8s 9s E E E N N".split(),
+            "1m 2p 3p 4m 5m 6m 7s 8s 9s E E E N N".split(),
+            "1p 2s 3s 4m 5m 6m 7p 8p 9p E E E N N".split(),
+        )
+
+        for hand in hands:
+            with self.subTest(hand=hand):
+                self.assertFalse(is_standard_winning_hand(hand))
+                self.assertTrue(
+                    is_rule_variant_winning_hand(
+                        hand,
+                        CYCLIC_ONE_TILE_SUBSTITUTION,
+                    )
+                )
+
+    def test_rule_two_substitution_is_mandatory(self):
+        hand = "1m 2m 3m 4p 5p 6p 7s 8s 9s E E E N N".split()
+
+        self.assertTrue(is_standard_winning_hand(hand))
+        self.assertFalse(
+            is_rule_variant_winning_hand(hand, CYCLIC_ONE_TILE_SUBSTITUTION)
+        )
+
+    def test_rule_channels_contain_two_single_rules_and_all_combinations(self):
+        self.assertEqual(
+            RULE_CHANNELS,
+            (
+                RED_DRAGON_WILDCARD,
+                CYCLIC_ONE_TILE_SUBSTITUTION,
+                f"{RED_DRAGON_WILDCARD}+{CYCLIC_ONE_TILE_SUBSTITUTION}",
+            ),
+        )
         self.assertEqual(
             channel_for_rules(MODIFIED_RULES),
             "+".join(MODIFIED_RULES),
@@ -184,23 +187,18 @@ class MahjongRuleVariantTests(unittest.TestCase):
             MODIFIED_RULES,
         )
 
-    def test_restrictive_and_cyclic_rules_apply_simultaneously(self):
-        hand = "8m 9m 1m 8p 9p 1p 4s 5s 6s E E E N N".split()
-        combined_channel = channel_for_rules(
-            (NO_CROSS_SUIT_DUPLICATE_SEQUENCES, CYCLIC_SEQUENCES)
-        )
-
-        self.assertTrue(is_rule_variant_winning_hand(hand, CYCLIC_SEQUENCES))
-        self.assertFalse(is_rule_variant_winning_hand(hand, combined_channel))
-
-    def test_all_three_rules_are_enabled_in_the_triple_channel(self):
+    def test_all_rules_are_enabled_in_the_full_combined_channel(self):
+        hand = "1s 2m C 4p 5p 6p 7s 8s 9s E E E N N".split()
         channel = channel_for_rules(MODIFIED_RULES)
-
         rules = rules_for_channel(channel)
 
-        self.assertTrue(rules.forbid_cross_suit_duplicate_sequences)
-        self.assertTrue(rules.allow_cyclic_sequences)
         self.assertTrue(rules.red_dragon_is_wildcard)
+        self.assertTrue(rules.cyclic_one_tile_substitution)
+        self.assertFalse(is_rule_variant_winning_hand(hand, RED_DRAGON_WILDCARD))
+        self.assertFalse(
+            is_rule_variant_winning_hand(hand, CYCLIC_ONE_TILE_SUBSTITUTION)
+        )
+        self.assertTrue(is_rule_variant_winning_hand(hand, channel))
 
     def test_loader_expands_the_same_solo_tasks_into_all_channels(self):
         tasks = load_mahjong_rule_variant_tasks()
@@ -226,7 +224,11 @@ class MahjongRuleVariantTests(unittest.TestCase):
 
     def test_prompt_states_only_selected_rule_and_hides_legality(self):
         tasks = load_mahjong_rule_variant_tasks()
-        task = next(task for task in tasks if task.channel == CYCLIC_SEQUENCES)
+        task = next(
+            task
+            for task in tasks
+            if task.channel == CYCLIC_ONE_TILE_SUBSTITUTION
+        )
         prompt = build_mahjong_rule_variant_prompt(
             task,
             draw_number=1,
@@ -236,12 +238,10 @@ class MahjongRuleVariantTests(unittest.TestCase):
             remaining_draws=task.max_draws - 1,
         )
 
-        self.assertIn("8-9-1 and 9-1-2", prompt)
+        self.assertIn("1s counts as 1m", prompt)
+        self.assertIn("1m counts as 1p", prompt)
+        self.assertIn("1p counts as 1s", prompt)
         self.assertNotIn(RULE_TEXT[RED_DRAGON_WILDCARD], prompt)
-        self.assertNotIn(
-            RULE_TEXT[NO_CROSS_SUIT_DUPLICATE_SEQUENCES],
-            prompt,
-        )
         self.assertNotIn("Tsumo legal now", prompt)
         self.assertNotIn("Legal actions now", prompt)
         self.assertNotIn(str(task.seed), prompt)
@@ -258,7 +258,9 @@ class MahjongRuleVariantTests(unittest.TestCase):
         self.assertNotIn("contains no C", prompt)
 
     def test_combined_prompt_lists_every_active_rule(self):
-        channel = channel_for_rules((CYCLIC_SEQUENCES, RED_DRAGON_WILDCARD))
+        channel = channel_for_rules(
+            (RED_DRAGON_WILDCARD, CYCLIC_ONE_TILE_SUBSTITUTION)
+        )
         task = next(
             task
             for task in load_mahjong_rule_variant_tasks()
@@ -274,9 +276,8 @@ class MahjongRuleVariantTests(unittest.TestCase):
             remaining_draws=task.max_draws - 1,
         )
 
-        self.assertIn(RULE_TEXT[CYCLIC_SEQUENCES], prompt)
+        self.assertIn(RULE_TEXT[CYCLIC_ONE_TILE_SUBSTITUTION], prompt)
         self.assertIn(RULE_TEXT[RED_DRAGON_WILDCARD], prompt)
-        self.assertNotIn(RULE_TEXT[NO_CROSS_SUIT_DUPLICATE_SEQUENCES], prompt)
         self.assertIn("apply simultaneously", prompt)
 
     def test_all_channels_use_the_same_concise_prompt_template(self):
@@ -310,10 +311,10 @@ class MahjongRuleVariantTests(unittest.TestCase):
             self.assertEqual(len(set(rendered)), 1)
 
     def test_standard_channel_uses_shared_system_and_prompt_template(self):
-        standard_task = next(
-            task
-            for task in load_mahjong_rule_variant_tasks()
-            if task.channel == STANDARD_RULES
+        standard_task = make_task(
+            STANDARD_RULES,
+            "1m 2m 3m 4p 5p 6p 7s 8s 9s E E E N".split(),
+            ["N"],
         )
         for channel in RULE_CHANNELS:
             self.assertEqual(
@@ -340,17 +341,14 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 build_mahjong_solo_prompt(standard_task, **kwargs),
             )
             self.assertIn(RULE_TEXT[STANDARD_RULES], prompt)
-            self.assertNotIn(RULE_TEXT[CYCLIC_SEQUENCES], prompt)
+            self.assertNotIn(RULE_TEXT[CYCLIC_ONE_TILE_SUBSTITUTION], prompt)
             self.assertNotIn(RULE_TEXT[RED_DRAGON_WILDCARD], prompt)
-            self.assertNotIn(
-                RULE_TEXT[NO_CROSS_SUIT_DUPLICATE_SEQUENCES],
-                prompt,
-            )
             self.assertNotIn("Base winning-shape rules", prompt)
             self.assertNotIn("Tips:", prompt)
-            self.assertIn("best advances the concealed hand", prompt)
+            self.assertIn("lowest post-discard shanten number", prompt)
             self.assertNotIn("post-discard standard shanten", prompt)
-            self.assertNotIn("higher live ukeire", prompt)
+            self.assertIn("maximum live ukeire", prompt)
+            self.assertIn("total remaining copies", prompt)
 
     def test_standard_channel_is_a_non_variant_baseline(self):
         task = make_task(
@@ -440,9 +438,9 @@ class MahjongRuleVariantTests(unittest.TestCase):
 
     def test_variant_only_tsumo_is_identified_in_predictions(self):
         task = make_task(
-            CYCLIC_SEQUENCES,
-            "8m 9m 2p 3p 4p 5s 6s 7s E E E N N".split(),
-            ["1m"],
+            CYCLIC_ONE_TILE_SUBSTITUTION,
+            "1s 2m 4p 5p 6p 7s 8s 9s E E E N N".split(),
+            ["3m"],
         )
         result = evaluate_mahjong_rule_variant_tasks(
             [task],
@@ -451,15 +449,17 @@ class MahjongRuleVariantTests(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertTrue(result.variant_only_win)
-        self.assertEqual(result.win_rule, CYCLIC_SEQUENCES)
+        self.assertEqual(result.win_rule, CYCLIC_ONE_TILE_SUBSTITUTION)
         self.assertEqual(result.variant_only_tsumo_draws, [1])
 
     def test_combined_channel_is_recorded_on_a_variant_only_win(self):
-        channel = channel_for_rules((CYCLIC_SEQUENCES, RED_DRAGON_WILDCARD))
+        channel = channel_for_rules(
+            (RED_DRAGON_WILDCARD, CYCLIC_ONE_TILE_SUBSTITUTION)
+        )
         task = make_task(
             channel,
-            "8m 9m 2p 3p 4p 5s 6s 7s E E E N N".split(),
-            ["1m"],
+            "1s 2m 4p 5p 6p 7s 8s 9s E E E N N".split(),
+            ["C"],
         )
 
         result = evaluate_mahjong_rule_variant_tasks(
@@ -472,14 +472,14 @@ class MahjongRuleVariantTests(unittest.TestCase):
         self.assertEqual(result.win_rule, channel)
         self.assertEqual(
             result.active_rules,
-            (CYCLIC_SEQUENCES, RED_DRAGON_WILDCARD),
+            (RED_DRAGON_WILDCARD, CYCLIC_ONE_TILE_SUBSTITUTION),
         )
 
-    def test_restrictive_channel_records_blocked_standard_win(self):
+    def test_one_tile_substitution_records_blocked_standard_win(self):
         task = make_task(
-            NO_CROSS_SUIT_DUPLICATE_SEQUENCES,
-            "1m 2m 3m 1p 2p 4s 5s 6s E E E N N".split(),
-            ["3p"],
+            CYCLIC_ONE_TILE_SUBSTITUTION,
+            "1m 2m 4p 5p 6p 7s 8s 9s E E E N N".split(),
+            ["3m"],
         )
         result = evaluate_mahjong_rule_variant_tasks(
             [task],
@@ -491,7 +491,7 @@ class MahjongRuleVariantTests(unittest.TestCase):
         self.assertEqual(result.reasons, ["illegal_tsumo_at_draw_1"])
         self.assertEqual(len(result.action_errors), 3)
         channel_summary = summarize_mahjong_rule_variants([result])["by_channel"][
-            NO_CROSS_SUIT_DUPLICATE_SEQUENCES
+            CYCLIC_ONE_TILE_SUBSTITUTION
         ]
         self.assertEqual(channel_summary["added_win_opportunity_draws"], 0)
         self.assertEqual(
@@ -567,9 +567,9 @@ class MahjongRuleVariantTests(unittest.TestCase):
 
     def test_action_parser_summary_and_writer(self):
         task = make_task(
-            CYCLIC_SEQUENCES,
-            "8m 9m 2p 3p 4p 5s 6s 7s E E E N N".split(),
-            ["1m"],
+            CYCLIC_ONE_TILE_SUBSTITUTION,
+            "1s 2m 4p 5p 6p 7s 8s 9s E E E N N".split(),
+            ["3m"],
         )
         result = evaluate_mahjong_rule_variant_tasks(
             [task], SequenceAgent([{"action": "tsumo"}])
@@ -588,7 +588,11 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 "total",
                 "success",
                 "success_rate",
+                "evaluated_total",
+                "api_error_total",
+                "evaluation_coverage",
                 "illegal_tsumo_total",
+                "shanten_optimal_discard_rate",
                 "strict_first_attempt_success",
                 "illegal_tsumo_rate",
                 "illegal_discard_rate",
@@ -602,8 +606,10 @@ class MahjongRuleVariantTests(unittest.TestCase):
         self.assertEqual(summary["total"], 1)
         self.assertEqual(summary["success"], 1)
         self.assertEqual(summary["success_rate"], 1.0)
-        channel_summary = summary["by_channel"][CYCLIC_SEQUENCES]
-        self.assertEqual(channel_summary["active_rules"], [CYCLIC_SEQUENCES])
+        channel_summary = summary["by_channel"][CYCLIC_ONE_TILE_SUBSTITUTION]
+        self.assertEqual(
+            channel_summary["active_rules"], [CYCLIC_ONE_TILE_SUBSTITUTION]
+        )
         self.assertEqual(channel_summary["variant_only_wins"], 1)
         self.assertEqual(channel_summary["added_win_opportunity_draws"], 1)
         self.assertEqual(
@@ -615,8 +621,12 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 (run_dir / "predictions.jsonl").read_text(encoding="utf-8")
             )
             self.assertTrue(prediction["variant_only_win"])
-            self.assertEqual(prediction["win_rule"], CYCLIC_SEQUENCES)
-            self.assertEqual(prediction["active_rules"], [CYCLIC_SEQUENCES])
+            self.assertEqual(
+                prediction["win_rule"], CYCLIC_ONE_TILE_SUBSTITUTION
+            )
+            self.assertEqual(
+                prediction["active_rules"], [CYCLIC_ONE_TILE_SUBSTITUTION]
+            )
             self.assertEqual(prediction["observation_mode"], "full-hand")
 
     def test_agent_request_error_is_recorded_and_does_not_abort_batch(self):
@@ -636,7 +646,11 @@ class MahjongRuleVariantTests(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual(summary["total"], 2)
         self.assertEqual(summary["success"], 0)
-        self.assertEqual(summary["success_rate"], 0.0)
+        self.assertIsNone(summary["success_rate"])
+        self.assertEqual(summary["evaluated_total"], 0)
+        self.assertEqual(summary["api_error_total"], 2)
+        self.assertEqual(summary["evaluation_coverage"], 0.0)
+        self.assertEqual(summary["run_status"], "completed_with_api_errors")
         self.assertTrue(results[0].reasons[0].startswith("agent_request_error:"))
         self.assertEqual(results[0].action_errors[0]["error"], "agent_request_error")
 
@@ -678,8 +692,18 @@ class MahjongRuleVariantTests(unittest.TestCase):
     def test_cli_marks_rule_checkpoint_interrupted_after_failure(self):
         winning_hand = "1m 2m 3m 4p 5p 6p 7s 8s 9s E E E N".split()
         tasks = [
-            make_task(STANDARD_RULES, winning_hand, ["N"], task_id="cli-save-1"),
-            make_task(STANDARD_RULES, winning_hand, ["N"], task_id="cli-save-2"),
+            make_task(
+                RED_DRAGON_WILDCARD,
+                winning_hand,
+                ["N"],
+                task_id="cli-save-1",
+            ),
+            make_task(
+                RED_DRAGON_WILDCARD,
+                winning_hand,
+                ["N"],
+                task_id="cli-save-2",
+            ),
         ]
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -687,7 +711,7 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 [
                     "evaluate-mahjong-rules",
                     "--rule-channel",
-                    STANDARD_RULES,
+                    RED_DRAGON_WILDCARD,
                     "--agent",
                     "openai-compatible",
                     "--output-dir",
@@ -726,19 +750,19 @@ class MahjongRuleVariantTests(unittest.TestCase):
         self.assertIn("unexpected evaluator failure", summary["error"])
 
     def test_summary_is_compact_for_multiple_channels(self):
-        standard_task = make_task(
-            STANDARD_RULES,
-            "1m 2m 3m 4p 5p 6p 7s 8s 9s E E E N".split(),
-            ["N"],
+        wildcard_task = make_task(
+            RED_DRAGON_WILDCARD,
+            "1m 2m 4p 5p 6p 7s 8s 9s E E E N N".split(),
+            ["C"],
         )
         cyclic_task = make_task(
-            CYCLIC_SEQUENCES,
-            "8m 9m 2p 3p 4p 5s 6s 7s E E E N N".split(),
-            ["1m"],
+            CYCLIC_ONE_TILE_SUBSTITUTION,
+            "1s 2m 4p 5p 6p 7s 8s 9s E E E N N".split(),
+            ["3m"],
         )
         results = [
             evaluate_mahjong_rule_variant_tasks(
-                [standard_task], SequenceAgent([{"action": "tsumo"}])
+                [wildcard_task], SequenceAgent([{"action": "tsumo"}])
             )[0],
             evaluate_mahjong_rule_variant_tasks(
                 [cyclic_task], SequenceAgent([{"action": "tsumo"}])
@@ -756,7 +780,11 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 "total",
                 "success",
                 "success_rate",
+                "evaluated_total",
+                "api_error_total",
+                "evaluation_coverage",
                 "illegal_tsumo_total",
+                "shanten_optimal_discard_rate",
                 "strict_first_attempt_success",
                 "illegal_tsumo_rate",
                 "illegal_discard_rate",
@@ -768,7 +796,8 @@ class MahjongRuleVariantTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            set(summary["by_channel"]), {STANDARD_RULES, CYCLIC_SEQUENCES}
+            set(summary["by_channel"]),
+            {RED_DRAGON_WILDCARD, CYCLIC_ONE_TILE_SUBSTITUTION},
         )
 
     def test_cli_and_factory_use_base_solo_dataset(self):
@@ -778,7 +807,7 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 "--agent",
                 "cot",
                 "--rule-channel",
-                STANDARD_RULES,
+                RED_DRAGON_WILDCARD,
                 "--observation-mode",
                 "history-only",
             ]
@@ -786,7 +815,7 @@ class MahjongRuleVariantTests(unittest.TestCase):
         spec = get_task_family_spec("mahjong_rule_variants")
 
         self.assertEqual(args.agent, "cot")
-        self.assertEqual(args.rule_channel, STANDARD_RULES)
+        self.assertEqual(args.rule_channel, RED_DRAGON_WILDCARD)
         self.assertEqual(args.observation_mode, "history-only")
         self.assertEqual(spec.default_path, Path("data/mahjong_solo/tasks_win.jsonl"))
 
@@ -795,16 +824,19 @@ class MahjongRuleVariantTests(unittest.TestCase):
             [
                 "evaluate-mahjong-rules",
                 "--rule",
-                CYCLIC_SEQUENCES,
-                "--rule",
                 RED_DRAGON_WILDCARD,
+                "--rule",
+                CYCLIC_ONE_TILE_SUBSTITUTION,
             ]
         )
 
-        self.assertEqual(args.rules, [CYCLIC_SEQUENCES, RED_DRAGON_WILDCARD])
+        self.assertEqual(
+            args.rules,
+            [RED_DRAGON_WILDCARD, CYCLIC_ONE_TILE_SUBSTITUTION],
+        )
         self.assertEqual(
             channel_for_rules(tuple(args.rules)),
-            f"{CYCLIC_SEQUENCES}+{RED_DRAGON_WILDCARD}",
+            f"{RED_DRAGON_WILDCARD}+{CYCLIC_ONE_TILE_SUBSTITUTION}",
         )
 
     def test_experiment_config_selects_a_combined_rule_channel(self):
@@ -812,27 +844,27 @@ class MahjongRuleVariantTests(unittest.TestCase):
 
         selected = _select_mahjong_rule_configuration(
             tasks,
-            {"rules": [CYCLIC_SEQUENCES, RED_DRAGON_WILDCARD]},
+            {"rules": [RED_DRAGON_WILDCARD, CYCLIC_ONE_TILE_SUBSTITUTION]},
         )
 
         self.assertTrue(selected)
         self.assertEqual(
             {task.channel for task in selected},
-            {f"{CYCLIC_SEQUENCES}+{RED_DRAGON_WILDCARD}"},
+            {f"{RED_DRAGON_WILDCARD}+{CYCLIC_ONE_TILE_SUBSTITUTION}"},
         )
 
-    def test_experiment_config_selects_all_seven_modified_rule_channels(self):
+    def test_experiment_config_selects_all_rule_channels(self):
         tasks = load_mahjong_rule_variant_tasks()
-        modified_channels = list(RULE_CHANNELS[1:])
+        configured_channels = list(RULE_CHANNELS)
 
         selected = _select_mahjong_rule_configuration(
             tasks,
-            {"rule_channels": modified_channels},
+            {"rule_channels": configured_channels},
         )
 
         self.assertEqual(
             {task.channel for task in selected},
-            set(modified_channels),
+            set(configured_channels),
         )
         self.assertNotIn(STANDARD_RULES, {task.channel for task in selected})
 

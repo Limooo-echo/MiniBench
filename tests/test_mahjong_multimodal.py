@@ -1,33 +1,32 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import replace
 import json
-from dataclasses import replace
+import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-import os
-import subprocess
-import sys
 
-from minibench.datasets.mahjong.dataset import load_mahjong_tasks
+from minibench.datasets.mahjong.dataset import load_mahjong_tasks, task_to_record
 from minibench.datasets.mahjong.evaluation import (
     evaluate_mahjong_tasks,
     expected_answer,
     summarize_mahjong,
     write_mahjong_run,
 )
-from minibench.datasets.mahjong.generation import generate_mahjong_visual_tasks
+from minibench.datasets.mahjong.generation import render_mahjong_visual_tasks
 from minibench.datasets.mahjong.prompting import build_mahjong_prompt
 from minibench.datasets.mahjong.visualization import (
+    MAHJONG_RENDERER_VERSION,
     mahjong_text_labels,
     render_mahjong_task_png,
 )
 from tests.image_regression import (
     assert_png_deterministic,
-    assert_text_regions_similar,
     assert_png_visually_equal,
+    assert_text_regions_similar,
     renderer_environment,
 )
 
@@ -37,15 +36,30 @@ MAHJONG_HEADER_BACKGROUND = (0x10, 0x2F, 0x2D)
 
 
 def _mahjong_text_regions(task):
-    table_rows = max(1, (len(task.visible_tiles) + task.table_columns - 1) // task.table_columns)
-    table_height = table_rows * (72 + 8) - 8
-    hand_y = 170 + table_height + 105
-    return (
-        ("title", (44, 34, 700, 74), MAHJONG_HEADER_BACKGROUND),
-        ("task-id", (790, 36, 1038, 72), MAHJONG_HEADER_BACKGROUND),
-        ("visible-tiles-label", (430, 102, 650, 134), MAHJONG_TABLE_BACKGROUND),
-        ("your-hand-label", (430, hand_y - 42, 650, hand_y - 6), MAHJONG_TABLE_BACKGROUND),
+    table_rows = (
+        (len(task.visible_tiles) + task.table_columns - 1) // task.table_columns
+        if task.visible_tiles
+        else 0
     )
+    table_height = table_rows * (72 + 8) - 8 if table_rows else 0
+    hand_y = 136 + table_height + 92 if task.visible_tiles else 144
+    regions = [
+        ("task-id", (360, 32, 720, 76), MAHJONG_HEADER_BACKGROUND),
+        (
+            "your-hand-label",
+            (430, hand_y - 42, 650, hand_y - 6),
+            MAHJONG_TABLE_BACKGROUND,
+        ),
+    ]
+    if task.visible_tiles:
+        regions.append(
+            (
+                "visible-tiles-label",
+                (430, 96, 650, 128),
+                MAHJONG_TABLE_BACKGROUND,
+            )
+        )
+    return tuple(regions)
 
 
 def _mahjong_text_boxes(task):
@@ -63,14 +77,19 @@ class OracleMahjongVisualAgent:
         self.contexts.append(context)
         task = self.tasks[context.task_id]
         answer = expected_answer(task)
-        payload = {
-            "hand": list(task.hand) if self.exact_transcription else [],
-            "visible_tiles": list(task.visible_tiles),
-        }
-        if task.goal in {"tenpai_discard", "max_ukeire_discard"}:
+        payload = {"hand": list(task.hand) if self.exact_transcription else []}
+        if task.visible_tiles:
+            payload["visible_tiles"] = (
+                list(task.visible_tiles) if self.exact_transcription else []
+            )
+        if "discard" in answer:
+            payload["discard"] = answer["discard"]
+        elif "discard_any" in answer:
             payload["discard"] = answer["discard_any"][0]
-        else:
+        if "winning_tiles" in answer:
             payload["winning_tiles"] = answer["winning_tiles"]
+        if "live_winning_copies" in answer:
+            payload["live_winning_copies"] = answer["live_winning_copies"]
         return json.dumps(payload)
 
     def generate(self, prompt, task):
@@ -85,37 +104,92 @@ class OracleMahjongVisualAgent:
 class MahjongMultimodalTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.static_tasks = load_mahjong_tasks("data/mahjong/tasks.jsonl")
         cls.tasks = load_mahjong_tasks("data/mahjong/visual_tasks.jsonl")
 
-    def test_visual_dataset_and_relative_paths(self):
-        self.assertEqual(len(self.tasks), 60)
-        self.assertTrue(all(task.image_path and task.image_path.is_file() for task in self.tasks))
-        self.assertEqual({len(task.visible_tiles) for task in self.tasks}, {10, 20})
+    def test_visual_dataset_is_an_exact_ninety_task_static_mirror(self):
+        self.assertEqual(len(self.static_tasks), 90)
+        self.assertEqual(len(self.tasks), 90)
+        self.assertTrue(
+            all(task.image_path and task.image_path.is_file() for task in self.tasks)
+        )
         self.assertEqual(
-            {task.goal for task in self.tasks},
-            {"winning_tiles", "max_ukeire_discard"},
+            Counter(
+                (task.tags[0], task.goal, len(task.visible_tiles))
+                for task in self.tasks
+            ),
+            Counter(
+                {
+                    ("easy", "winning_tiles", 0): 15,
+                    ("easy", "max_wait_discard", 0): 15,
+                    ("hard", "winning_tiles", 0): 15,
+                    ("hard", "max_wait_discard", 0): 15,
+                    ("easy", "winning_tiles", 12): 15,
+                    ("easy", "max_ukeire_discard", 12): 15,
+                }
+            ),
+        )
+        for static, visual in zip(self.static_tasks, self.tasks):
+            self.assertEqual(visual.id, static.id)
+            self.assertEqual(visual.goal, static.goal)
+            self.assertEqual(visual.hand, static.hand)
+            self.assertEqual(visual.visible_tiles, static.visible_tiles)
+            self.assertEqual(
+                tuple(tag for tag in visual.tags if tag != "visual"),
+                static.tags,
+            )
+
+        records = [
+            json.loads(line)
+            for line in Path("data/mahjong/visual_tasks.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        self.assertEqual(
+            {record["renderer_version"] for record in records},
+            {MAHJONG_RENDERER_VERSION},
         )
 
-    def test_visual_prompt_hides_tile_truth_and_text_control_exposes_it(self):
-        task = self.tasks[0]
-        visual = build_mahjong_prompt(task, input_mode="image")
-        text = build_mahjong_prompt(task, input_mode="text")
-        self.assertNotIn(" ".join(task.hand), visual)
-        self.assertNotIn(" ".join(task.visible_tiles), visual)
-        self.assertIn("inspect the attached Mahjong table image", visual)
-        self.assertIn(" ".join(task.hand), text)
-        self.assertIn('"hand"', visual)
-        self.assertIn('"visible_tiles"', visual)
+    def test_image_prompt_hides_tiles_and_requests_applicable_transcription(self):
+        plain_task = next(task for task in self.tasks if not task.visible_tiles)
+        visible_task = next(task for task in self.tasks if task.visible_tiles)
+        plain_prompt = build_mahjong_prompt(plain_task, input_mode="image")
+        visible_prompt = build_mahjong_prompt(visible_task, input_mode="image")
 
-    def test_visual_and_text_paired_evaluation(self):
-        agent = OracleMahjongVisualAgent(self.tasks[:2])
+        self.assertNotIn(" ".join(plain_task.hand), plain_prompt)
+        self.assertIn("inspect the attached Mahjong table image", plain_prompt)
+        self.assertIn('"hand"', plain_prompt)
+        self.assertNotIn('"visible_tiles"', plain_prompt)
+        self.assertNotIn("VISIBLE TILES", plain_prompt)
+
+        self.assertNotIn(" ".join(visible_task.hand), visible_prompt)
+        self.assertNotIn(" ".join(visible_task.visible_tiles), visible_prompt)
+        self.assertIn('"hand"', visible_prompt)
+        self.assertIn('"visible_tiles"', visible_prompt)
+
+    def test_image_only_evaluation_and_transcription_metrics(self):
+        selected = [
+            next(task for task in self.tasks if not task.visible_tiles),
+            next(task for task in self.tasks if task.visible_tiles),
+        ]
+        agent = OracleMahjongVisualAgent(selected)
         results = evaluate_mahjong_tasks(
-            self.tasks[:2],
+            selected,
             agent,
-            input_modes=("text", "image"),
+            input_modes=("image",),
         )
-        self.assertEqual(len(results), 4)
+
+        self.assertEqual(len(results), 2)
         self.assertEqual(agent.image_calls, 2)
+        self.assertTrue(all(result.success for result in results))
+        self.assertTrue(all(result.hand_transcription_exact for result in results))
+        self.assertIsNone(results[0].visible_tiles_transcription_accuracy)
+        self.assertIsNone(results[0].visible_tiles_transcription_exact)
+        self.assertEqual(
+            results[0].expected_transcription,
+            {"hand": list(selected[0].hand)},
+        )
+        self.assertTrue(results[1].visible_tiles_transcription_exact)
         self.assertTrue(
             all(
                 not hasattr(context, hidden_field)
@@ -128,30 +202,27 @@ class MahjongMultimodalTests(unittest.TestCase):
                 )
             )
         )
-        self.assertTrue(all(result.success for result in results))
-        self.assertTrue(
-            all(
-                result.hand_transcription_exact
-                for result in results
-                if result.input_mode == "image"
-            )
-        )
-        self.assertTrue(
-            all(
-                result.hand_transcription_exact is None
-                for result in results
-                if result.input_mode == "text"
-            )
-        )
-        summary = summarize_mahjong(results)
-        self.assertEqual(summary["visual_gap"]["image"]["visual_gap"], 0.0)
-        self.assertEqual(summary["hand_transcription_exact_rate"], 1.0)
 
-    def test_visual_predictions_keep_multimodal_transcription_fields(self):
+        summary = summarize_mahjong(results)
+        self.assertEqual(set(summary["by_input_mode"]), {"image"})
+        self.assertNotIn("visual_gap", summary)
+        self.assertEqual(summary["hand_transcription_accuracy"], 1.0)
+        self.assertEqual(summary["hand_transcription_exact_rate"], 1.0)
+        self.assertEqual(summary["visible_tiles_transcription_accuracy"], 1.0)
+        self.assertEqual(summary["visible_tiles_transcription_exact_rate"], 1.0)
+        self.assertEqual(summary["transcription_exact_rate"], 1.0)
+        self.assertEqual(summary["joint_success_rate"], 1.0)
+        self.assertEqual(
+            summary["reasoning_success_given_exact_transcription"],
+            1.0,
+        )
+
+    def test_visual_predictions_keep_transcription_fields(self):
+        task = next(task for task in self.tasks if not task.visible_tiles)
         results = evaluate_mahjong_tasks(
-            [self.tasks[0]],
-            OracleMahjongVisualAgent([self.tasks[0]]),
-            input_modes=("text", "image"),
+            [task],
+            OracleMahjongVisualAgent([task]),
+            input_modes=("image",),
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = write_mahjong_run(
@@ -159,12 +230,9 @@ class MahjongMultimodalTests(unittest.TestCase):
                 output_dir=tmpdir,
                 run_name="visual-prediction-fields",
             )
-            predictions = [
-                json.loads(line)
-                for line in (run_dir / "predictions.jsonl")
-                .read_text(encoding="utf-8")
-                .splitlines()
-            ]
+            prediction = json.loads(
+                (run_dir / "predictions.jsonl").read_text(encoding="utf-8")
+            )
 
         transcription_fields = {
             "expected_transcription",
@@ -175,59 +243,48 @@ class MahjongMultimodalTests(unittest.TestCase):
             "transcription_exact",
             "joint_success",
         }
-        self.assertEqual(len(predictions), 2)
-        self.assertTrue(
-            all(transcription_fields.issubset(prediction) for prediction in predictions)
+        self.assertTrue(transcription_fields.issubset(prediction))
+        self.assertEqual(
+            prediction["expected_transcription"],
+            {"hand": list(task.hand)},
         )
+        self.assertIsNone(prediction["visible_tiles_transcription_accuracy"])
 
-    def test_transcription_summary_uses_image_mode_only(self):
-        results = evaluate_mahjong_tasks(
-            [self.tasks[0]],
-            OracleMahjongVisualAgent([self.tasks[0]]),
-            input_modes=("text", "image"),
+    def test_answer_score_is_separate_from_transcription(self):
+        task = self.tasks[0]
+        result = evaluate_mahjong_tasks(
+            [task],
+            OracleMahjongVisualAgent([task], exact_transcription=False),
+            input_modes=("image",),
+        )[0]
+
+        self.assertTrue(result.success)
+        self.assertFalse(result.hand_transcription_exact)
+        self.assertFalse(result.transcription_exact)
+        self.assertFalse(result.joint_success)
+        summary = summarize_mahjong([result])
+        self.assertIsNone(summary["reasoning_success_given_exact_transcription"])
+
+    def test_reasoning_success_conditions_on_exact_transcription(self):
+        tasks = self.tasks[:2]
+        correct, second = evaluate_mahjong_tasks(
+            tasks,
+            OracleMahjongVisualAgent(tasks),
+            input_modes=("image",),
         )
-        text_result = next(
-            result for result in results if result.input_mode == "text"
-        )
-        image_result = next(
-            result for result in results if result.input_mode == "image"
-        )
-        text_result_with_wrong_transcription = replace(
-            text_result,
-            hand_transcription_accuracy=0.0,
-            hand_transcription_exact=False,
-            visible_tiles_transcription_accuracy=0.0,
-            visible_tiles_transcription_exact=False,
-            transcription_exact=False,
+        wrong_reasoning = replace(
+            second,
+            success=False,
+            score=0.0,
             joint_success=False,
         )
 
-        summary = summarize_mahjong(
-            [text_result_with_wrong_transcription, image_result]
+        summary = summarize_mahjong([correct, wrong_reasoning])
+
+        self.assertEqual(
+            summary["reasoning_success_given_exact_transcription"],
+            0.5,
         )
-
-        self.assertEqual(summary["total"], 2)
-        self.assertEqual(summary["success"], 2)
-        self.assertEqual(set(summary["by_input_mode"]), {"text", "image"})
-        self.assertEqual(summary["hand_transcription_accuracy"], 1.0)
-        self.assertEqual(summary["hand_transcription_exact_rate"], 1.0)
-        self.assertEqual(summary["visible_tiles_transcription_accuracy"], 1.0)
-        self.assertEqual(summary["visible_tiles_transcription_exact_rate"], 1.0)
-        self.assertEqual(summary["transcription_exact_rate"], 1.0)
-        self.assertEqual(summary["joint_success_rate"], 1.0)
-
-    def test_answer_score_is_separate_from_transcription(self):
-        result = evaluate_mahjong_tasks(
-            [self.tasks[0]],
-            OracleMahjongVisualAgent(
-                [self.tasks[0]],
-                exact_transcription=False,
-            ),
-            input_modes=("image",),
-        )[0]
-        self.assertTrue(result.success)
-        self.assertFalse(result.hand_transcription_exact)
-        self.assertFalse(result.joint_success)
 
     def test_renderer_reproduces_committed_image(self):
         task = self.tasks[0]
@@ -255,10 +312,7 @@ class MahjongMultimodalTests(unittest.TestCase):
     def test_renderer_detects_mutated_tile(self):
         task = self.tasks[0]
         replacement_tile = "1m" if task.hand[0] != "1m" else "9m"
-        mutated_task = replace(
-            task,
-            hand=(replacement_tile, *task.hand[1:]),
-        )
+        mutated_task = replace(task, hand=(replacement_tile, *task.hand[1:]))
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "mutated.png"
             render_mahjong_task_png(mutated_task, output)
@@ -290,62 +344,50 @@ class MahjongMultimodalTests(unittest.TestCase):
         self.assertEqual(
             mahjong_text_labels(task),
             {
-                "title": "Which discard leaves the most live winning tiles?",
                 "task_id": task.id,
                 "visible_tiles": "VISIBLE TILES",
                 "hand": "YOUR HAND",
             },
         )
 
-    def test_small_visual_generation_is_reproducible(self):
+    def test_visual_rendering_is_a_reproducible_static_conversion(self):
         with tempfile.TemporaryDirectory() as first_dir, tempfile.TemporaryDirectory() as second_dir:
+            source = Path(first_dir) / "source.jsonl"
+            source.write_text(
+                "".join(
+                    json.dumps(task_to_record(task)) + "\n"
+                    for task in self.static_tasks[:2]
+                ),
+                encoding="utf-8",
+            )
             first = Path(first_dir) / "tasks.jsonl"
+            second_source = Path(second_dir) / "source.jsonl"
+            second_source.write_text(
+                source.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
             second = Path(second_dir) / "tasks.jsonl"
-            first_summary = generate_mahjong_visual_tasks(
-                output=first,
-                count_per_type=1,
-                visible_count=(10, 20),
-                seed=20260803,
-            )
-            second_summary = generate_mahjong_visual_tasks(
-                output=second,
-                count_per_type=1,
-                visible_count=(10, 20),
-                seed=20260803,
-            )
-            self.assertEqual(first.read_text(encoding="utf-8"), second.read_text(encoding="utf-8"))
-            self.assertEqual(first_summary["count"], 4)
-            self.assertEqual(first_summary["attempts_by_type"], second_summary["attempts_by_type"])
 
-    def test_generation_is_independent_of_python_hash_seed(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            outputs = []
-            for seed in ("1", "2"):
-                output = root / seed / "tasks.jsonl"
-                env = os.environ.copy()
-                env["PYTHONHASHSEED"] = seed
-                subprocess.run(
-                    [
-                        sys.executable,
-                        "scripts/generate_mahjong_visual_tasks.py",
-                        "--output",
-                        str(output),
-                        "--count-per-type",
-                        "1",
-                        "--visible-count",
-                        "10",
-                        "--visible-count",
-                        "20",
-                        "--overwrite",
-                    ],
-                    env=env,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-                outputs.append(output.read_text(encoding="utf-8"))
-            self.assertEqual(outputs[0], outputs[1])
+            first_summary = render_mahjong_visual_tasks(
+                tasks_path=source,
+                output=first,
+            )
+            second_summary = render_mahjong_visual_tasks(
+                tasks_path=second_source,
+                output=second,
+            )
+
+            self.assertEqual(
+                first.read_text(encoding="utf-8"),
+                second.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(first_summary["count"], 2)
+            self.assertEqual(second_summary["count"], 2)
+            converted = load_mahjong_tasks(first)
+            self.assertEqual(
+                [task.id for task in converted],
+                [task.id for task in self.static_tasks[:2]],
+            )
 
 
 if __name__ == "__main__":

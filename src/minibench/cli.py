@@ -453,23 +453,18 @@ def _cmd_generate_mahjong_static(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_generate_mahjong_visual(args: argparse.Namespace) -> int:
-    from minibench.datasets.mahjong.generation import generate_mahjong_visual_tasks
+def _cmd_render_mahjong_visual(args: argparse.Namespace) -> int:
+    from minibench.datasets.mahjong.generation import render_mahjong_visual_tasks
 
     try:
-        summary = generate_mahjong_visual_tasks(
+        summary = render_mahjong_visual_tasks(
+            tasks_path=args.tasks,
             output=args.output,
             render_dir=args.render_dir,
-            count_per_type=args.count_per_type,
-            visible_count=args.visible_count or (10, 20),
-            table_columns=args.table_columns,
-            seed=args.seed,
-            prefix=args.prefix,
-            max_attempts=args.max_attempts,
             overwrite=args.overwrite,
         )
     except (RuntimeError, ValueError) as exc:
-        raise SystemExit(f"mahjong visual task generation failed: {exc}") from exc
+        raise SystemExit(f"mahjong visual rendering failed: {exc}") from exc
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     return 0
 
@@ -1230,10 +1225,10 @@ def build_parser() -> argparse.ArgumentParser:
     generate_mahjong_static.add_argument(
         "--count",
         type=int,
-        default=60,
+        default=90,
         help=(
-            "Total number of tasks, balanced across easy/hard and "
-            "winning_tiles/max_wait_discard."
+            "Total number of tasks, balanced across the four original static "
+            "groups and two Easy groups with 12 public visible tiles."
         ),
     )
     generate_mahjong_static.add_argument("--seed", type=int, default=20260807)
@@ -1242,31 +1237,23 @@ def build_parser() -> argparse.ArgumentParser:
     generate_mahjong_static.add_argument("--overwrite", action="store_true")
     generate_mahjong_static.set_defaults(func=_cmd_generate_mahjong_static)
 
-    generate_mahjong_visual = subparsers.add_parser(
-        "generate-mahjong-visual",
-        help="Generate visual waiting-tile and maximum-ukeire Mahjong tasks.",
+    render_mahjong_visual = subparsers.add_parser(
+        "render-mahjong-visual",
+        help="Render an image-only mirror of existing static Mahjong tasks.",
     )
-    generate_mahjong_visual.add_argument(
+    render_mahjong_visual.add_argument(
+        "--tasks",
+        type=Path,
+        default=Path("data/mahjong/tasks.jsonl"),
+    )
+    render_mahjong_visual.add_argument(
         "--output",
         type=Path,
         default=Path("data/mahjong/visual_tasks.jsonl"),
     )
-    generate_mahjong_visual.add_argument("--render-dir", type=Path, default=None)
-    generate_mahjong_visual.add_argument("--count-per-type", type=int, default=15)
-    generate_mahjong_visual.add_argument(
-        "--visible-count",
-        type=int,
-        action="append",
-        default=None,
-        metavar="COUNT",
-        help="Repeat for multiple public-table tile counts; defaults to 10 and 20.",
-    )
-    generate_mahjong_visual.add_argument("--table-columns", type=int, default=6)
-    generate_mahjong_visual.add_argument("--seed", type=int, default=20260803)
-    generate_mahjong_visual.add_argument("--prefix", default="mj-visual")
-    generate_mahjong_visual.add_argument("--max-attempts", type=int, default=None)
-    generate_mahjong_visual.add_argument("--overwrite", action="store_true")
-    generate_mahjong_visual.set_defaults(func=_cmd_generate_mahjong_visual)
+    render_mahjong_visual.add_argument("--render-dir", type=Path, default=None)
+    render_mahjong_visual.add_argument("--overwrite", action="store_true")
+    render_mahjong_visual.set_defaults(func=_cmd_render_mahjong_visual)
 
     generate_mahjong_solo = subparsers.add_parser(
         "generate-mahjong-solo",
@@ -1390,14 +1377,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--rule-channel",
         choices=RULE_CHANNELS,
         default=None,
-        help="Evaluate one canonical rule channel; omit to run all eight.",
+        help="Evaluate one canonical rule channel; omit to run all three.",
     )
     rule_selection.add_argument(
         "--rule",
         dest="rules",
         action="append",
         choices=MODIFIED_RULES,
-        help="Repeat to select a two- or three-rule combination.",
+        help="Repeat to select the two-rule combination.",
     )
     evaluate_mahjong_rules.add_argument(
         "--progress",

@@ -4,7 +4,8 @@ from typing import Protocol
 
 
 class MahjongPromptTask(Protocol):
-    initial_hand: tuple[str, ...]
+    @property
+    def initial_hand(self) -> tuple[str, ...]: ...
 
 
 MAHJONG_SOLO_OBSERVATION_MODES = ("full-hand", "history-only")
@@ -32,8 +33,17 @@ MAHJONG_ACTION_FORMAT_LINES = (
 
 
 MAHJONG_DISCARD_GUIDANCE = (
-    "When discarding, choose the tile that best advances the concealed hand "
-    "toward a legal winning shape under the selected rule configuration."
+    "When discarding, consider the shanten number of the 13 tiles left after "
+    "each legal discard under the selected rule configuration. Choose a "
+    "discard with the lowest post-discard shanten number, even when no "
+    "discard reduces it this turn. Among ties, choose maximum live ukeire: "
+    "the total remaining copies of drawable tiles that lower shanten under "
+    "the selected rules, allowing the best subsequent discard if the draw "
+    "does not complete the hand. Count four copies per physical tile type, "
+    "subtracting the current hand and all previously discarded tiles. "
+    "The prospective discard is already counted in the current hand. "
+    "Do not use hidden "
+    "future wall tiles. All discards tied on both criteria are equally optimal."
 )
 
 
@@ -101,6 +111,9 @@ def build_mahjong_solo_history_turn_prompt(
                 f"Attempt {attempt_number} of {max_attempts} for the same turn.",
                 "Reconstruct the concealed hand from the conversation before "
                 "responding, and verify that any discarded tile is present.",
+                "If discarding, choose a tile minimizing post-discard shanten "
+                "under the selected rules, breaking ties by maximum live "
+                "ukeire as defined at the start of this conversation.",
                 *MAHJONG_ACTION_FORMAT_LINES,
                 "Return one legal action only.",
             ]
@@ -138,6 +151,9 @@ def build_mahjong_solo_history_turn_prompt(
             [
                 f"Your previous discard {previous_discard} was accepted.",
                 "Update the concealed hand from the conversation history.",
+                "If discarding, choose a tile minimizing post-discard shanten "
+                "under the selected rules, breaking ties by maximum live "
+                "ukeire as defined at the start of this conversation.",
                 "",
             ]
         )

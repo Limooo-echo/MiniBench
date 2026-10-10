@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -129,6 +132,18 @@ class OpenAICompatibleAgent(Agent):
         self._llm_calls = 0
         self._usage_missing_calls = 0
         self._token_usage = empty_token_usage()
+        self._completion_traces: list[dict[str, Any]] | None = None
+
+    @contextmanager
+    def capture_completion_traces(self) -> Iterator[list[dict[str, Any]]]:
+        """Capture response details only while an evaluator requests them."""
+        previous = self._completion_traces
+        traces: list[dict[str, Any]] = []
+        self._completion_traces = traces
+        try:
+            yield traces
+        finally:
+            self._completion_traces = previous
 
     @property
     def endpoint(self) -> str:
@@ -305,6 +320,20 @@ class OpenAICompatibleAgent(Agent):
 
             if not isinstance(content, str):
                 raise RuntimeError(f"Unexpected message content in response: {raw}")
+
+            if self._completion_traces is not None:
+                request_payload = json.loads(request.data or b"{}")
+                trace = {
+                    "content": message.get("content"),
+                    "finish_reason": choice.get("finish_reason"),
+                    "usage": usage,
+                    "max_tokens": request_payload.get("max_tokens"),
+                    "model_elapsed_seconds": round(perf_counter() - started_at, 6),
+                }
+                for key in ("reasoning_content", "reasoning", "reasoning_details"):
+                    if key in message:
+                        trace[key] = message[key]
+                self._completion_traces.append(deepcopy(trace))
 
             if not content.strip():
                 finish_reason = choice.get("finish_reason")

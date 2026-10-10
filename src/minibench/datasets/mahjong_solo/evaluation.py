@@ -29,6 +29,11 @@ from minibench.datasets.mahjong_solo.prompting import (
     build_mahjong_solo_history_turn_prompt,
     build_mahjong_solo_prompt,
 )
+from minibench.datasets.mahjong_solo.shanten_strategy import (
+    evaluate_shanten_discard_strategy,
+    mean_episode_shanten_discard_rate,
+)
+from minibench.datasets.mahjong_rule_variants.rules import STANDARD_RULES
 
 
 MAX_ACTION_ATTEMPTS = 3
@@ -38,11 +43,16 @@ MAX_ACTION_ATTEMPTS = 3
 class MahjongSoloInstanceResult:
     task_id: str
     observation_mode: str
-    success: bool
-    score: float
+    success: bool | None
+    score: float | None
     draws: list[str]
     discards: list[str]
     raw_outputs: list[str]
+    first_attempt_outputs: list[str | None]
+    shanten_optimal_steps: list[dict[str, Any]]
+    shanten_optimal_hit_count: int
+    shanten_assessed_step_count: int
+    shanten_optimal_discard_rate: float | None
     reasoning_traces: list[dict[str, Any] | None]
     conversation: list[ChatMessage]
     agent_actions: list[dict[str, Any]]
@@ -52,6 +62,7 @@ class MahjongSoloInstanceResult:
     reasons: list[str]
     tags: tuple[str, ...]
     metrics: dict[str, object]
+    evaluation_status: str = "completed"
 
 
 def generate_mahjong_history_action(
@@ -63,19 +74,25 @@ def generate_mahjong_history_action(
 
     phase_generate = getattr(agent, "generate_messages_for_phase", None)
     if callable(phase_generate):
-        return phase_generate(
+        output = phase_generate(
             messages,
             task_context,
             phase="final",
             json_mode=True,
         )
+        if not isinstance(output, str):
+            raise TypeError("Agent message generation must return a string")
+        return output
     generate_messages = getattr(agent, "generate_messages", None)
     if callable(generate_messages):
-        return generate_messages(
+        output = generate_messages(
             messages,
             task_context,
             json_mode=True,
         )
+        if not isinstance(output, str):
+            raise TypeError("Agent message generation must return a string")
+        return output
     raise ValueError(
         "Mahjong history-only evaluation requires an agent with "
         "generate_messages_for_phase() or generate_messages(); use "
@@ -110,10 +127,11 @@ def evaluate_mahjong_solo_tasks(
         if on_result is not None:
             on_result(results)
         if show_progress:
-            success_count = sum(item.success for item in results)
+            success_count = sum(bool(item.success) for item in results)
+            coverage = _evaluation_coverage(results, total)
             print(
-                f"[mahjong-solo] completed={index}/{total} "
-                f"success={success_count}",
+                f"[mahjong-solo] completed={coverage['evaluated_total']}/{total} "
+                f"success={success_count} api_errors={coverage['api_error_total']}",
                 flush=True,
             )
     return results
@@ -139,6 +157,7 @@ def evaluate_mahjong_solo_task(
     draws: list[str] = []
     discards: list[str] = []
     raw_outputs: list[str] = []
+    first_attempt_outputs: list[str | None] = []
     reasoning_traces: list[dict[str, Any] | None] = []
     conversation: list[ChatMessage] = []
     agent_actions: list[dict[str, Any]] = []
@@ -150,6 +169,7 @@ def evaluate_mahjong_solo_task(
     for draw_number, drawn_tile in enumerate(task.wall[: task.max_draws], start=1):
         hand.append(drawn_tile)
         draws.append(drawn_tile)
+        first_attempt_outputs.append(None)
         current_is_win = is_winning_hand(hand)
         current_win_score = _score_tsumo(task, hand, drawn_tile) if current_is_win else None
         action_feedback: list[str] = []
@@ -190,7 +210,6 @@ def evaluate_mahjong_solo_task(
                         tuple(conversation),
                         public_context,
                     )
-                    conversation.append({"role": "assistant", "content": raw_output})
                 else:
                     raw_output = agent.generate(prompt, public_context)
             except RuntimeError as exc:
@@ -211,6 +230,7 @@ def evaluate_mahjong_solo_task(
                     draws=draws,
                     discards=discards,
                     raw_outputs=raw_outputs,
+                    first_attempt_outputs=first_attempt_outputs,
                     reasoning_traces=reasoning_traces,
                     conversation=conversation,
                     agent_actions=agent_actions,
@@ -221,8 +241,14 @@ def evaluate_mahjong_solo_task(
                     metrics=finish_task_metrics(agent, metrics_start),
                 )
             raw_outputs.append(raw_output)
+            if attempt_number == 1:
+                first_attempt_outputs[-1] = raw_output
             reasoning_traces.append(_read_generation_trace(agent))
             action = extract_mahjong_solo_action(raw_output)
+            if observation_mode == "history-only":
+                conversation.append({
+                    "role": "assistant", "content": _action_history_content(action)
+                })
 
             if action is None:
                 last_error = "no_json_action_extracted"
@@ -240,6 +266,7 @@ def evaluate_mahjong_solo_task(
                             draws=draws,
                             discards=discards,
                             raw_outputs=raw_outputs,
+                            first_attempt_outputs=first_attempt_outputs,
                             reasoning_traces=reasoning_traces,
                             conversation=conversation,
                             agent_actions=agent_actions,
@@ -294,6 +321,7 @@ def evaluate_mahjong_solo_task(
         draws=draws,
         discards=discards,
         raw_outputs=raw_outputs,
+        first_attempt_outputs=first_attempt_outputs,
         reasoning_traces=reasoning_traces,
         conversation=conversation,
         agent_actions=agent_actions,
@@ -312,8 +340,12 @@ def extract_mahjong_solo_action(output: str) -> dict[str, Any] | None:
     action = payload.get("action")
     if not isinstance(action, str):
         return None
-    parsed: dict[str, Any] = {"action": action.strip().lower()}
-    tile = payload.get("tile") or payload.get("discard")
+    action = action.strip().lower()
+    allowed_fields = {"action"} if action == "tsumo" else {"action", "tile"}
+    if set(payload) - allowed_fields:
+        return None
+    parsed: dict[str, Any] = {"action": action}
+    tile = payload.get("tile")
     if isinstance(tile, str):
         try:
             parsed["tile"] = normalize_tile(tile)
@@ -322,7 +354,46 @@ def extract_mahjong_solo_action(output: str) -> dict[str, Any] | None:
     return parsed
 
 
-def _summarize_action_retry_metrics(results: list[Any]) -> dict[str, float]:
+def _action_history_content(action: dict[str, Any] | None) -> str:
+    """Keep only protocol actions in history, never rejected notes or prose."""
+    if action is not None:
+        if action.get("action") == "tsumo":
+            return json.dumps({"action": "tsumo"})
+        if action.get("action") == "discard" and isinstance(action.get("tile"), str):
+            try:
+                tile = normalize_tile(action["tile"])
+            except ValueError:
+                pass
+            else:
+                return json.dumps({"action": "discard", "tile": tile})
+    return "{}"
+
+
+def _valid_evaluation_results(results: list[Any]) -> list[Any]:
+    return [
+        result for result in results
+        if getattr(result, "evaluation_status", "completed") != "api_error"
+        and not any(
+            item.get("error") == "agent_request_error"
+            for item in result.action_errors
+        )
+    ]
+
+
+def _evaluation_coverage(
+    results: list[Any], planned_total: int | None = None,
+) -> dict[str, int | float]:
+    evaluated = len(_valid_evaluation_results(results))
+    planned = len(results) if planned_total is None else planned_total
+    return {
+        "evaluated_total": evaluated,
+        "api_error_total": len(results) - evaluated,
+        "evaluation_coverage": evaluated / planned if planned else 0.0,
+    }
+
+
+def _summarize_action_retry_metrics(results: list[Any]) -> dict[str, float | None]:
+    results = _valid_evaluation_results(results)
     total = len(results)
     action_attempt_total = sum(len(result.raw_outputs) for result in results)
     illegal_tsumo_total = 0
@@ -365,24 +436,24 @@ def _summarize_action_retry_metrics(results: list[Any]) -> dict[str, float]:
         1 for result in results if result.success and result.action_errors
     )
     return {
-        "strict_first_attempt_success": strict_success / total if total else 0.0,
+        "strict_first_attempt_success": strict_success / total if total else None,
         "illegal_tsumo_rate": (
             illegal_tsumo_total / action_attempt_total
             if action_attempt_total
-            else 0.0
+            else None
         ),
         "illegal_discard_rate": (
             illegal_discard_total / action_attempt_total
             if action_attempt_total
-            else 0.0
+            else None
         ),
         "retry_corrected_success": (
-            retry_corrected_success / total if total else 0.0
+            retry_corrected_success / total if total else None
         ),
         "first_attempt_legal_action_rate": (
             legal_first_attempt_total / returned_first_attempt_total
             if returned_first_attempt_total
-            else 0.0
+            else None
         ),
     }
 
@@ -398,19 +469,25 @@ def summarize_mahjong_solo(
     planned = total if planned_total is None else planned_total
     if planned < total:
         raise ValueError("planned_total cannot be smaller than completed results")
-    success_count = sum(1 for result in results if result.success)
+    valid_results = _valid_evaluation_results(results)
+    coverage = _evaluation_coverage(results, planned)
+    evaluated_total = len(valid_results)
+    if run_status == "completed" and coverage["api_error_total"]:
+        run_status = "completed_with_api_errors"
+    success_count = sum(1 for result in valid_results if result.success)
     illegal_tsumo_total = sum(
         1
-        for result in results
+        for result in valid_results
         for action_error in result.action_errors
         if str(action_error.get("error", "")).startswith("illegal_tsumo_at_draw_")
     )
     summary = {
         "total": total,
         "planned_total": planned,
-        "completed_total": total,
-        "remaining_total": planned - total,
+        "completed_total": evaluated_total,
+        "remaining_total": planned - evaluated_total,
         "run_status": run_status,
+        **coverage,
         "observation_mode": (
             results[0].observation_mode
             if results
@@ -421,8 +498,9 @@ def summarize_mahjong_solo(
             else "mixed"
         ),
         "success": success_count,
-        "success_rate": success_count / total if total else 0.0,
+        "success_rate": success_count / evaluated_total if evaluated_total else None,
         "illegal_tsumo_total": illegal_tsumo_total,
+        "shanten_optimal_discard_rate": mean_episode_shanten_discard_rate(valid_results),
         **_summarize_action_retry_metrics(results),
         "metrics": summarize_metrics(results),
     }
@@ -459,13 +537,17 @@ def write_mahjong_solo_run(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    success_rate_text = (
+        f"{summary['success_rate']:.3f}"
+        if summary["success_rate"] is not None else "n/a"
+    )
     (run_dir / "summary.txt").write_text(
         f"run_status={summary['run_status']} "
         f"planned={summary['planned_total']} "
         f"completed={summary['completed_total']} "
         f"remaining={summary['remaining_total']}\n"
         f"total={summary['total']} success={summary['success']} "
-        f"success_rate={summary['success_rate']:.3f}\n"
+        f"success_rate={success_rate_text}\n"
         + (f"error={error}\n" if error is not None else "")
         + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
@@ -481,6 +563,7 @@ def _make_result(
     draws: list[str],
     discards: list[str],
     raw_outputs: list[str],
+    first_attempt_outputs: list[str | None],
     reasoning_traces: list[dict[str, Any] | None],
     conversation: list[ChatMessage],
     agent_actions: list[dict[str, Any]],
@@ -490,14 +573,27 @@ def _make_result(
     reasons: list[str],
     metrics: dict[str, object],
 ) -> MahjongSoloInstanceResult:
+    api_error = any(item.get("error") == "agent_request_error" for item in action_errors)
+    strategy = evaluate_shanten_discard_strategy(
+        task.initial_hand,
+        draws,
+        discards,
+        first_attempt_outputs,
+        STANDARD_RULES,
+        is_winning_hand,
+        extract_mahjong_solo_action,
+    )
     return MahjongSoloInstanceResult(
         task_id=task.id,
         observation_mode=observation_mode,
-        success=success,
-        score=1.0 if success else 0.0,
+        success=None if api_error else success,
+        score=None if api_error else (1.0 if success else 0.0),
+        evaluation_status="api_error" if api_error else "completed",
         draws=list(draws),
         discards=list(discards),
         raw_outputs=list(raw_outputs),
+        first_attempt_outputs=list(first_attempt_outputs),
+        **strategy,
         reasoning_traces=deepcopy(reasoning_traces),
         conversation=list(conversation),
         agent_actions=list(agent_actions),
@@ -538,7 +634,11 @@ def _score_tsumo(
 
 def _action_error_feedback(error: str) -> str:
     if error == "no_json_action_extracted":
-        return "The previous response was not a parseable action JSON object."
+        return (
+            "The previous response was not a valid action JSON object. "
+            "Use only action for tsumo, or action and tile for discard; "
+            "do not add other fields."
+        )
     if error.startswith("illegal_tsumo_at_draw_"):
         return (
             "The previous tsumo declaration was illegal: the current 14 tiles "

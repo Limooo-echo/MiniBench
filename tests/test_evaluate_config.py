@@ -13,7 +13,7 @@ from minibench.factory.experiments import get_task_family_spec
 class EvaluateConfigTests(unittest.TestCase):
     def test_visual_configs_use_qwen_3_8_max(self):
         visual_configs = (
-            "mahjong_multimodal_ablation.yaml",
+            "mahjong_multimodal.yaml",
             "one_stroke_a4.yaml",
             "one_stroke_a4_ablation.yaml",
             "xiangqi_multimodal.yaml",
@@ -24,15 +24,12 @@ class EvaluateConfigTests(unittest.TestCase):
                 config = load_experiment_config(Path("config/experiments") / filename)
                 self.assertEqual(config["provider"]["name"], "qwen")
                 self.assertEqual(config["provider"]["model"], "qwen3.8-max")
-                expected_extra_body = (
-                    {"thinking": {"type": "disabled"}}
-                    if filename == "mahjong_multimodal_ablation.yaml"
-                    else {"enable_thinking": False}
-                )
                 self.assertEqual(
                     config["provider"]["extra_body"],
-                    expected_extra_body,
+                    {"enable_thinking": False},
                 )
+                if filename == "mahjong_multimodal.yaml":
+                    self.assertEqual(config["evaluation"]["input_modes"], ["image"])
 
     def test_run_config_writes_run_artifacts(self):
         with tempfile.TemporaryDirectory() as tmpdir:

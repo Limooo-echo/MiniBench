@@ -341,19 +341,27 @@ minibench run-config config/experiments/one_stroke_generated_euler_theorem.yaml
 | `mahjong_solo.yaml` | 标准规则下的 full-hand 单人摸弃决策 |
 | `mahjong_rule_variants.yaml` | 全手牌规则适应，默认扩展全部规则通道 |
 | `mahjong_history_only.yaml` | 标准规则下的在线多轮 history-only 决策 |
-| `mahjong_multimodal_ablation.yaml` | 同题 text/image 配对消融，默认 Qwen |
+| `mahjong_multimodal.yaml` | 静态 90 题的一一对应图片版本，仅运行 image，默认 Qwen |
 
 ```bash
 minibench run-config config/experiments/mahjong.yaml
 minibench run-config config/experiments/mahjong_solo.yaml
 minibench run-config config/experiments/mahjong_rule_variants.yaml
 minibench run-config config/experiments/mahjong_history_only.yaml
-minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
+minibench run-config config/experiments/mahjong_multimodal.yaml
 ```
 
 麻将 history-only 只在第一轮提供初始手牌，后续只提供新摸牌和环境已接受的历史弃牌。由于每轮弃牌都是正式计分决策，每轮都以 `final` 阶段调用 agent；兼容仅实现旧 `generate_messages()` 接口的自定义 agent。
 
-麻将视觉图片来自仓库内牌面素材与确定性 Pillow 渲染器。更换 Qwen provider/agent 不会改变牌局数据、答案或评分逻辑。
+麻将视觉图片来自仓库内牌面素材与确定性 Pillow 渲染器。视觉数据逐题复用静态麻将的 ID、手牌、公开牌、目标和标准答案，仅把牌码输入转换成图片。重新渲染使用：
+
+```bash
+minibench render-mahjong-visual \
+  --tasks data/mahjong/tasks.jsonl \
+  --output data/mahjong/visual_tasks.jsonl \
+  --render-dir data/mahjong/visual_tasks_visual \
+  --overwrite
+```
 
 ## 5. 如何切换 agent 架构
 
@@ -429,16 +437,16 @@ export DASHSCOPE_API_KEY
 minibench run-config config/experiments/xiangqi_multimodal.yaml
 minibench run-config config/experiments/one_stroke_a4.yaml
 minibench run-config config/experiments/one_stroke_a4_ablation.yaml
-minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
+minibench run-config config/experiments/mahjong_multimodal.yaml
 ```
 
 其中：
 
 - 象棋运行 `text`、`chinese-piece-image`、`latin-piece-image`。
 - 一笔画 A4 正式运行 `challenge_image`，消融运行 `text`、`clear_image`、`challenge_image`。
-- 麻将配对消融运行 `text`、`image`；只需图片模式时可在同一 YAML 中将 `evaluation.input_modes` 设为 `[image]`。
+- 麻将多模态运行静态 90 题的一一对应 `image` 版本；文本基线由 `mahjong.yaml` 单独运行。
 
-配对消融应让同一个 Qwen 模型同时跑文本和图片，才能把差异主要归因于输入模态，而不是模型能力差异。
+麻将静态和图片结果可按相同任务 ID 做跨模态比较。图片模式额外要求转录手牌及适用时的公开牌，因此该比较是跨模态性能差距，而不是完全纯净的单变量输出消融。
 
 ### 6.2 另跑 DeepSeek 文本基线
 

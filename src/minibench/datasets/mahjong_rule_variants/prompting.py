@@ -7,8 +7,7 @@ from minibench.datasets.mahjong_solo.prompting import (
     build_shared_mahjong_draw_discard_prompt,
 )
 from minibench.datasets.mahjong_rule_variants.rules import (
-    CYCLIC_SEQUENCES,
-    NO_CROSS_SUIT_DUPLICATE_SEQUENCES,
+    CYCLIC_ONE_TILE_SUBSTITUTION,
     RED_DRAGON_WILDCARD,
     STANDARD_RULES,
     active_rules_for_channel,
@@ -20,18 +19,15 @@ MAHJONG_RULE_VARIANT_SYSTEM_PROMPT = MAHJONG_SOLO_SYSTEM_PROMPT
 
 RULE_TEXT = {
     STANDARD_RULES: STANDARD_MAHJONG_RULE_TEXT,
-    NO_CROSS_SUIT_DUPLICATE_SEQUENCES: (
-        "Identical numeric sequences may repeat within the same suit, but the "
-        "same sequence may not appear in two different suits in one winning "
-        "decomposition. Example: 1m-2m-3m together with 1p-2p-3p is forbidden."
-    ),
-    CYCLIC_SEQUENCES: (
-        "Numbered suits wrap around: 8-9-1 and 9-1-2 are legal sequences in "
-        "addition to ordinary consecutive sequences."
-    ),
     RED_DRAGON_WILDCARD: (
         "Every red dragon C is a wildcard and may represent any one tile when "
         "checking whether the 14-tile hand is complete."
+    ),
+    CYCLIC_ONE_TILE_SUBSTITUTION: (
+        "When checking whether the 14-tile hand is complete, apply this mandatory "
+        "directional replacement to every printed one tile: 1s counts as 1m, 1m "
+        "counts as 1p, and 1p counts as 1s. All other tiles are unchanged, and "
+        "discard actions must still name the printed tile."
     ),
 }
 
@@ -75,4 +71,3 @@ def rule_texts_for_channel(channel: str) -> tuple[str, ...]:
     if not active_rules:
         return (RULE_TEXT[STANDARD_RULES],)
     return tuple(RULE_TEXT[rule] for rule in active_rules)
-

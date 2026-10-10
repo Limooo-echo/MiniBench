@@ -12,7 +12,7 @@ from minibench.assets.fonts import pillow_font
 from minibench.datasets.mahjong.dataset import MahjongTask
 
 
-MAHJONG_RENDERER_VERSION = "visual-v3"
+MAHJONG_RENDERER_VERSION = "visual-v4"
 
 
 TILE_ASSET_NAMES = {
@@ -74,11 +74,6 @@ def _draw_centered_text(
 def mahjong_text_labels(task: MahjongTask) -> dict[str, str]:
     """Return the stable text contract used by the multimodal renderer."""
     return {
-        "title": (
-            "Which tile completes the hand?"
-            if task.goal == "winning_tiles"
-            else "Which discard leaves the most live winning tiles?"
-        ),
         "task_id": task.id,
         "visible_tiles": "VISIBLE TILES",
         "hand": "YOUR HAND",
@@ -94,46 +89,58 @@ def render_mahjong_task_png(task: MahjongTask, output: str | Path) -> Path:
     table_tile_height = 72
     table_gap = 8
     columns = max(1, task.table_columns)
-    table_rows = max(1, (len(task.visible_tiles) + columns - 1) // columns)
+    has_visible_tiles = bool(task.visible_tiles)
+    table_rows = (
+        (len(task.visible_tiles) + columns - 1) // columns
+        if has_visible_tiles
+        else 0
+    )
     table_width = min(len(task.visible_tiles), columns) * (
         table_tile_width + table_gap
-    ) - (table_gap if task.visible_tiles else 0)
-    table_height = table_rows * (table_tile_height + table_gap) - table_gap
+    ) - (table_gap if has_visible_tiles else 0)
+    table_height = (
+        table_rows * (table_tile_height + table_gap) - table_gap
+        if has_visible_tiles
+        else 0
+    )
 
     hand_tile_width = 60
     hand_tile_height = 80
     hand_gap = 5
     hand_width = len(task.hand) * (hand_tile_width + hand_gap) - hand_gap
     width = max(1080, hand_width + 120, table_width + 160)
-    hand_y = 170 + table_height + 105
-    height = max(640, hand_y + hand_tile_height + 80)
+    table_start_y = 136
+    hand_y = table_start_y + table_height + 92 if has_visible_tiles else 144
+    height = max(
+        640 if has_visible_tiles else 336,
+        hand_y + hand_tile_height + 72,
+    )
 
     canvas = Image.new("RGB", (width, height), "#174f3c")
     draw = ImageDraw.Draw(canvas)
     draw.rounded_rectangle((28, 24, width - 28, 82), radius=6, fill="#102f2d")
     labels = mahjong_text_labels(task)
-    draw.text((52, 39), labels["title"], font=_font(24, bold=True), fill="#f7f1df")
-    task_font = _font(15)
-    task_bounds = draw.textbbox((0, 0), labels["task_id"], font=task_font)
-    draw.text(
-        (width - 52 - (task_bounds[2] - task_bounds[0]), 43),
-        labels["task_id"],
-        font=task_font,
-        fill="#d5ddca",
-    )
     _draw_centered_text(
         draw,
-        (width / 2, 118),
-        labels["visible_tiles"],
-        font=_font(16),
+        (width / 2, 53),
+        labels["task_id"],
+        font=_font(16, bold=True),
         fill="#d5ddca",
     )
+    if has_visible_tiles:
+        _draw_centered_text(
+            draw,
+            (width / 2, 112),
+            labels["visible_tiles"],
+            font=_font(16),
+            fill="#d5ddca",
+        )
 
-    table_start_x = (width - table_width) / 2 if task.visible_tiles else width / 2
+    table_start_x = (width - table_width) / 2
     for index, tile in enumerate(task.visible_tiles):
         row, column = divmod(index, columns)
         x = int(table_start_x + column * (table_tile_width + table_gap))
-        y = 142 + row * (table_tile_height + table_gap)
+        y = table_start_y + row * (table_tile_height + table_gap)
         draw.rounded_rectangle(
             (x, y, x + table_tile_width, y + table_tile_height),
             radius=4,
@@ -203,6 +210,7 @@ def render_mahjong_gallery(
         goal_counts[task.goal] = goal_counts.get(task.goal, 0) + 1
     goal_labels = {
         "winning_tiles": "Winning tiles / 听牌进张",
+        "max_wait_discard": "Max distinct waits / 最多听牌切牌",
         "max_ukeire_discard": "Max ukeire discard / 最佳切牌",
     }
     progress_cards = "\n".join(

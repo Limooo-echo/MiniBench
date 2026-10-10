@@ -283,9 +283,11 @@ class MahjongSoloTests(unittest.TestCase):
         self.assertNotIn("Legal actions now", prompt)
         self.assertNotIn("Discard quality hints", prompt)
         self.assertNotIn("Winning hand yaku", prompt)
-        self.assertIn("best advances the concealed hand", prompt)
+        self.assertIn("lowest post-discard shanten number", prompt)
         self.assertNotIn("post-discard standard shanten", prompt)
-        self.assertNotIn("higher live ukeire", prompt)
+        self.assertIn("maximum live ukeire", prompt)
+        self.assertIn("total remaining copies", prompt)
+        self.assertIn("current hand and all previously discarded tiles", prompt)
 
     def test_task_system_prompt_does_not_force_final_json_during_reasoning(self):
         self.assertIn("single-player closed-hand Mahjong", MAHJONG_SOLO_SYSTEM_PROMPT)
@@ -322,9 +324,9 @@ class MahjongSoloTests(unittest.TestCase):
 
         self.assertIn("Initial concealed hand (13 tiles):", first)
         self.assertIn("Turn 1: you draw 9s", first)
-        self.assertIn("best advances the concealed hand", first)
+        self.assertIn("lowest post-discard shanten number", first)
         self.assertNotIn("post-discard standard shanten", first)
-        self.assertNotIn("higher live ukeire", first)
+        self.assertIn("maximum live ukeire", first)
         self.assertIn(
             '{"action":"discard","tile":"<LEGAL_TILE_FROM_HAND>"}', first
         )
@@ -336,8 +338,9 @@ class MahjongSoloTests(unittest.TestCase):
         self.assertNotIn("Current hand (", second)
         self.assertNotIn("Turn 1", second)
         self.assertIn("Reconstruct the concealed hand", second)
+        self.assertIn("minimizing post-discard shanten", second)
         self.assertNotIn("post-discard standard shanten", second)
-        self.assertNotIn("higher live ukeire", second)
+        self.assertIn("maximum live ukeire", second)
 
     def test_illegal_tsumo_retry_uses_unchanged_hand(self):
         agent = SequenceMahjongAgent(

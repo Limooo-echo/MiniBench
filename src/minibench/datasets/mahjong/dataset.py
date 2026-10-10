@@ -81,6 +81,19 @@ def mahjong_task_from_dict(
         ).resolve()
         if not image_path.is_file():
             raise ValueError(f"{raw['id']}: image file does not exist: {image_path}")
+    tags = _require_string_list(raw, "tags")
+    if "static-visible" in tags:
+        if len(visible_tiles) != 12:
+            raise ValueError(
+                f"{raw['id']}: static-visible tasks must have exactly 12 visible tiles"
+            )
+        if "easy" not in tags:
+            raise ValueError(f"{raw['id']}: static-visible tasks must be easy")
+        if goal not in {"winning_tiles", "max_ukeire_discard"}:
+            raise ValueError(
+                f"{raw['id']}: static-visible tasks must use winning_tiles or "
+                "max_ukeire_discard"
+            )
     if goal == "tenpai_discard":
         if len(hand) % 3 != 2:
             raise ValueError(f"{raw['id']}: tenpai_discard hand must have 3n+2 tiles")
@@ -108,7 +121,7 @@ def mahjong_task_from_dict(
         id=raw["id"],
         goal=goal,
         hand=hand,
-        tags=_require_string_list(raw, "tags"),
+        tags=tags,
         visible_tiles=visible_tiles,
         table_columns=table_columns,
         image=image,

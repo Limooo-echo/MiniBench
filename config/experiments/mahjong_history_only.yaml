@@ -9,7 +9,7 @@ agent:
   samples: 1
   reasoning_temperature: 0.0
   final_temperature: 0.0
-  max_reasoning_tokens: 1024
+  max_reasoning_tokens: 2048
 
 provider:
   name: deepseek

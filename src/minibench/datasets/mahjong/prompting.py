@@ -55,8 +55,17 @@ def build_mahjong_prompt(
     ]
 
     if visual_task:
-        lines.extend(_paired_input_lines(task, input_mode=selected_mode))
-        lines.extend(_paired_observation_instructions(task))
+        lines.extend(_visual_input_lines(task, input_mode=selected_mode))
+        lines.extend(_visual_observation_instructions(task))
+    elif _is_static_visible_task(task):
+        lines.extend(
+            [
+                f"VISIBLE TILES: {' '.join(task.visible_tiles)}",
+                f"YOUR HAND: {' '.join(task.hand)}",
+                f"Goal: {task.goal}",
+                "",
+            ]
+        )
     else:
         lines.extend([f"Hand: {' '.join(task.hand)}", f"Goal: {task.goal}", ""])
 
@@ -90,8 +99,21 @@ def build_mahjong_prompt(
                 "13-tile hand, on the visible table, and the chosen discard itself.",
                 "Compare every distinct discard, find all structural winning tile "
                 "types, and sum their remaining nonnegative copy counts.",
-                "If multiple discards tie for the largest live-copy total, return "
-                "any one of them.",
+                *(
+                    [
+                        "For the unique optimal discard, list every structural "
+                        "winning tile type and its exact remaining copy count, "
+                        "including counts of zero."
+                    ]
+                    if _is_static_visible_task(task)
+                    else []
+                ),
+                (
+                    "This generated task has one unique optimal discard."
+                    if _is_static_visible_task(task)
+                    else "If multiple discards tie for the largest live-copy "
+                    "total, return any one of them."
+                ),
                 _static_output_schema(task, goal="max_ukeire_discard"),
             ]
         )
@@ -102,6 +124,14 @@ def build_mahjong_prompt(
                 "complete according to the benchmark winning-shape rules.",
                 "List structural waits even when all four copies are already "
                 "visible; the table is public context, not a rule change.",
+                *(
+                    [
+                        "For every winning tile type, give its exact remaining "
+                        "copy count, including counts of zero."
+                    ]
+                    if _is_static_visible_task(task)
+                    else []
+                ),
                 "Return all and only the winning tile types allowed by these "
                 "benchmark shape rules.",
                 _static_output_schema(task, goal="winning_tiles"),
@@ -113,14 +143,20 @@ def build_mahjong_prompt(
     return "\n".join(lines)
 
 
-def _paired_input_lines(task: MahjongTask, *, input_mode: str) -> list[str]:
+def _visual_input_lines(task: MahjongTask, *, input_mode: str) -> list[str]:
     if input_mode == "image":
-        return [
+        lines = [
             "Input source: inspect the attached Mahjong table image; the tile "
             "identities are not repeated as text.",
-            "The upper area is labelled VISIBLE TILES and the lower area is "
-            "labelled YOUR HAND.",
         ]
+        if task.visible_tiles:
+            lines.append(
+                "The upper area is labelled VISIBLE TILES and the lower area is "
+                "labelled YOUR HAND."
+            )
+        else:
+            lines.append("The image contains one tile area labelled YOUR HAND.")
+        return lines
     return [
         "Input source: use the benchmark tile codes supplied below.",
         (
@@ -132,11 +168,10 @@ def _paired_input_lines(task: MahjongTask, *, input_mode: str) -> list[str]:
     ]
 
 
-def _paired_observation_instructions(task: MahjongTask) -> list[str]:
-    return [
-        "Paired observation instructions:",
-        "Carefully identify every tile and internally transcribe both input "
-        "areas before solving.",
+def _visual_observation_instructions(task: MahjongTask) -> list[str]:
+    lines = [
+        "Observation and transcription instructions:",
+        "Carefully identify every tile before solving.",
         "Tile-face/code conversion:",
         "- Chinese-number + 萬/万 tiles are m; circular-dot tiles are p; "
         "bamboo-stick tiles are s.",
@@ -144,23 +179,53 @@ def _paired_observation_instructions(task: MahjongTask) -> list[str]:
         "- In the JSON answer, use only benchmark codes such as 3m, 6p, 8s, E, "
         "or C.",
         "- Never output Chinese tile names such as 三萬, 六筒, or 南.",
-        "In the final JSON, transcribe every tile in both input areas before "
-        "giving the task answer.",
-        "Preserve duplicate tiles. Put YOUR HAND in the hand list and VISIBLE "
-        "TILES in the visible_tiles list.",
-        f"The concealed hand contains {len(task.hand)} tiles.",
-        f"The visible table contains {len(task.visible_tiles)} tiles.",
-        f"Goal: {task.goal}",
-        "",
     ]
+    if task.visible_tiles:
+        lines.extend(
+            [
+                "In the final JSON, transcribe every tile in both input areas "
+                "before giving the task answer.",
+                "Preserve duplicate tiles. Put YOUR HAND in the hand list and "
+                "VISIBLE TILES in the visible_tiles list.",
+                f"The concealed hand contains {len(task.hand)} tiles.",
+                f"The visible table contains {len(task.visible_tiles)} tiles.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "In the final JSON, transcribe every tile in YOUR HAND before "
+                "giving the task answer.",
+                "Preserve duplicate tiles and put them in the hand list.",
+                f"The concealed hand contains {len(task.hand)} tiles.",
+            ]
+        )
+    lines.extend([f"Goal: {task.goal}", ""])
+    return lines
 
 
 def _static_output_schema(task: MahjongTask, *, goal: str) -> str:
-    transcription = (
-        '"hand":[...],"visible_tiles":[...],'
-        if "visual" in task.tags or task.image is not None
-        else ""
-    )
+    transcription = ""
+    if "visual" in task.tags or task.image is not None:
+        transcription = '"hand":[...],'
+        if task.visible_tiles:
+            transcription += '"visible_tiles":[...],'
+    if _is_static_visible_task(task):
+        if goal == "winning_tiles":
+            return (
+                "Return only {" + transcription + '"winning_tiles":[...],'
+                '"live_winning_copies":{"3m":2,"6m":0}}.'
+            )
+        if goal == "max_ukeire_discard":
+            return (
+                "Return only {" + transcription
+                + '"discard":"...","winning_tiles":[...],'
+                '"live_winning_copies":{"3m":2,"6m":0}}.'
+            )
     if goal == "winning_tiles":
         return "Return only {" + transcription + '"winning_tiles":[...]}.'
     return "Return only {" + transcription + '"discard":"..."}.'
+
+
+def _is_static_visible_task(task: MahjongTask) -> bool:
+    return "static-visible" in task.tags

@@ -5,22 +5,21 @@ task:
   task_ids: []
 
 agent:
-  name: openai-compatible
-  samples: 3
+  name: cot
+  samples: 1
   reasoning_temperature: 0.0
   final_temperature: 0.0
   max_reasoning_tokens: 1024
 
 provider:
-  name: deepseek
-  model: deepseek-v4-flash
+  name: qwen
+  model: qwen3.8-max
   json_mode: true
-  max_tokens: 512
-  timeout: 120
+  max_tokens: 1024
+  timeout: 300
   extra_body:
-    thinking:
-      type: disabled
+    enable_thinking: false
 
 run:
   output_dir: runs
-  run_name: mahjong-openai-compatible
+  run_name: mahjong-cot-new-qwen

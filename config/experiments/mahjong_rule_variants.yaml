@@ -9,7 +9,7 @@ agent:
   samples: 1
   reasoning_temperature: 0.0
   final_temperature: 0.0
-  max_reasoning_tokens: 1024
+  max_reasoning_tokens: 2048
 
 provider:
   name: deepseek
@@ -25,9 +25,7 @@ evaluation:
   observation_mode: full-hand
   show_progress: true
   rule_channels:
-    - no_cross_suit_duplicate_sequences
-    - cyclic_sequences
-
+    - "red_dragon_wildcard+cyclic_one_tile_substitution"
 run:
   output_dir: runs
-  run_name: null
+  run_name: new-rule4
