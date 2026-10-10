@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — project organization
+
+- Split CLI handlers into `commands/` and experiment orchestration into
+  `experiments/`. Removed `factory.experiments`; use the new modules directly.
+- Removed the deprecated `openai-compatible` agent name and
+  `OpenAICompatibleAgent`. Use `passthrough`, or compose `OpenAICompatibleClient`
+  with an existing Agent. Transport and reasoning algorithms are unchanged.
+- Removed duplicate `one_stroke.yaml`; use `one_stroke_direct.yaml`.
+  Task data, experimental settings, prompt versions and prompt text are unchanged.
+- Run fingerprints include the extracted orchestration modules. Existing
+  results remain readable, but resume requires the same source fingerprint.
+  Zebra uses only its current sidecar lock; obsolete `.run.lock` entries are
+  treated as unexpected files, never silently reused or removed.
+- Removed hand-written old folder/agent aliases from result plots. Visualization
+  helpers scope their font settings locally, close their figures and accept
+  filename-only output paths.
+
 ## 0.2.0 — 2026-08-19
 
 Breaking Xiangqi schema and interface release.

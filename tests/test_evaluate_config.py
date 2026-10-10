@@ -7,7 +7,7 @@ import yaml
 
 from minibench.evaluate import run_config
 from minibench.factory.config import load_experiment_config, validate_experiment_config
-from minibench.factory.experiments import get_task_family_spec
+from minibench.experiments.registry import get_task_family_spec
 
 
 class EvaluateConfigTests(unittest.TestCase):
@@ -79,7 +79,7 @@ class EvaluateConfigTests(unittest.TestCase):
                             "task_ids": [],
                         },
                         "agent": {
-                            "name": "openai-compatible",
+                            "name": "passthrough",
                             "predictions": str(predictions_path),
                         },
                         "provider": {"name": "generic"},
@@ -136,7 +136,7 @@ class EvaluateConfigTests(unittest.TestCase):
                             "task_ids": [],
                         },
                         "agent": {
-                            "name": "openai-compatible",
+                            "name": "passthrough",
                             "predictions": str(predictions_path),
                         },
                         "provider": {"name": "generic"},
@@ -209,7 +209,7 @@ class EvaluateConfigTests(unittest.TestCase):
                             "task_ids": [],
                         },
                         "agent": {
-                            "name": "openai-compatible",
+                            "name": "passthrough",
                             "predictions": str(predictions),
                         },
                         "provider": {"name": "generic"},
@@ -258,7 +258,7 @@ class EvaluateConfigTests(unittest.TestCase):
         )
         self.assertEqual(args.max_tokens, 1024)
 
-    def test_one_stroke_openai_compatible_rejects_reasoning_only_fields(self):
+    def test_one_stroke_passthrough_rejects_reasoning_only_fields(self):
         field_values = {
             "samples": 3,
             "reasoning_temperature": 0.7,
@@ -275,7 +275,7 @@ class EvaluateConfigTests(unittest.TestCase):
                         {
                             "task": {"family": "one_stroke"},
                             "agent": {
-                                "name": "openai-compatible",
+                                "name": "passthrough",
                                 field: value,
                             },
                             "provider": {"name": "generic"},
@@ -302,7 +302,7 @@ class EvaluateConfigTests(unittest.TestCase):
                 )
                 self.assertEqual(config["agent"]["samples"], 3)
 
-        for agent_name in ("openai-compatible", "cot"):
+        for agent_name in ("passthrough", "cot"):
             with self.subTest(agent_name=agent_name):
                 with self.assertRaisesRegex(
                     ValueError,
@@ -343,9 +343,8 @@ class EvaluateConfigTests(unittest.TestCase):
                     30.0,
                 )
 
-        alias = load_experiment_config("config/experiments/one_stroke.yaml")
         canonical = load_experiment_config("config/experiments/one_stroke_direct.yaml")
-        self.assertEqual(alias, canonical)
+        self.assertFalse(Path("config/experiments/one_stroke.yaml").exists())
         self.assertEqual(canonical["provider"]["max_tokens"], 1024)
         self.assertIsNone(canonical["run"]["run_name"])
         self.assertEqual(canonical["run"]["on_existing"], "error")
@@ -363,7 +362,7 @@ class EvaluateConfigTests(unittest.TestCase):
             validate_experiment_config(
                 {
                     "task": {"family": "not-a-family"},
-                    "agent": {"name": "openai-compatible"},
+                    "agent": {"name": "passthrough"},
                     "provider": {"name": "generic"},
                     "run": {"output_dir": "runs"},
                 }
@@ -373,7 +372,7 @@ class EvaluateConfigTests(unittest.TestCase):
         config = validate_experiment_config(
             {
                 "task": {"family": "zebra"},
-                "agent": {"name": "openai-compatible"},
+                "agent": {"name": "passthrough"},
                 "provider": {"name": "generic"},
                 "run": {"output_dir": "runs"},
             }
@@ -384,7 +383,7 @@ class EvaluateConfigTests(unittest.TestCase):
     def test_resume_requires_safe_explicit_run_name(self):
         base = {
             "task": {"family": "zebra"},
-            "agent": {"name": "openai-compatible"},
+            "agent": {"name": "passthrough"},
             "provider": {"name": "generic"},
         }
         with self.assertRaisesRegex(ValueError, "run.run_name is required"):
@@ -405,7 +404,7 @@ class EvaluateConfigTests(unittest.TestCase):
     def test_provider_retry_fields_are_validated(self):
         base = {
             "task": {"family": "zebra"},
-            "agent": {"name": "openai-compatible"},
+            "agent": {"name": "passthrough"},
             "run": {"output_dir": "runs"},
         }
         valid = validate_experiment_config(
@@ -453,7 +452,7 @@ class EvaluateConfigTests(unittest.TestCase):
             validate_experiment_config(
                 {
                     "task": {"family": "one_stroke"},
-                    "agent": {"name": "openai-compatible"},
+                    "agent": {"name": "passthrough"},
                     "run": {"output_dir": "runs"},
                 }
             )

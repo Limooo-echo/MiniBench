@@ -40,7 +40,8 @@ from minibench.datasets.xiangqi.text_encoding import board_state_text
 from minibench.datasets.xiangqi.variants.board import VariantBoard
 from minibench.datasets.xiangqi.variants.rules import Rule
 from minibench.factory.config import load_experiment_config
-from minibench.factory.experiments import get_task_family_spec, run_family_experiment
+from minibench.experiments.registry import get_task_family_spec
+from minibench.experiments.runner import run_family_experiment
 
 
 CONFIG_PATHS = {
@@ -323,9 +324,9 @@ class XiangqiV2DataTests(unittest.TestCase):
                     write_run=writer,
                 )
                 with patch(
-                    "minibench.factory.experiments.get_task_family_spec",
+                    "minibench.experiments.runner.get_task_family_spec",
                     return_value=smoke_spec,
-                ), patch("minibench.factory.experiments._evaluate", return_value=[]):
+                ), patch("minibench.experiments.xiangqi._evaluate", return_value=[]):
                     run_dir, summary = run_family_experiment(config)
                 self.assertEqual(summary["total"], 1)
                 self.assertTrue((run_dir / "resolved_config.yaml").is_file())

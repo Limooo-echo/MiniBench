@@ -63,7 +63,7 @@ class MahjongCliOfflineSmokeTests(unittest.TestCase):
             "minibench.datasets.mahjong.dataset.load_mahjong_tasks",
             return_value=[static_wait_task()],
         ), patch(
-            "minibench.cli._make_cli_agent",
+            "minibench.commands.mahjong._make_cli_agent",
             return_value=OfflineMahjongAgent(),
         ):
             args = build_parser().parse_args(
@@ -84,7 +84,7 @@ class MahjongCliOfflineSmokeTests(unittest.TestCase):
                 "load_mahjong_rule_variant_tasks",
                 return_value=[standard_rule_task()],
             ), patch(
-                "minibench.cli._make_cli_agent",
+                "minibench.commands.mahjong._make_cli_agent",
                 return_value=OfflineMahjongAgent(),
             ):
                 args = build_parser().parse_args(
@@ -126,7 +126,7 @@ class MahjongCliOfflineSmokeTests(unittest.TestCase):
                 "minibench.datasets.mahjong.dataset.load_mahjong_tasks",
                 return_value=[visual_task],
             ), patch(
-                "minibench.cli._make_cli_agent",
+                "minibench.commands.mahjong._make_cli_agent",
                 return_value=OfflineMahjongAgent(),
             ):
                 args = build_parser().parse_args(

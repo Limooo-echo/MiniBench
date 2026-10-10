@@ -6,11 +6,8 @@ from unittest.mock import patch
 
 from minibench.datasets.one_stroke.dataset import load_one_stroke_tasks
 from minibench.datasets.one_stroke.evaluation import plan_one_stroke_work_items
-from minibench.factory.experiments import (
-    _one_stroke_dataset_profile,
-    _one_stroke_input_assets,
-    run_family_experiment,
-)
+from minibench.experiments.one_stroke import _one_stroke_dataset_profile, _one_stroke_input_assets
+from minibench.experiments.runner import run_family_experiment
 
 
 def one_stroke_record(task_id):
@@ -41,7 +38,7 @@ def experiment_config(root, tasks_path, *, run_name="one-stroke-resume"):
             "limit": None,
             "task_ids": [],
         },
-        "agent": {"name": "openai-compatible"},
+        "agent": {"name": "passthrough"},
         "provider": {
             "name": "generic",
             "model": "unit-model",
@@ -126,7 +123,7 @@ class OneStrokeResumeTests(unittest.TestCase):
             )
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.one_stroke.make_agent_from_config",
                 return_value=first_agent,
             ):
                 with self.assertRaisesRegex(RuntimeError, "1/2 results") as raised:
@@ -187,7 +184,7 @@ class OneStrokeResumeTests(unittest.TestCase):
 
             second_agent = DirectAgent()
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.one_stroke.make_agent_from_config",
                 return_value=second_agent,
             ):
                 resumed_dir, summary = run_family_experiment(config)
@@ -233,7 +230,7 @@ class OneStrokeResumeTests(unittest.TestCase):
             first_agent = HistoryAgent(fail_on_call=3)
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.one_stroke.make_agent_from_config",
                 return_value=first_agent,
             ):
                 with self.assertRaisesRegex(RuntimeError, "1/2 results"):
@@ -254,7 +251,7 @@ class OneStrokeResumeTests(unittest.TestCase):
 
             resumed_agent = HistoryAgent()
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.one_stroke.make_agent_from_config",
                 return_value=resumed_agent,
             ):
                 _, summary = run_family_experiment(config)
@@ -280,7 +277,7 @@ class OneStrokeResumeTests(unittest.TestCase):
             config = experiment_config(root, tasks_path, run_name="mismatch")
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.one_stroke.make_agent_from_config",
                 return_value=DirectAgent(fail_after=1),
             ):
                 with self.assertRaises(RuntimeError):
@@ -300,7 +297,7 @@ class OneStrokeResumeTests(unittest.TestCase):
                 "provider": {**config["provider"], "temperature": 0.5},
             }
             with patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.one_stroke.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
                     run_family_experiment(changed)
@@ -319,13 +316,13 @@ class OneStrokeResumeTests(unittest.TestCase):
             config = experiment_config(root, tasks_path, run_name="completed")
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.one_stroke.make_agent_from_config",
                 return_value=DirectAgent(),
             ):
                 run_family_experiment(config)
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.one_stroke.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaisesRegex(ValueError, "already completed"):
                     run_family_experiment(config)
@@ -344,7 +341,7 @@ class OneStrokeResumeTests(unittest.TestCase):
             }
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.one_stroke.make_agent_from_config",
                 return_value=DirectAgent(),
             ):
                 run_dir, _ = run_family_experiment(config)
@@ -460,7 +457,7 @@ class OneStrokeResumeTests(unittest.TestCase):
             config["evaluation"]["input_modes"] = ["text"]
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.one_stroke.make_agent_from_config",
                 return_value=DirectAgent(fail_after=0),
             ):
                 with self.assertRaisesRegex(RuntimeError, "0/1 results"):
@@ -486,7 +483,7 @@ class OneStrokeResumeTests(unittest.TestCase):
             image_path.write_bytes(b"image-v2")
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.one_stroke.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
                     run_family_experiment(config)

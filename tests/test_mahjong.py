@@ -231,7 +231,7 @@ class MahjongTests(unittest.TestCase):
                 "minibench.datasets.mahjong.dataset.load_mahjong_tasks",
                 return_value=[wait_task(), wait_task()],
             ), patch(
-                "minibench.cli._make_cli_agent",
+                "minibench.commands.mahjong._make_cli_agent",
                 return_value=TimeoutOnSecondMahjongCallAgent(),
             ):
                 with self.assertRaisesRegex(SystemExit, "partial results saved"):

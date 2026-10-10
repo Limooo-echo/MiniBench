@@ -1,8 +1,8 @@
 # Design Notes
 
-## First Loop
+## Evaluation Loop
 
-The first implementation follows this minimal loop:
+All current task families follow this loop:
 
 ```text
 task selection
@@ -34,11 +34,15 @@ From SWE-bench:
 
 ## Model Adapter
 
-The first real model adapter is `openai-compatible`. It uses the chat
+`factory/providers.py` provides `OpenAICompatibleClient`. It uses the chat
 completions request shape directly through the Python standard library, so the
 benchmark does not need an SDK dependency. Provider shortcuts fill in common
 defaults for DeepSeek, Qwen/DashScope, and SiliconFlow, while `generic` keeps the
 adapter open to local servers and other compatible APIs.
+
+The transport client is not an Agent. `factory/agents.py` composes it with
+`passthrough` or a reasoning architecture from `agents/`. There is no deprecated
+combined client/agent wrapper and no old-name fallback.
 
 ## Task Taxonomy
 
@@ -46,10 +50,21 @@ Task sets use normalized `prefix:value` tags documented in
 `docs/task-authoring.md`. Family, capability, source, size, and difficulty tags
 support AgentBoard-style diagnostic summaries.
 
-## Near-Term Roadmap
+## Code Ownership
 
-1. Add an `Environment` interface with `reset`, `step`, and `state`.
-2. Save full trajectories for multi-step tasks.
-3. Add progress-rate scoring for intermediate states.
-4. Add weighted diagnostic dimensions over tags.
-5. Add provider-specific result metadata such as latency, token usage, and cost.
+- `cli.py` composes command groups; `commands/` owns CLI arguments and handlers.
+- `evaluate.py` loads/validates a YAML configuration and starts the experiment.
+- `factory/` owns configuration validation, agent construction and HTTP transport.
+- `experiments/registry.py` is the sole task-family registry. `runner.py` selects
+  inputs and routes to the task's checkpoint orchestration; `dispatch.py` forwards
+  supported evaluation parameters. `selection.py` and `metadata.py` own the
+  shared input-selection and reproducibility helpers.
+- `datasets/` owns task data formats, prompts, generators, rules and evaluators.
+- `agents/` and `core/prompts.py` own reasoning architectures and prompt versions.
+- `scoring/` builds offline capability scores from existing observations.
+- `visualization/` displays tasks and run artifacts; it does not change scoring.
+
+Multi-step tasks already persist trajectories and intermediate results. Preserve
+their task-specific protocols rather than imposing a new environment abstraction.
+Resume checks use input/configuration/source fingerprints and reject version
+mixing. Archived data and results are not silently migrated.

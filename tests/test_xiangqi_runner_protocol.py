@@ -14,7 +14,8 @@ import yaml
 
 from scripts import run_xiangqi_smoke as smoke, xiangqi_web_test as web
 from minibench.core.multimodal import ImageAttachment
-from minibench.factory.experiments import get_task_family_spec, _evaluate
+from minibench.experiments.registry import get_task_family_spec
+from minibench.experiments.dispatch import _evaluate
 
 
 class RunnerProtocolTests(unittest.TestCase):

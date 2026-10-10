@@ -1,7 +1,7 @@
 import unittest
 
 
-class ArchitectureCompatTests(unittest.TestCase):
+class PublicApiTests(unittest.TestCase):
     def test_factory_agent_path_exports_make_agent(self):
         from minibench.agents.passthrough import PassthroughAgent
         from minibench.factory.agents import make_agent
@@ -11,21 +11,13 @@ class ArchitectureCompatTests(unittest.TestCase):
             PassthroughAgent,
         )
 
-    def test_deprecated_python_agent_is_still_constructible(self):
-        from minibench.factory.providers import (
-            OpenAICompatibleAgent,
-            OpenAICompatibleClient,
-        )
+    def test_factory_exports_transport_without_deprecated_mixed_agent(self):
+        from minibench import factory
+        from minibench.factory.providers import OpenAICompatibleClient
 
-        with self.assertWarnsRegex(FutureWarning, "deprecated"):
-            agent = OpenAICompatibleAgent(
-                model="unit-model",
-                base_url="https://example.invalid/v1",
-                api_key_env="UNIT_KEY",
-            )
-
-        self.assertIsInstance(agent, OpenAICompatibleClient)
-        self.assertTrue(callable(agent.generate))
+        self.assertIs(factory.OpenAICompatibleClient, OpenAICompatibleClient)
+        self.assertNotIn("OpenAICompatibleAgent", factory.__all__)
+        self.assertFalse(hasattr(factory, "OpenAICompatibleAgent"))
 
     def test_new_agent_architectures_are_publicly_exported(self):
         from minibench.agents import (

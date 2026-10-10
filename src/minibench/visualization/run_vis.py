@@ -1,6 +1,6 @@
-"""Compatibility entrypoint for MiniBench visualization helpers.
+"""Standalone entrypoint for MiniBench task and result visualization.
 
-New Xiangqi workflows should prefer ``minibench inspect-xiangqi`` and
+Xiangqi inspection is also available via ``minibench inspect-xiangqi`` and
 ``minibench build-xiangqi-gallery``.
 """
 from __future__ import annotations

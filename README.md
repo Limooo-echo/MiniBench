@@ -347,7 +347,6 @@ minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 | 配置 | 内容 |
 | --- | --- |
 | `one_stroke_direct.yaml` | 直接求解，无欧拉定理提示 |
-| `one_stroke.yaml` | 与正式 direct 相同的兼容入口；通常不必与 direct 重复运行 |
 | `one_stroke_history.yaml` | 历史记忆：增量状态与仅历史对照 |
 | `one_stroke_multimodal.yaml` | 多模态图片，默认 Qwen |
 | `one_stroke_multimodal_ablation.yaml` | 多模态 text/image 配对消融 |
@@ -357,7 +356,6 @@ minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 
 ```bash
 minibench run-config config/experiments/one_stroke_direct.yaml
-minibench run-config config/experiments/one_stroke.yaml
 minibench run-config config/experiments/one_stroke_history.yaml
 minibench run-config config/experiments/one_stroke_multimodal.yaml
 minibench run-config config/experiments/one_stroke_multimodal_ablation.yaml
@@ -428,7 +426,10 @@ critic-refine
 least-to-most
 ```
 
-未显式填写名称时 factory 默认使用 `direct`。旧 YAML 名称 `openai-compatible` 已从公开列表移除，但仍会在发出 `FutureWarning` 后解析为 `passthrough`，完整保留 raw baseline 语义；它绝不会静默映射为 `direct`。旧代码直接导入的 `OpenAICompatibleAgent` 也只作为兼容包装保留。
+未显式填写名称时 factory 默认使用 `direct`。原样转发基线统一使用 `passthrough`。
+旧名称 `openai-compatible` 和混合 transport/agent 类 `OpenAICompatibleAgent` 已移除，
+不会静默转成其他架构。Python 代码使用 `OpenAICompatibleClient` 加现有 Agent 组合；
+模型请求、prompt 和推理流程不因这次整理而改变。
 
 ### 5.2 各架构的算法与调用数
 
@@ -772,11 +773,31 @@ Windows 的 `D:\AAALimoWork\CS\Seminar\MiniBench` 在 WSL 中是：
 ```text
 config/experiments/       # 可执行 YAML，是非敏感实验配置的唯一来源
 data/                     # JSONL 任务数据
+src/minibench/cli.py      # 命令注册与分发入口
+src/minibench/commands/   # 按任务分组的 CLI 参数与处理函数
+src/minibench/factory/    # 配置校验、agent 装配、provider 传输
+src/minibench/experiments/ # 任务注册、选题、运行与断点续跑
 src/minibench/agents/     # agent 推理架构
-src/minibench/factory/    # config、agent、provider、experiment 装配
-src/minibench/datasets/   # 各任务加载、prompt、评测、渲染与引擎
+src/minibench/core/       # prompt 注册、调用预算、消息/图片、通用检查点
+src/minibench/datasets/   # 各任务加载、prompt、出题、评测、渲染与引擎
+src/minibench/scoring/    # 离线四维评分与报告
+src/minibench/visualization/ # 任务展示与结果图表
 tests/                    # 单元、数据、CLI 与图片回归测试
 runs/                     # 运行输出，Git 忽略
 ```
+
+读代码从 `cli.py` → `evaluate.py` → `experiments/runner.py` 开始：
+
+- 命令参数与处理函数在 `commands/{static,mahjong,xiangqi,scoring}.py`；共同参数在 `common.py`。
+- `experiments/registry.py` 是十类任务的唯一注册表；`selection.py` 管选题和输入模式，
+  `dispatch.py` 只转发各任务支持的评测参数，`metadata.py` 管不含凭据的复现信息。
+- `experiments/{one_stroke,zebra,xiangqi,mahjong}.py` 分别管理各任务的运行状态；
+  算法、题目规则和 prompt 留在原来的 `datasets/`、`agents/` 和 `core/prompts.py`。
+
+不保留 `factory.experiments` 导入转发层；调用代码直接使用上述模块。
+重复的 `one_stroke.yaml` 已删除，直接解题统一用 `one_stroke_direct.yaml`。
+`prompt_version: v1/v2` 是仍支持的显式 prompt 选项，本次没有删除或修改。
+题库与历史结果保留；运行代码指纹会因源码整理而变化，旧运行目录不跨源码版本续跑。
+辅助绘图不再在导入时改写全局字体，单张图的设置在绘图结束后恢复。
 
 版本破坏性变更见 [`CHANGELOG.md`](CHANGELOG.md)，任务编写规范见 [`docs/task-authoring.md`](docs/task-authoring.md)。

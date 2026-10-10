@@ -21,7 +21,7 @@ sys.path.insert(0, str(repo / 'src'))
 from minibench.scoring.manifest import load_suite, read_document, file_hash
 from minibench.scoring.adapters import score_record
 from minibench.scoring.report import _costs
-from minibench.factory.experiments import get_task_family_spec
+from minibench.experiments.registry import get_task_family_spec
 from minibench.datasets.xiangqi.mate_in_one import evaluate_mate_in_one_tasks
 from minibench.datasets.xiangqi.history import evaluate_history_tasks
 from minibench.datasets.xiangqi.multimodal import _run_multimodal_game

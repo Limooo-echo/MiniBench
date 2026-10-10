@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from minibench.cli import _limit_mahjong_rule_sources, build_parser
+from minibench.commands.mahjong import _limit_mahjong_rule_sources
+from minibench.cli import build_parser
 from minibench.datasets.mahjong_rule_variants.dataset import (
     MahjongRuleVariantTask,
     load_mahjong_rule_variant_tasks,
@@ -39,10 +40,8 @@ from minibench.datasets.mahjong_solo.prompting import (
     MAHJONG_SOLO_SYSTEM_PROMPT,
     build_mahjong_solo_prompt,
 )
-from minibench.factory.experiments import (
-    _select_mahjong_rule_configuration,
-    get_task_family_spec,
-)
+from minibench.experiments.selection import _select_mahjong_rule_configuration
+from minibench.experiments.registry import get_task_family_spec
 
 
 class SequenceAgent:
@@ -607,7 +606,7 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 "load_mahjong_rule_variant_tasks",
                 return_value=tasks,
             ), patch(
-                "minibench.cli._make_cli_agent",
+                "minibench.commands.mahjong._make_cli_agent",
                 return_value=FailOnSecondCallAgent(),
             ):
                 with self.assertRaisesRegex(SystemExit, "partial results saved"):
