@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import json
 from pathlib import Path
 import re
@@ -12,6 +12,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from minibench.core.agent import Agent
+from minibench.core.runtime import AgentRuntime, StrictJSONObjectError
 from minibench.core.metrics import (
     finish_task_metrics,
     start_task_metrics,
@@ -77,6 +78,81 @@ _TRANSCRIPTION_PREDICTION_FIELDS = (
     "transcription_exact",
     "joint_success",
 )
+
+
+def run_mahjong_generation(agent: Agent, callback: Callable[[], str]) -> str:
+    """Keep Mahjong's scored action retries distinct from runtime format repairs."""
+    runtime = getattr(agent, "runtime", None)
+    config = getattr(agent, "config", None)
+    if not isinstance(runtime, AgentRuntime):
+        return callback()
+    previous_trace_mode = runtime.trace_mode
+    runtime.trace_mode = "full"
+    client = runtime.client
+    previous_truncation = getattr(client, "allow_truncated_content", None)
+    if previous_truncation is not None:
+        client.allow_truncated_content = True
+    if config is not None:
+        setattr(agent, "config", replace(config, max_format_repairs=0))
+    span_id = runtime.begin_span(
+        getattr(agent, "name", "mahjong-generation"),
+        metadata={"agent": getattr(agent, "name", "unknown"),
+                  "prompt_version": getattr(config, "prompt_version", None)},
+    )
+    output = None
+    error = None
+    try:
+        output = callback()
+        return output
+    except StrictJSONObjectError as exc:
+        run = runtime.end_span(span_id, error=f"{type(exc).__name__}: {exc}", stop_reason="error")
+        span_id = None
+        stage = run.stages[-1] if run.stages else None
+        # A malformed submitted answer is a model error, not an API failure.
+        # Internal stage-contract errors are not submitted task actions.
+        if stage is not None and stage.stage_name.endswith((".final", ".refine")):
+            if isinstance(exc.raw_output, str):
+                return exc.raw_output
+        raise
+    except BaseException as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        if span_id is not None:
+            runtime.end_span(span_id, output=output, error=error,
+                             stop_reason="error" if error else "completed")
+        runtime.trace_mode = previous_trace_mode
+        if previous_truncation is not None:
+            client.allow_truncated_content = previous_truncation
+        if config is not None:
+            setattr(agent, "config", config)
+
+
+def read_mahjong_generation_trace(agent: Agent) -> dict[str, Any] | None:
+    reader = getattr(agent, "last_generation_trace", None)
+    if callable(reader):
+        trace = reader()
+        if isinstance(trace, dict):
+            return deepcopy(trace)
+    run = getattr(agent, "last_run", None)
+    if run is None:
+        return None
+    trace = run.to_dict()
+    trace["architecture"] = getattr(agent, "name", run.name)
+    trace["stage_metrics"] = {}
+    labels = {"solve": "solution", "refine": "refinement"}
+    for stage in run.stages:
+        label = labels.get(stage.stage_name.rsplit(".", 1)[-1],
+                           stage.stage_name.rsplit(".", 1)[-1])
+        trace["stage_metrics"][label] = {
+            "model_elapsed_seconds": stage.model_elapsed_seconds,
+            "llm_calls": stage.llm_calls,
+            "usage_missing_calls": stage.usage_missing_calls,
+            "token_usage": dict(stage.token_usage),
+        }
+        if label in {"reasoning", "plan", "solution", "draft", "critique", "refinement", "final"}:
+            trace[label] = stage.output
+    return deepcopy(trace)
 
 
 def extract_mahjong_answer(output: str) -> dict[str, Any] | None:
@@ -146,15 +222,18 @@ def evaluate_mahjong_tasks(
                     generate_multimodal = getattr(agent, "generate_multimodal", None)
                     if not callable(generate_multimodal):
                         raise ValueError("Mahjong image evaluation requires generate_multimodal()")
-                    raw_output = generate_multimodal(
-                        prompt,
-                        public_context,
-                        images=[ImageAttachment(path=task.image_path)],
+                    raw_output = run_mahjong_generation(
+                        agent,
+                        lambda: generate_multimodal(
+                            prompt, public_context,
+                            images=[ImageAttachment(path=task.image_path)],
+                        ),
                     )
                 else:
-                    raw_output = agent.generate(prompt, public_context)
-            trace_reader = getattr(agent, "last_generation_trace", None)
-            reasoning_trace = trace_reader() if callable(trace_reader) else None
+                    raw_output = run_mahjong_generation(
+                        agent, lambda: agent.generate(prompt, public_context)
+                    )
+            reasoning_trace = read_mahjong_generation_trace(agent)
             parsed = extract_mahjong_answer(raw_output)
             if parsed is None:
                 parsed = {}

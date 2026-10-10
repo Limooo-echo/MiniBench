@@ -14,8 +14,8 @@ class EvaluateConfigTests(unittest.TestCase):
     def test_visual_configs_use_qwen_3_8_max(self):
         visual_configs = (
             "mahjong_multimodal.yaml",
-            "one_stroke_a4.yaml",
-            "one_stroke_a4_ablation.yaml",
+            "one_stroke_multimodal.yaml",
+            "one_stroke_multimodal_ablation.yaml",
             "xiangqi_multimodal.yaml",
         )
 
@@ -28,8 +28,6 @@ class EvaluateConfigTests(unittest.TestCase):
                     config["provider"]["extra_body"],
                     {"enable_thinking": False},
                 )
-                if filename == "mahjong_multimodal.yaml":
-                    self.assertEqual(config["evaluation"]["input_modes"], ["image"])
 
     def test_run_config_writes_run_artifacts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -100,14 +98,14 @@ class EvaluateConfigTests(unittest.TestCase):
             self.assertEqual(result["success"], 1)
             self.assertTrue((run_dir / "predictions.jsonl").exists())
             self.assertTrue((run_dir / "results.json").exists())
-            saved = json.loads(
-                (run_dir / "results.json").read_text(encoding="utf-8")
-            )
+            saved = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["puzzle_accuracy"], 1.0)
             self.assertIn("metrics", saved)
             self.assertEqual(saved["metrics"]["total"]["llm_calls"], 0)
             prediction = json.loads(
-                (run_dir / "predictions.jsonl").read_text(encoding="utf-8").splitlines()[0]
+                (run_dir / "predictions.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()[0]
             )
             self.assertIn("metrics", prediction)
             self.assertIn("task_elapsed_seconds", prediction["metrics"])
@@ -160,76 +158,30 @@ class EvaluateConfigTests(unittest.TestCase):
             self.assertEqual(result["success"], 1)
             self.assertEqual(saved_prediction["prompt_variant"], "euler_theorem")
 
-    def test_run_config_expands_one_stroke_rule_modes(self):
-        from minibench.datasets.one_stroke.dataset import load_one_stroke_tasks
-        from minibench.datasets.one_stroke.rules import (
-            find_constrained_one_stroke_path,
-            rules_for_mode,
+    def test_one_stroke_rejects_removed_rule_and_image_modes(self):
+        evaluations = (
+            {"rule_mode": "full"},
+            {"rule_modes": ["full"]},
+            {"input_modes": ["clear_image"]},
+            {"input_modes": ["challenge_image"]},
         )
+        for evaluation in evaluations:
+            with self.subTest(evaluation=evaluation):
+                with self.assertRaises(ValueError):
+                    validate_experiment_config(
+                        {
+                            "task": {"family": "one_stroke"},
+                            "agent": {"name": "passthrough"},
+                            "provider": {"name": "generic"},
+                            "evaluation": evaluation,
+                            "run": {"output_dir": "runs"},
+                        }
+                    )
 
-        task = load_one_stroke_tasks(
-            "data/one_stroke/a2_rule_condition.jsonl"
-        )[0]
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = Path(tmpdir) / "runs"
-            predictions_path = Path(tmpdir) / "predictions.jsonl"
-            raw_outputs = []
-            for mode in ("full", "conflicting_rule"):
-                constraints = rules_for_mode(
-                    task.rule_constraints,
-                    task.key_rule_id,
-                    task.conflicting_rule,
-                    mode,
-                )
-                oracle = find_constrained_one_stroke_path(
-                    task.vertices, task.edges, constraints=constraints
-                )
-                raw_outputs.append(
-                    json.dumps({"path": oracle[0], "edge_path": oracle[1]})
-                )
-            predictions_path.write_text(
-                json.dumps({"task_id": task.id, "raw_outputs": raw_outputs}) + "\n",
-                encoding="utf-8",
-            )
-            config_path = Path(tmpdir) / "a2.yaml"
-            config_path.write_text(
-                yaml.safe_dump(
-                    {
-                        "task": {
-                            "family": "one_stroke",
-                            "path": "data/one_stroke/a2_rule_condition.jsonl",
-                            "limit": 1,
-                            "task_ids": [],
-                        },
-                        "agent": {
-                            "name": "openai-compatible",
-                            "predictions": str(predictions_path),
-                        },
-                        "provider": {"name": "generic"},
-                        "evaluation": {
-                            "rule_modes": ["full", "conflicting_rule"]
-                        },
-                        "run": {
-                            "output_dir": str(output_dir),
-                            "run_name": "a2-unit-run",
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            result = run_config(config_path)
-
-            self.assertEqual(result["total"], 2)
-            self.assertEqual(result["success"], 2)
-            self.assertEqual(
-                set(result["by_rule_mode"]), {"full", "conflicting_rule"}
-            )
-
-    def test_run_config_expands_one_stroke_a4_input_modes(self):
+    def test_run_config_expands_one_stroke_multimodal_input_modes(self):
         from minibench.datasets.one_stroke.dataset import load_one_stroke_tasks
 
-        task = load_one_stroke_tasks("data/one_stroke/a4_multimodal.jsonl")[0]
+        task = load_one_stroke_tasks("data/one_stroke/multimodal.jsonl")[0]
         raw_output = json.dumps(
             {
                 "recognized_vertices": list(task.vertices),
@@ -241,19 +193,17 @@ class EvaluateConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             predictions = Path(tmpdir) / "predictions.jsonl"
             predictions.write_text(
-                json.dumps(
-                    {"task_id": task.id, "raw_outputs": [raw_output] * 3}
-                )
+                json.dumps({"task_id": task.id, "raw_outputs": [raw_output] * 2})
                 + "\n",
                 encoding="utf-8",
             )
-            config = Path(tmpdir) / "a4.yaml"
+            config = Path(tmpdir) / "multimodal.yaml"
             config.write_text(
                 yaml.safe_dump(
                     {
                         "task": {
                             "family": "one_stroke",
-                            "path": "data/one_stroke/a4_multimodal.jsonl",
+                            "path": "data/one_stroke/multimodal.jsonl",
                             "limit": 1,
                             "task_ids": [],
                         },
@@ -265,13 +215,12 @@ class EvaluateConfigTests(unittest.TestCase):
                         "evaluation": {
                             "input_modes": [
                                 "text",
-                                "clear_image",
-                                "challenge_image",
+                                "image",
                             ]
                         },
                         "run": {
                             "output_dir": str(Path(tmpdir) / "runs"),
-                            "run_name": "a4-unit-run",
+                            "run_name": "multimodal-unit-run",
                         },
                     }
                 ),
@@ -280,11 +229,11 @@ class EvaluateConfigTests(unittest.TestCase):
 
             result = run_config(config)
 
-        self.assertEqual(result["total"], 3)
-        self.assertEqual(result["success"], 3)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["success"], 2)
         self.assertEqual(
             set(result["by_input_mode"]),
-            {"text", "clear_image", "challenge_image"},
+            {"text", "image"},
         )
 
     def test_cli_accepts_multimodal_all_modes(self):
@@ -293,11 +242,120 @@ class EvaluateConfigTests(unittest.TestCase):
         one_stroke = build_parser().parse_args(
             ["evaluate-one-stroke", "--input-mode", "all"]
         )
-        mahjong = build_parser().parse_args(
-            ["evaluate-mahjong", "--input-mode", "all"]
-        )
+        mahjong = build_parser().parse_args(["evaluate-mahjong", "--input-mode", "all"])
         self.assertEqual(one_stroke.input_mode, "all")
         self.assertEqual(mahjong.input_mode, "all")
+
+    def test_cli_one_stroke_defaults_to_canonical_direct(self):
+        from minibench.cli import build_parser
+
+        args = build_parser().parse_args(["evaluate-one-stroke"])
+
+        self.assertEqual(
+            args.one_stroke_tasks,
+            Path("data/one_stroke/direct.jsonl"),
+        )
+        self.assertEqual(args.max_tokens, 1024)
+
+    def test_one_stroke_openai_compatible_rejects_reasoning_only_fields(self):
+        field_values = {
+            "samples": 3,
+            "reasoning_temperature": 0.7,
+            "final_temperature": 0.0,
+            "max_reasoning_tokens": 512,
+        }
+        for field, value in field_values.items():
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"agent\.{field}.*would be ignored",
+                ):
+                    validate_experiment_config(
+                        {
+                            "task": {"family": "one_stroke"},
+                            "agent": {
+                                "name": "openai-compatible",
+                                field: value,
+                            },
+                            "provider": {"name": "generic"},
+                            "run": {"output_dir": "runs"},
+                        }
+                    )
+
+    def test_samples_are_supported_only_by_sc_and_best_of_n(self):
+        for agent_name in ("self-consistency", "best-of-n"):
+            with self.subTest(agent_name=agent_name):
+                config = validate_experiment_config(
+                    {
+                        "task": {"family": "zebra"},
+                        "agent": {
+                            "name": agent_name,
+                            "samples": 3,
+                            "reasoning_temperature": 0.7,
+                            "final_temperature": 0.0,
+                            "max_reasoning_tokens": 512,
+                        },
+                        "provider": {"name": "generic"},
+                        "run": {"output_dir": "runs"},
+                    }
+                )
+                self.assertEqual(config["agent"]["samples"], 3)
+
+        for agent_name in ("openai-compatible", "cot"):
+            with self.subTest(agent_name=agent_name):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"agent\.samples.*would be ignored",
+                ):
+                    validate_experiment_config(
+                        {
+                            "task": {"family": "zebra"},
+                            "agent": {
+                                "name": agent_name,
+                                "samples": 3,
+                            },
+                            "provider": {"name": "generic"},
+                            "run": {"output_dir": "runs"},
+                        }
+                    )
+
+    def test_one_stroke_configs_are_canonical_and_retry_safe(self):
+        unsupported_fields = {
+            "samples",
+            "reasoning_temperature",
+            "final_temperature",
+            "max_reasoning_tokens",
+        }
+        paths = sorted(Path("config/experiments").glob("one_stroke*.yaml"))
+        self.assertTrue(paths)
+        for path in paths:
+            with self.subTest(path=path):
+                config = load_experiment_config(path)
+                self.assertTrue(unsupported_fields.isdisjoint(config["agent"]))
+                self.assertEqual(config["provider"]["max_retries"], 3)
+                self.assertEqual(
+                    config["provider"]["retry_initial_backoff_seconds"],
+                    1.0,
+                )
+                self.assertEqual(
+                    config["provider"]["retry_max_backoff_seconds"],
+                    30.0,
+                )
+
+        alias = load_experiment_config("config/experiments/one_stroke.yaml")
+        canonical = load_experiment_config("config/experiments/one_stroke_direct.yaml")
+        self.assertEqual(alias, canonical)
+        self.assertEqual(canonical["provider"]["max_tokens"], 1024)
+        self.assertIsNone(canonical["run"]["run_name"])
+        self.assertEqual(canonical["run"]["on_existing"], "error")
+
+        theorem = load_experiment_config(
+            "config/experiments/one_stroke_euler_theorem.yaml"
+        )
+        self.assertEqual(theorem["task"], canonical["task"])
+        self.assertEqual(theorem["agent"], canonical["agent"])
+        self.assertEqual(theorem["provider"], canonical["provider"])
+        self.assertEqual(theorem["evaluation"]["prompt_variant"], "euler_theorem")
 
     def test_invalid_task_family_reports_clear_error(self):
         with self.assertRaisesRegex(ValueError, "task.family must be one of"):
@@ -329,9 +387,7 @@ class EvaluateConfigTests(unittest.TestCase):
             "provider": {"name": "generic"},
         }
         with self.assertRaisesRegex(ValueError, "run.run_name is required"):
-            validate_experiment_config(
-                {**base, "run": {"on_existing": "resume"}}
-            )
+            validate_experiment_config({**base, "run": {"on_existing": "resume"}})
         for run_name in ("../escape", "nested/run", "nested\\run", ".", ".."):
             with self.subTest(run_name=run_name):
                 with self.assertRaisesRegex(ValueError, "single directory name"):
@@ -388,7 +444,7 @@ class EvaluateConfigTests(unittest.TestCase):
         self.assertEqual(config["provider"]["max_retries"], 3)
         self.assertEqual(config["provider"]["retry_initial_backoff_seconds"], 1.0)
         self.assertEqual(config["provider"]["retry_max_backoff_seconds"], 30.0)
-        self.assertEqual(config["run"]["run_name"], "zebra-history-deepseek")
+        self.assertEqual(config["run"]["run_name"], "zebra-history-deferred_0823")
         self.assertEqual(config["run"]["on_existing"], "resume")
 
     def test_missing_section_reports_clear_error(self):

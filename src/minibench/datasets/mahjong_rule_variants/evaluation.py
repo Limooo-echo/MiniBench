@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 from time import strftime
@@ -15,8 +15,10 @@ from minibench.core.metrics import (
     summarize_metrics,
 )
 from minibench.datasets.mahjong.api import normalize_tile
-from minibench.datasets.mahjong.evaluation import MahjongPublicTaskContext
+from minibench.datasets.mahjong.evaluation import MahjongPublicTaskContext, run_mahjong_generation
 from minibench.datasets.mahjong_solo.evaluation import (
+    _episode_process_fields,
+    _summarize_process_scores,
     _action_history_content,
     _evaluation_coverage,
     _read_generation_trace,
@@ -78,6 +80,10 @@ class MahjongRuleVariantInstanceResult:
     tags: tuple[str, ...]
     metrics: dict[str, object]
     evaluation_status: str = "completed"
+    process_score: float | None = None
+    correct_steps: int = 0
+    total_steps: int = 0
+    step_scores: list[dict[str, Any]] = field(default_factory=list)
 
 
 def evaluate_mahjong_rule_variant_tasks(
@@ -189,7 +195,9 @@ def evaluate_mahjong_rule_variant_task(
                         public_context,
                     )
                 else:
-                    raw_output = agent.generate(prompt, public_context)
+                    raw_output = run_mahjong_generation(
+                        agent, lambda: agent.generate(prompt, public_context)
+                    )
             except RuntimeError as exc:
                 error_detail = str(exc)
                 action_errors.append(
@@ -390,6 +398,9 @@ def summarize_mahjong_rule_variants(
             channel_summary["success"] / channel_total if channel_total else None
         )
         channel_summary["evaluation_coverage"] = channel_total / channel_summary["total"]
+        channel_summary.update(_summarize_process_scores(
+            [result for result in valid_results if result.channel == channel]
+        ))
         channel_summary["shanten_optimal_discard_rate"] = (
             mean_episode_shanten_discard_rate(
                 [result for result in valid_results if result.channel == channel]
@@ -405,6 +416,7 @@ def summarize_mahjong_rule_variants(
         "total": total,
         "success": success,
         "success_rate": success / evaluated_total if evaluated_total else None,
+        **_summarize_process_scores(valid_results),
         **coverage,
         "illegal_tsumo_total": illegal_tsumo_total,
         "shanten_optimal_discard_rate": mean_episode_shanten_discard_rate(valid_results),
@@ -452,6 +464,12 @@ def write_mahjong_rule_variant_run(
                         "active_rules": result.active_rules,
                         "observation_mode": result.observation_mode,
                         "evaluation_status": result.evaluation_status,
+                        "success": result.success,
+                        "score": result.score,
+                        "process_score": result.process_score,
+                        "correct_steps": result.correct_steps,
+                        "total_steps": result.total_steps,
+                        "step_scores": result.step_scores,
                         "raw_outputs": result.raw_outputs,
                         "first_attempt_outputs": result.first_attempt_outputs,
                         "shanten_optimal_steps": result.shanten_optimal_steps,
@@ -507,6 +525,7 @@ def _make_result(
     metrics: dict[str, object],
 ) -> MahjongRuleVariantInstanceResult:
     api_error = any(item.get("error") == "agent_request_error" for item in action_errors)
+    process = _episode_process_fields(task, raw_outputs, api_error, task.channel)
     strategy = evaluate_shanten_discard_strategy(
         task.initial_hand,
         draws,
@@ -523,7 +542,8 @@ def _make_result(
         active_rules=task.active_rules,
         observation_mode=observation_mode,
         success=None if api_error else success,
-        score=None if api_error else float(success),
+        score=None if api_error else (1.0 if success else process["process_score"]),
+        **process,
         evaluation_status="api_error" if api_error else "completed",
         win_rule=win_rule,
         variant_only_win=(

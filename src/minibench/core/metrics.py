@@ -32,9 +32,13 @@ def empty_agent_run_metrics() -> dict[str, Any]:
 
 
 def start_task_metrics(agent: Any) -> dict[str, Any]:
+    runtime = _runtime_target(agent)
+    span_id = runtime.begin_span("task") if runtime is not None else None
     return {
         "started_at": perf_counter(),
         "model_snapshot": model_metrics_snapshot(agent),
+        "_runtime": runtime,
+        "_runtime_span_id": span_id,
     }
 
 
@@ -47,6 +51,12 @@ def finish_task_metrics(agent: Any, start: dict[str, Any]) -> dict[str, Any]:
     metrics["usage_available"] = (
         int(metrics["llm_calls"]) > int(metrics["usage_missing_calls"])
     )
+    runtime = start.get("_runtime")
+    span_id = start.get("_runtime_span_id")
+    if runtime is not None and isinstance(span_id, str):
+        run = runtime.end_span(span_id)
+        if getattr(run, "trace_mode", "off") != "off":
+            metrics["trace"] = run.to_dict()
     return metrics
 
 
@@ -177,7 +187,29 @@ def _looks_like_token_key(key: str) -> bool:
 def _metrics_target(agent: Any) -> Any | None:
     if callable(getattr(agent, "metrics_snapshot", None)):
         return agent
+    runtime = getattr(agent, "runtime", None)
+    if runtime is not None and runtime is not agent:
+        target = _metrics_target(runtime)
+        if target is not None:
+            return target
     client = getattr(agent, "client", None)
     if client is not None and client is not agent:
         return _metrics_target(client)
+    return None
+
+
+def _runtime_target(agent: Any) -> Any | None:
+    if bool(getattr(agent, "_is_agent_runtime", False)):
+        begin_span = getattr(agent, "begin_span", None)
+        end_span = getattr(agent, "end_span", None)
+        if callable(begin_span) and callable(end_span):
+            return agent
+    runtime = getattr(agent, "runtime", None)
+    if runtime is not None and runtime is not agent:
+        found = _runtime_target(runtime)
+        if found is not None:
+            return found
+    client = getattr(agent, "client", None)
+    if client is not None and client is not agent:
+        return _runtime_target(client)
     return None

@@ -1,0 +1,59 @@
+FAIL: test_c2_builder_does_not_trust_a_claimed_margin_or_oracle (test_xiangqi_generators.GeneratorTests)
+----------------------------------------------------------------------
+ValueError: invalid candidate: ['cchess_validation_error:cchess calibration failed: cchess_unavailable_or_failed:No package metadata was found for cchess']
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/runner/work/MiniBench/MiniBench/tests/test_xiangqi_generators.py", line 43, in test_c2_builder_does_not_trust_a_claimed_margin_or_oracle
+    with self.assertRaisesRegex(ValueError, "stale or non-unique"):
+AssertionError: "stale or non-unique" does not match "invalid candidate: ['cchess_validation_error:cchess calibration failed: cchess_unavailable_or_failed:No package metadata was found for cchess']"
+
+======================================================================
+FAIL: test_both_complete_lines_are_independently_checked (test_xiangqi_h2_validation.H2ValidationTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/MiniBench/MiniBench/tests/test_xiangqi_h2_validation.py", line 26, in test_both_complete_lines_are_independently_checked
+    self.assertEqual(build_h2.assess_depth_pair(self.FEN, runs), [])
+AssertionError: Lists differ: ['depth_16:ply_1:cchess_validation_error:c[381 chars]tch'] != []
+
+First list contains 6 additional elements.
+First extra element 0:
+'depth_16:ply_1:cchess_validation_error:cchess calibration failed: cchess_unavailable_or_failed:No package metadata was found for cchess'
+
++ []
+- ['depth_16:ply_1:cchess_validation_error:cchess calibration failed: '
+-  'cchess_unavailable_or_failed:No package metadata was found for cchess',
+-  'depth_16:pv_not_checkmate:ongoing',
+-  'depth_16:reference_length_mismatch',
+-  'depth_20:ply_1:cchess_validation_error:cchess calibration failed: '
+-  'cchess_unavailable_or_failed:No package metadata was found for cchess',
+-  'depth_20:pv_not_checkmate:ongoing',
+-  'depth_20:reference_length_mismatch']
+
+======================================================================
+FAIL: test_record_uses_reference_distance_and_preserves_source_identity (test_xiangqi_h2_validation.H2ValidationTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/MiniBench/MiniBench/tests/test_xiangqi_h2_validation.py", line 94, in test_record_uses_reference_distance_and_preserves_source_identity
+    self.assertEqual(build_h2.assess_depth_pair(self.FEN, runs), [])
+AssertionError: Lists differ: ['depth_16:ply_1:cchess_validation_error:c[381 chars]tch'] != []
+
+First list contains 6 additional elements.
+First extra element 0:
+'depth_16:ply_1:cchess_validation_error:cchess calibration failed: cchess_unavailable_or_failed:No package metadata was found for cchess'
+
++ []
+- ['depth_16:ply_1:cchess_validation_error:cchess calibration failed: '
+-  'cchess_unavailable_or_failed:No package metadata was found for cchess',
+-  'depth_16:pv_not_checkmate:ongoing',
+-  'depth_16:reference_length_mismatch',
+-  'depth_20:ply_1:cchess_validation_error:cchess calibration failed: '
+-  'cchess_unavailable_or_failed:No package metadata was found for cchess',
+-  'depth_20:pv_not_checkmate:ongoing',
+-  'depth_20:reference_length_mismatch']
+
+----------------------------------------------------------------------
+Ran 508 tests in 31.495s
+
+FAILED (failures=3, skipped=12)

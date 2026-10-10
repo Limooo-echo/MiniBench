@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from minibench.cli import build_parser
@@ -201,10 +202,9 @@ class MahjongSoloTests(unittest.TestCase):
             "the hand is complete",
         )
 
-    def test_diagnostic_terminal_task_is_an_immediate_win(self):
-        task = load_mahjong_solo_tasks(
-            "data/mahjong_solo/diagnostic_terminal_win.jsonl"
-        )[0]
+    def test_terminal_task_is_an_immediate_win(self):
+        # Keep the fixture in the test; the old diagnostics dataset was removed.
+        task = replace(tsumo_task(), wall=("E",), max_draws=1)
 
         self.assertEqual(task.max_draws, 1)
         self.assertTrue(is_winning_hand([*task.initial_hand, task.wall[0]]))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 import re
@@ -22,7 +22,9 @@ from minibench.datasets.mahjong.api import (
     score_closed_hand,
     tile_to_index,
 )
-from minibench.datasets.mahjong.evaluation import MahjongPublicTaskContext
+from minibench.datasets.mahjong.evaluation import (
+    MahjongPublicTaskContext, read_mahjong_generation_trace, run_mahjong_generation,
+)
 from minibench.datasets.mahjong_solo.dataset import MahjongSoloTask
 from minibench.datasets.mahjong_solo.prompting import (
     MAHJONG_SOLO_OBSERVATION_MODES,
@@ -63,6 +65,10 @@ class MahjongSoloInstanceResult:
     tags: tuple[str, ...]
     metrics: dict[str, object]
     evaluation_status: str = "completed"
+    process_score: float | None = None
+    correct_steps: int = 0
+    total_steps: int = 0
+    step_scores: list[dict[str, Any]] = field(default_factory=list)
 
 
 def generate_mahjong_history_action(
@@ -74,21 +80,18 @@ def generate_mahjong_history_action(
 
     phase_generate = getattr(agent, "generate_messages_for_phase", None)
     if callable(phase_generate):
-        output = phase_generate(
-            messages,
-            task_context,
-            phase="final",
-            json_mode=True,
+        output = run_mahjong_generation(
+            agent,
+            lambda: phase_generate(messages, task_context, phase="final", json_mode=True),
         )
         if not isinstance(output, str):
             raise TypeError("Agent message generation must return a string")
         return output
     generate_messages = getattr(agent, "generate_messages", None)
     if callable(generate_messages):
-        output = generate_messages(
-            messages,
-            task_context,
-            json_mode=True,
+        output = run_mahjong_generation(
+            agent,
+            lambda: generate_messages(messages, task_context, json_mode=True),
         )
         if not isinstance(output, str):
             raise TypeError("Agent message generation must return a string")
@@ -211,7 +214,9 @@ def evaluate_mahjong_solo_task(
                         public_context,
                     )
                 else:
-                    raw_output = agent.generate(prompt, public_context)
+                    raw_output = run_mahjong_generation(
+                        agent, lambda: agent.generate(prompt, public_context)
+                    )
             except RuntimeError as exc:
                 error_detail = str(exc)
                 action_errors.append(
@@ -499,6 +504,7 @@ def summarize_mahjong_solo(
         ),
         "success": success_count,
         "success_rate": success_count / evaluated_total if evaluated_total else None,
+        **_summarize_process_scores(valid_results),
         "illegal_tsumo_total": illegal_tsumo_total,
         "shanten_optimal_discard_rate": mean_episode_shanten_discard_rate(valid_results),
         **_summarize_action_retry_metrics(results),
@@ -574,6 +580,7 @@ def _make_result(
     metrics: dict[str, object],
 ) -> MahjongSoloInstanceResult:
     api_error = any(item.get("error") == "agent_request_error" for item in action_errors)
+    process = _episode_process_fields(task, raw_outputs, api_error, STANDARD_RULES)
     strategy = evaluate_shanten_discard_strategy(
         task.initial_hand,
         draws,
@@ -587,7 +594,8 @@ def _make_result(
         task_id=task.id,
         observation_mode=observation_mode,
         success=None if api_error else success,
-        score=None if api_error else (1.0 if success else 0.0),
+        score=None if api_error else (1.0 if success else process["process_score"]),
+        **process,
         evaluation_status="api_error" if api_error else "completed",
         draws=list(draws),
         discards=list(discards),
@@ -607,11 +615,30 @@ def _make_result(
 
 
 def _read_generation_trace(agent: Agent) -> dict[str, Any] | None:
-    reader = getattr(agent, "last_generation_trace", None)
-    if not callable(reader):
-        return None
-    trace = reader()
-    return deepcopy(trace) if isinstance(trace, dict) else None
+    return read_mahjong_generation_trace(agent)
+
+
+def _episode_process_fields(
+    task: Any, raw_outputs: list[str], api_error: bool, channel: str,
+) -> dict[str, Any]:
+    if api_error:
+        return {"process_score": None, "correct_steps": 0, "total_steps": 0,
+                "step_scores": []}
+    from minibench.datasets.mahjong_solo.oracle import score_episode
+    process = score_episode(task, raw_outputs, channel=channel)
+    return {"process_score": process["process_score"],
+            "correct_steps": process["correct_steps"],
+            "total_steps": process["total_steps"], "step_scores": process["steps"]}
+
+
+def _summarize_process_scores(results: list[Any]) -> dict[str, float | None]:
+    results = _valid_evaluation_results(results)
+    return {
+        "average_score": (sum(item.score for item in results) / len(results)
+                          if results else None),
+        "average_process_score": (sum(item.process_score for item in results) / len(results)
+                                  if results else None),
+    }
 
 
 def _score_tsumo(

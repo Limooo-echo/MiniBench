@@ -5,7 +5,7 @@ task:
   task_ids: []
 
 agent:
-  name: openai-compatible
+  name: cot
 
 provider:
   name: deepseek
@@ -19,4 +19,4 @@ evaluation:
 
 run:
   output_dir: runs
-  run_name: null
+  run_name: zebra_rule_codebook_0823

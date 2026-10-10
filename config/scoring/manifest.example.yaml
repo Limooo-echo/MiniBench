@@ -1,0 +1,213 @@
+version: 1
+suite_id: minibench-four-dim-xiangqi-reasoning-v2
+profiles:
+- id: example-model
+  model:
+    provider: replace-with-recorded-provider
+    name: replace-with-recorded-model
+architectures:
+- id: cot
+  default_config: true
+  config:
+    name: cot
+experiments:
+- id: zebra-direct
+  family: zebra
+  dimension: D
+  dataset:
+    path: ../../data/zebra/eval.jsonl
+    sha256: 7163d88b25c0b9a86c94ef586b46b623a05da9f80167a86ab02c8a4f77f0b9c1
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      show_progress: true
+  runs: []
+- id: zebra-rule
+  family: zebra
+  dimension: R
+  dataset:
+    path: ../../data/zebra/rule_codebook_eval.jsonl
+    sha256: 827dec7ec7e86f89bd7fd635636be1e541f0806256429b19371f9a2229b57794
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      show_progress: true
+  runs: []
+- id: zebra-history
+  family: zebra
+  dimension: H
+  dataset:
+    path: ../../data/zebra/history_eval.jsonl
+    sha256: bc0984980a9d8f5d3f09e17ab95d5878afe06074fb4c53c806fadfe9d62dbb4f
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      memory_modes:
+      - deferred_reasoning
+      state_max_tokens: 512
+      ack_max_tokens: 32
+      final_max_tokens: 4096
+      show_progress: true
+  runs: []
+- id: one-stroke-direct
+  family: one_stroke
+  dimension: D
+  dataset:
+    path: ../../data/one_stroke/direct.jsonl
+    sha256: 0556189988526c93f062ee93307d37cf8c7d4676df0ff14195f98cb555fa3786
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      prompt_variant: baseline
+      show_progress: true
+  runs: []
+- id: one-stroke-history
+  family: one_stroke
+  dimension: H
+  dataset:
+    path: ../../data/one_stroke/history.jsonl
+    sha256: 3dda677dc64d7217f4eda9481caa5910136deb7f21d1447851819fb363dfcf25
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      memory_modes:
+      - incremental_state
+      - step_history_only
+      state_max_tokens: 512
+      ack_max_tokens: 32
+      final_max_tokens: 1024
+      show_progress: true
+  runs: []
+- id: one-stroke-visual
+  family: one_stroke
+  dimension: V
+  dataset:
+    path: ../../data/one_stroke/multimodal.jsonl
+    sha256: bd07f099ae70a67be645961889f39c57e20c12280b202aa40bfe7363173d206d
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      input_modes:
+      - image
+      show_progress: true
+  runs: []
+- id: xiangqi-direct
+  family: xiangqi_mate_in_one
+  dimension: D
+  dataset:
+    path: ../../data/xiangqi/mate_in_one/tasks.jsonl
+    sha256: f4edbfb1a4eadf88e1ee4bfc0e0d6e800bd7bcf211dc022881282e86646e8f1e
+  protocol:
+    version: xiangqi-reasoning-v2
+    release_id: xiangqi-2026-09-19-r1
+    evaluation:
+      pikafish_depth: 8
+      pikafish_timeout: 60.0
+      pikafish_binary_sha256: 0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3
+      pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
+  runs: []
+  selection:
+    path: ../../data/xiangqi/evaluation_samples/formal/d3.jsonl
+    sha256: ac963bacff8c76986eddfee43327ca7f7408c8f57d7e75cd81bcb0c1a8345f9c
+- id: xiangqi-rule
+  family: xiangqi_rule_variants
+  dimension: R
+  dataset:
+    path: ../../data/xiangqi/rule_variants/tasks.jsonl
+    sha256: dd1cc29e88b0faf763968c5decd2d11d940e89cb32088ccae03fee209ac06924
+  protocol:
+    version: xiangqi-reasoning-v2
+    release_id: xiangqi-2026-09-19-r1
+    evaluation:
+      oracle_depth: 3
+  runs: []
+  selection:
+    path: ../../data/xiangqi/evaluation_samples/formal/c2.jsonl
+    sha256: ae1b0510cd33e246dffb26645b2abc5ff99563271d7dc5212f5ac2313096d0b1
+- id: xiangqi-history
+  family: xiangqi_history
+  dimension: H
+  dataset:
+    path: ../../data/xiangqi/history/tasks.jsonl
+    sha256: 228610b9a1a5cb7e8604cd420d353d76dd30d7b3b2258bc7adc49f18e7259b74
+  protocol:
+    version: xiangqi-reasoning-v2
+    release_id: xiangqi-2026-09-19-r1
+    evaluation:
+      history_mode: paired
+      pikafish_depth: 16
+      pikafish_timeout: 60.0
+      pikafish_binary_sha256: 0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3
+      pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
+  runs: []
+  selection:
+    path: ../../data/xiangqi/evaluation_samples/formal/h2.jsonl
+    sha256: 0c3a3376b2a7a1d4e50dd5304f63692ea2374bf0fae76c8a8663dc4af3a7a981
+- id: xiangqi-visual
+  family: xiangqi_multimodal
+  dimension: V
+  dataset:
+    path: ../../data/xiangqi/multimodal/tasks.jsonl
+    sha256: 0efe16c4e0ca4e3a6a71642cbde392e926785ed274e5a7f5712b90b3736c405e
+  protocol:
+    version: xiangqi-reasoning-v2
+    release_id: xiangqi-2026-09-19-r1
+    evaluation:
+      input_modes:
+      - text
+      - chinese-piece-image
+      - latin-piece-image
+      verify_with_pikafish: true
+      pikafish_depth: 8
+      pikafish_timeout: 60.0
+      pikafish_binary_sha256: 0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3
+      pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
+  runs: []
+  selection:
+    path: ../../data/xiangqi/evaluation_samples/formal/m2.jsonl
+    sha256: 9470d5998ed93f530a26c8373671ec79e945efcc807401be02b2c52081ce5b89
+- id: mahjong-direct
+  family: mahjong
+  dimension: D
+  dataset:
+    path: ../../data/mahjong/tasks.jsonl
+    sha256: f2903f75b25438b8e75ec4316564a5203e277f0089ef2e51a9a1c339ed5d28c2
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation: {}
+  runs: []
+- id: mahjong-rule
+  family: mahjong_rule_variants
+  dimension: R
+  dataset:
+    path: ../../data/mahjong_solo/tasks_win.jsonl
+    sha256: 6f3eeffbdfb43c9bba6e6fb54cec3b3db9d53aebbb0cbe921723dce0f53fed32
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      observation_mode: full-hand
+      show_progress: true
+  runs: []
+- id: mahjong-history
+  family: mahjong_solo
+  dimension: H
+  dataset:
+    path: ../../data/mahjong_solo/tasks_win.jsonl
+    sha256: 6f3eeffbdfb43c9bba6e6fb54cec3b3db9d53aebbb0cbe921723dce0f53fed32
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      observation_mode: history-only
+  runs: []
+- id: mahjong-visual
+  family: mahjong
+  dimension: V
+  dataset:
+    path: ../../data/mahjong/visual_tasks.jsonl
+    sha256: b939e02d9f96ee899207884515d423c15d59f5bcacc5ea70a93a681bb281413d
+  protocol:
+    version: existing-task-protocol-v1
+    evaluation:
+      input_modes:
+      - image
+  runs: []

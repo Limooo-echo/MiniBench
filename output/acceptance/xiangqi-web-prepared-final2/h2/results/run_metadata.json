@@ -1,0 +1,26 @@
+{
+  "protocol_version": "xiangqi-reasoning-v2",
+  "agent_adapter": "manual-web using direct prompts without automatic format repair",
+  "source_sha256": "228610b9a1a5cb7e8604cd420d353d76dd30d7b3b2258bc7adc49f18e7259b74",
+  "selection_sha256": "98a023e8a664f9659f154194bfd09729f82914160977423b12d803d2d286e6e4",
+  "engine": {
+    "executable": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe",
+    "binary_sha256": "0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3",
+    "binary_size_bytes": 6944256,
+    "options": {
+      "Threads": 1,
+      "Hash": 128,
+      "clear_hash_per_analysis": true
+    },
+    "eval_file": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/tmp/resources/pikafish/pikafish.nnue",
+    "eval_file_sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e"
+  },
+  "evaluation": {
+    "history_mode": "paired",
+    "pikafish_binary_sha256": "0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3",
+    "pikafish_depth": 16,
+    "pikafish_nnue_sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e",
+    "pikafish_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe",
+    "pikafish_timeout": 60.0
+  }
+}

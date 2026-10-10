@@ -1,0 +1,11 @@
+{
+  "cases": [
+    "correct_scripted_agent",
+    "returned_invalid_answer",
+    "provider_timeout",
+    "legal_wrong_d3",
+    "diagnostic_engine_fault_d3_m2",
+    "required_opponent_fault_h2"
+  ],
+  "checkpoint": "append each individual task/mode result before continuing"
+}

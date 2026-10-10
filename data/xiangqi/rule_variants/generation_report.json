@@ -1,0 +1,29 @@
+{
+  "available_unique": 1961,
+  "candidate_limit": 10000,
+  "code_sha256": {
+    "scripts/extract_ccpd_positions.py": "228eba116796125b6678248f3fbef2f378514e8a14ce511d41e03e47629b3c8f",
+    "scripts/generate_xiangqi_c2_candidates.py": "e1e317c08ff94ec9dd0bd086ed9b5f25e3c508c9b975c9610b531ebd42e73021",
+    "src/minibench/datasets/xiangqi/reference.py": "5620ba0f5bc31d8777f81afe280d47860f052bfb003f96b4550a064dcf615503",
+    "src/minibench/datasets/xiangqi/validation.py": "8c44bfe3cdce9de5422b8c6afb13658ba617aef3d0b7cb5f3fc7056dde76fedf",
+    "src/minibench/datasets/xiangqi/variants/board.py": "3550036b584743eb10e9d2e123729ba6a9cdfeceea326c64932e8917b7a77311",
+    "src/minibench/datasets/xiangqi/variants/rules.py": "7d66f4079305217d365180e96e63a0c429218d68869e75416ba0f8adcfc197d1",
+    "src/minibench/datasets/xiangqi/variants/search.py": "449f0cf468c3d2d988e53e7f2a0079b7783da7f5628ab05311f729c93099bf4e"
+  },
+  "counts": {
+    "chariot-no-center": 20,
+    "horse-no-leg-block": 20,
+    "soldier-free-retreat": 20,
+    "standard-controls": 10
+  },
+  "depth": 3,
+  "max_pieces": 18,
+  "positions_sha256": "28d02afcfb26f9067964bd3c4942049bd8aadf325f7779211ef90ccfb7961e8b",
+  "ready": true,
+  "rejections": [],
+  "scanned": 1744,
+  "seed": 20260831,
+  "source_revision": "368a47a947773dd8692c026e286dd19b6277b993",
+  "tolerance": 1e-06,
+  "unique_margin_min": 0.5
+}

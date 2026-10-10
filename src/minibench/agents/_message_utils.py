@@ -4,11 +4,11 @@ from copy import deepcopy
 from typing import Callable, Sequence, cast
 
 from minibench.core.agent import (
-    ChatClient,
     ChatMessage,
     MessagePhase,
     ReasoningConfig,
 )
+from minibench.core.runtime import AgentRuntime
 
 
 def validate_message_phase(phase: MessagePhase | str) -> MessagePhase:
@@ -34,7 +34,7 @@ def visible_generation_options(
 
 
 def complete_intermediate_message(
-    client: ChatClient,
+    client: AgentRuntime,
     messages: Sequence[ChatMessage],
     config: ReasoningConfig,
     *,
@@ -56,11 +56,12 @@ def complete_intermediate_message(
         temperature=resolved_temperature,
         max_tokens=resolved_max_tokens,
         json_mode=resolved_json_mode,
+        stage_name="intermediate",
     )
 
 
 def complete_transformed_messages(
-    client: ChatClient,
+    client: AgentRuntime,
     messages: Sequence[ChatMessage],
     *,
     transform: Callable[[str], str],
@@ -68,6 +69,9 @@ def complete_transformed_messages(
     temperature: float,
     max_tokens: int,
     json_mode: bool,
+    stage_name: str = "completion",
+    strict_json: bool = False,
+    repair_format: bool = True,
 ) -> str:
     prepared_messages = deepcopy(list(messages))
     _transform_last_user_message(prepared_messages, transform)
@@ -81,7 +85,39 @@ def complete_transformed_messages(
         temperature=temperature,
         max_tokens=max_tokens,
         json_mode=json_mode,
+        stage_name=stage_name,
+        strict_json=strict_json,
+        repair_format=repair_format,
     )
+
+
+def transformed_messages(
+    messages: Sequence[ChatMessage],
+    *,
+    transform: Callable[[str], str],
+    phase_system_prompt: str,
+) -> tuple[list[ChatMessage], str | None]:
+    """Return a defensive copy with only the final user turn transformed."""
+
+    prepared_messages = deepcopy(list(messages))
+    _transform_last_user_message(prepared_messages, transform)
+    return (
+        prepared_messages,
+        _merge_phase_system_prompt(prepared_messages, phase_system_prompt),
+    )
+
+
+def last_user_text(messages: Sequence[ChatMessage]) -> str:
+    for message in reversed(messages):
+        if message["role"] != "user":
+            continue
+        content = message["content"]
+        if not isinstance(content, str):
+            raise TypeError(
+                "Reasoning agents require text content in the last user message"
+            )
+        return content
+    raise ValueError("Reasoning agents require at least one user message")
 
 
 def _transform_last_user_message(

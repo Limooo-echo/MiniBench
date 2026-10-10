@@ -21,7 +21,18 @@ jobs:
       - name: Install package
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -c constraints/ci-py310.txt -e .
+          python -m pip install -c constraints/ci-py310.txt -e ".[xiangqi-generation]"
+      - name: Verify independent Xiangqi validator
+        run: |
+          python - <<'PY'
+          import json
+          from minibench.datasets.xiangqi.validation import calibrate_cchess
+
+          report = calibrate_cchess()
+          print(json.dumps(report, sort_keys=True))
+          if not report["valid"]:
+              raise SystemExit("Independent Xiangqi validator is not ready")
+          PY
       - name: Run tests
         run: python -m unittest discover -s tests
       - name: Upload renderer diagnostics
@@ -60,8 +71,8 @@ jobs:
           python -m unittest
           tests.test_mahjong_multimodal.MahjongMultimodalTests.test_renderer_reproduces_committed_image
           tests.test_mahjong_multimodal.MahjongMultimodalTests.test_renderer_detects_mutated_tile
-          tests.test_one_stroke_a4.OneStrokeA4DatasetTests.test_generator_is_deterministic
-          tests.test_xiangqi_multimodal.XiangqiMultimodalTests.test_renderer_supports_bytes_and_legacy_base64
+          tests.test_one_stroke_multimodal.OneStrokeMultimodalDatasetTests.test_generator_is_deterministic
+          tests.test_xiangqi_multimodal.XiangqiMultimodalTests.test_renderer_supports_png_bytes
       - name: Upload renderer diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

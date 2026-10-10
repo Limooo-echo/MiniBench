@@ -6,7 +6,8 @@ task:
 
 agent:
   name: cot
-  samples: 1
+  prompt_version: v1
+  max_format_repairs: 0
   reasoning_temperature: 0.0
   final_temperature: 0.0
   max_reasoning_tokens: 2048

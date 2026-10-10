@@ -4,7 +4,21 @@ MiniBench 是一个用统一 YAML、统一 agent/provider 接口和统一结果�
 
 本 README 以 **WSL 2 + Ubuntu 22.04 + Python 3.10** 为标准环境。进入 Ubuntu 后，下面所有安装、配置、运行和排错命令都在 WSL 终端执行。
 
-> 先记住两条：文本任务默认使用 DeepSeek V4；带图片的任务必须使用支持视觉输入的模型，仓库默认使用 Qwen。不要用 DeepSeek 跑 `image`、`challenge_image`、`chinese-piece-image` 或 `latin-piece-image`。
+> 先记住两条：文本任务默认使用 DeepSeek V4；带图片的任务必须使用支持视觉输入的模型，仓库默认使用 Qwen。不要用 DeepSeek 跑 `image`、`chinese-piece-image` 或 `latin-piece-image`。
+
+## 离线四维评分
+
+已有实验结果可以离线汇总为直接解题、规则变化、历史信息、图像输入四个分数，不会重新调用模型。
+
+```bash
+minibench score-suite --manifest config/scoring/manifest.example.yaml --weights config/scoring/weights.yaml --output outputs/my-scoring-report
+```
+
+示例清单固定了原题文件及 SHA-256，`runs` 留空，运行后会如实报告缺失覆盖。填入已保存的逐题结果及其原始配置来源后再发布正式比较；不要用当前配置推断旧实验。输出目录须为空或尚不存在。
+
+评分版本 2.0.0 使用 `s = Y + (1 - Y) × P`，过程分不放缩，每题每条件运行一次，维度内任务等权。连续麻将按给定牌墙逐步计算最早和牌动作集，过程分为命中步数 / 总动作步数；麻将图像题与文字题使用相同目标和过程分标准。旧缩放或人工权重配置需要更新。
+
+完整公式、等权说明、逐题评分与清单字段见 [评分设计说明](docs/scoring-design.md)，实施和验收记录见 [评分实施记录](docs/scoring-plan.md)。
 
 ## 1. 在 WSL Ubuntu 中安装
 
@@ -25,8 +39,10 @@ python3.10 -m venv ~/.venvs/minibench
 source ~/.venvs/minibench/bin/activate
 
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -c constraints/ci-py310.txt -e .
+python -m pip install -c constraints/ci-py310.txt -e ".[xiangqi-generation]"
 ```
+
+完整测试需要 `xiangqi-generation` 中固定版本的独立象棋裁判 `cchess`；只安装基础包不足以运行全套生成器与数据验证测试。
 
 验证安装：
 
@@ -226,18 +242,57 @@ minibench run-config config/experiments/zebra_rule_codebook.yaml
 minibench run-config config/experiments/zebra_history.yaml
 ```
 
-内置推理 agent 均支持分阶段多轮 messages：历史累积轮使用 `intermediate`，最终计分轮使用 `final`。因此 `zebra_history.yaml` 可以切换为 `direct`、`cot`、`self-consistency`、`tot`、`plan-then-solve` 或 `critic-refine`。
+`zebra_history.yaml` 默认使用 `agent.name: passthrough`；所有实现 phase-aware 消息接口的推理 Agent 也可运行该多轮评测。
 
 ### 4.2 象棋 schema v2
 
+当前数据为 `xiangqi-2026-09-19-r1`，运行协议为 `xiangqi-reasoning-v2`。
+四类各 250 条数据已重新审核；修复内容、旧题替换原因和验收证据见
+[象棋修复报告](docs/xiangqi-repair-report.md)。
+
+象棋现在只维护这四类任务及其出题、验证、可视化链路；只接收 schema v2 的
+FEN 数据。旧吃将题、残局生存、通用对局、Gym action-index 接口和迁移工具已移除。
+`data/xiangqi/legacy/`、旧题库文件和历史 `runs/` 保留作存档，不会自动转成当前实验。
+
 | 配置 | 公开 family | 内容 |
 | --- | --- | --- |
-| `xiangqi_mate_in_one.yaml` | `xiangqi-mate-in-one` | 一步杀 |
-| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 标准规则与三个规则变体 |
-| `xiangqi_history.yaml` | `xiangqi-history` | `full-state` / `move-history-only` |
-| `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 文本、中文棋子图、拉丁棋子图；默认 Qwen |
+| `xiangqi_mate_in_one.yaml` | `xiangqi-mate-in-one` | 严格一步将死，接受全部合法答案 |
+| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 同局面四规则卡，固定三层效用，自由生成 UCI |
+| `xiangqi_history.yaml` | `xiangqi-history` | 按参考将杀距离分层，配对 `full-state` / `move-history-only`，固定 Pikafish 应战 |
+| `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 同一 D3 局面的文字、中文棋子图、拉丁棋子图比较 |
 
-直接运行 YAML：
+D3/M2 用精确棋规判定将死，Pikafish 只提供诊断；H2 需要固定的对手引擎。
+本版使用的引擎与 NNUE 指纹在 `data/xiangqi/provenance.json`，配置会校验它们。
+本地已验收的 Windows universal 引擎可原生运行；通过 WSL 启动它需要启用
+Windows 程序互通。新克隆需按 provenance 取得同一发行资产，不要直接用不同
+版本引擎替代。以下为 WSL/Bash 示例：
+
+```bash
+export PIKAFISH_PATH="$PWD/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe"
+mkdir -p output/xiangqi-checks
+python scripts/validate_xiangqi_data.py --workers 6 --output output/xiangqi-checks/independent-validation.json
+python scripts/audit_xiangqi_release.py --technical --validation-report output/xiangqi-checks/independent-validation.json --output output/xiangqi-checks/release-audit.json
+python scripts/run_xiangqi_smoke.py --prepare-only --pikafish-path "$PIKAFISH_PATH"
+```
+
+以上命令不调用语言模型。`--strict` 还检查外部来源声明，原仓库未声明顶级许可证的状态
+仍会被报告。数据数量、规则、配对、哈希或来源有分歧时，技术门禁会失败。
+源码变动后须重新验证；原 `data/xiangqi/independent_validation.json` 是历史证据，
+不要把它的旧源码指纹当成当前代码已通过验收。
+
+如果 WSL 启动 `.exe` 报 `Exec format error`，可使用已安装项目依赖的 Windows
+Python，在 PowerShell 中做真实引擎离线验收（输出目录必须是新的）：
+
+```powershell
+$env:PYTHONPATH = "src"
+$env:PIKAFISH_PATH = (Resolve-Path "tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe").Path
+python scripts/accept_xiangqi_protocol.py --output-dir output/acceptance/xiangqi-new-check --pikafish-path $env:PIKAFISH_PATH
+```
+
+小样本名单已冻结：D3/H2/M2 各 6 个局面，C2 三个配对场景（12 条规则条件）。
+正式配置固定为 D3/H2/M2 各 30 个局面，C2 十个场景；不会每次重新抽题。
+同一模型的各架构使用相同名单，并保留各自登记的默认架构配置。
+需要运行真实模型时，配置凭据后去掉 `--prepare-only`，或运行对应 YAML：
 
 ```bash
 minibench run-config config/experiments/xiangqi_mate_in_one.yaml
@@ -246,94 +301,82 @@ minibench run-config config/experiments/xiangqi_history.yaml
 minibench run-config config/experiments/xiangqi_multimodal.yaml
 ```
 
-象棋还提供可覆盖 YAML 的便捷入口：
+`run-task`/`run-suite` 可以覆盖 agent、provider、model 等参数。冻结配置的
+`task.selection` 不能同时设置抽样、limit 或 task_ids；探索性重选题时，应复制 YAML
+并明确移除 selection，记录自己的名单，避免混入正式对照。
+同名结果禁止覆盖，下一次实验应使用新的 run_name 或输出目录。
+
+当前配置只填写实际生效的参数：C2 为 `oracle_depth: 3`；H2 为历史模式和固定
+Pikafish；D3/M2 的引擎参数仅用于诊断；M2 另有三种 `input_modes` 与可选图片输出。
+回合上限来自题目本身，不能用 `evaluation.max_plies` 或 CLI 覆盖。
+`search_depth`、`opponent_depth`、`optimal_depth`、旧图片模式名等会直接报错。
+正式和 smoke YAML 均直接引用冻结名单，不再附带未启用的抽样参数。
+
+代码职责也收拢到一条链路：`schema.py` / `dataset.py` 加载当前数据；
+`mate_in_one.py`、`rule_variants.py`、`history.py`、`multimodal.py` 各管一类评测；
+`variants/` 管现有棋规与搜索，`engines/pikafish.py` 管 UCI 引擎；
+`reference.py` / `validation.py` 管独立复验，`presentation.py` 管查看与离线图库。
+`visualization/xiangqi_vis.py` 的单题与轨迹 PNG/GIF 复用 M2 绘图，图表使用当前
+难度名，并将缺失诊断标为 missing，不当成零分。
+出题入口保留在 `scripts/annotate_xiangqi_d3.py`、`build_xiangqi_c2.py`、
+`build_xiangqi_h2.py` 和 `build_xiangqi_m2_from_d3.py`，完整命令见数据卡。
+
+网页版流程复用已准备的配置和名单：
 
 ```bash
-minibench run-task xiangqi-mate-in-one \
-  --agent cot \
-  --provider deepseek \
-  --model deepseek-v4-flash \
-  --sample-seed 42 \
-  --sample-count 10
-
-minibench run-task xiangqi-history \
-  --history-mode full-state \
-  --sample-count 10 \
-  --pikafish-depth 8
-
-minibench run-suite \
-  --tasks xiangqi-mate-in-one,xiangqi-rule-variants \
-  --sample-count 10
+python scripts/xiangqi_web_test.py --suite-dir runs/xiangqi-smoke-<时间戳> --prepare-only
 ```
 
-`run-task`/`run-suite` 可覆盖 agent、provider、model、key 变量、抽样和常用评测参数，但不提供 `--base-url`。自定义 endpoint 请复制 YAML，设置 `provider.base_url`，再用 `run-config`。
-
-一步杀和历史任务需要 Pikafish。全部操作仍在 WSL 中：
+人工检查数据也不需要调用模型：
 
 ```bash
-mkdir -p ~/opt
-git clone https://github.com/official-pikafish/Pikafish.git ~/opt/Pikafish
-cd ~/opt/Pikafish/src
-make -j"$(nproc)" profile-build
-
-export PIKAFISH_PATH="$HOME/opt/Pikafish/src/pikafish"
-test -x "$PIKAFISH_PATH"
-
-cd /mnt/d/AAALimoWork/CS/Seminar/MiniBench
-```
-
-Pikafish 官方编译说明也建议在 `src` 下执行 `make -j profile-build`：[官方 README](https://github.com/official-pikafish/Pikafish#compiling-pikafish)。
-
-人工检查数据不需要调用模型：
-
-```bash
-minibench inspect-xiangqi \
-  --task xiangqi-history \
-  --id xiangqi-history-0001 \
-  --format terminal
-
-minibench inspect-xiangqi \
-  --task xiangqi-multimodal \
-  --id xiangqi-multimodal-0001 \
-  --format png \
-  --output output/xiangqi-example.png
-
+minibench inspect-xiangqi --task xiangqi-history --id xiangqi-history-0001 --format terminal
+minibench inspect-xiangqi --task xiangqi-multimodal --id xiangqi-multimodal-m2-0001 --format png --output output/xiangqi-example.png
 minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 ```
 
-字段、FEN、坐标、UCI 和评分定义见 [`docs/xiangqi-data-card.md`](docs/xiangqi-data-card.md)。
+字段、效用函数、固定引擎、完整重建命令和方法边界见
+[数据卡](docs/xiangqi-data-card.md)。
 
 ### 4.3 一笔画
 
+正式数据为 `data/one_stroke/direct.jsonl`、`history.jsonl` 和 `multimodal.jsonl`，
+任务 ID 分别使用 `direct-`、`history-`、`multimodal-` 前缀。每组保留 easy/medium/hard 各 10 题；
+多模态每题只有一张清晰图片，主实验 30 项，text/image 配对消融 60 项。
+
 | 配置 | 内容 |
 | --- | --- |
-| `one_stroke_a1.yaml` | A1 直接求解，无欧拉定理提示 |
-| `one_stroke.yaml` | 与正式 A1 相同的兼容入口；通常不必与 A1 重复运行 |
-| `one_stroke_a2.yaml` | A2 临时规则条件 |
-| `one_stroke_a2_ablation.yaml` | A2 full/standard/drop/conflicting 消融 |
-| `one_stroke_a3_history.yaml` | A3 增量状态与仅历史对照 |
-| `one_stroke_a4.yaml` | A4 挑战图片，默认 Qwen |
-| `one_stroke_a4_ablation.yaml` | A4 text/clear image/challenge image 配对消融 |
-| `one_stroke_euler_theorem.yaml` | 旧 smoke 数据的欧拉定理提示消融 |
+| `one_stroke_direct.yaml` | 直接求解，无欧拉定理提示 |
+| `one_stroke.yaml` | 与正式 direct 相同的兼容入口；通常不必与 direct 重复运行 |
+| `one_stroke_history.yaml` | 历史记忆：增量状态与仅历史对照 |
+| `one_stroke_multimodal.yaml` | 多模态图片，默认 Qwen |
+| `one_stroke_multimodal_ablation.yaml` | 多模态 text/image 配对消融 |
+| `one_stroke_euler_theorem.yaml` | 与正式 direct 同题的欧拉定理提示消融 |
 | `one_stroke_generated.yaml` | 生成数据，baseline prompt |
 | `one_stroke_generated_euler_theorem.yaml` | 生成数据，Euler prompt |
 
 ```bash
-minibench run-config config/experiments/one_stroke_a1.yaml
+minibench run-config config/experiments/one_stroke_direct.yaml
 minibench run-config config/experiments/one_stroke.yaml
-minibench run-config config/experiments/one_stroke_a2.yaml
-minibench run-config config/experiments/one_stroke_a2_ablation.yaml
-minibench run-config config/experiments/one_stroke_a3_history.yaml
-minibench run-config config/experiments/one_stroke_a4.yaml
-minibench run-config config/experiments/one_stroke_a4_ablation.yaml
+minibench run-config config/experiments/one_stroke_history.yaml
+minibench run-config config/experiments/one_stroke_multimodal.yaml
+minibench run-config config/experiments/one_stroke_multimodal_ablation.yaml
 minibench run-config config/experiments/one_stroke_euler_theorem.yaml
 minibench run-config config/experiments/one_stroke_generated.yaml
 minibench run-config config/experiments/one_stroke_generated_euler_theorem.yaml
 ```
 
-`one_stroke_a3_history.yaml` 与 Zebra history 一样支持分阶段多轮 messages，可以切换内置推理 agent。
+规则限定推理子任务已移除。旧编号路径、旧评分字段和旧图片模式不再兼容；已有 `runs/` 结果保留，
+新配置默认新建运行目录，不跨版本续跑。评分字段采用 `direct_score`、`history_*` 和 `multimodal_*`。
+
+一笔画 history 会区分 `intermediate` 与 `final` 阶段。`passthrough` 可直接运行；
+CoT/ToT 等 phase-aware 包装器会在中间轮使用轻量消息调用，只在最终轮执行其完整推理流程。
 
 ### 4.4 麻将
+
+合并兼容说明：当前麻将 CoT 配置显式使用 `prompt_version: v1`，沿用本地已验证的内部推理提示词及 history-only 的 current-turn 包装；推理阶段不要求只输出任务 JSON。`samples` 已移除（新配置校验不接受 CoT 中无效的采样参数），原有温度和 token 上限保持不变。麻将评测使用原有三次动作尝试，关闭 runtime 的额外格式修复，避免首次回答指标被隐式修复改变；内部阶段输出按轮保存。非空截断推理仍进入 final，并保留 `finish_reason`。
+
+main 的新 ToT 是 beam/BFS 搜索，使用 `prompt_version: v2` 及 `max_depth`、`branching_factor`、`beam_width`，不再是旧版三个候选再选择；旧 ToT 成绩不能当成新版 ToT 成绩混合汇总。要切换为新 ToT，请同时修改 `name` 和 `prompt_version`，并使用新的实验目录。
 
 | 配置 | 内容 |
 | --- | --- |
@@ -365,41 +408,140 @@ minibench render-mahjong-visual \
 
 ## 5. 如何切换 agent 架构
 
-agent 架构和 provider 是两个独立维度：`agent.name` 决定一次题目如何组织模型调用，`provider` 决定这些调用发给哪个模型服务。
+### 5.1 通信客户端与推理策略是两层
 
-| `agent.name` | 单次静态题的大致模型调用数 | 用途 |
+`provider`、通信客户端和 Agent 策略各自负责不同事情：
+
+```text
+provider YAML
+      ↓
+OpenAICompatibleClient        请求、HTTP 重试、provider 兼容、usage、响应解析
+      ↓
+Passthrough / Direct / CoT / SC / Best-of-N / ToT / ...
+                              Prompt 编排与推理算法
+```
+
+`OpenAICompatibleClient` 不是一种推理架构。它只负责把文本、历史消息和图片发送到 OpenAI-compatible `chat/completions` 服务，并解析可见内容、独立 reasoning、finish reason 与 usage。Provider 返回的 `reasoning_content` 不会再被当作最终答案；可见内容为空或被截断会产生明确错误。
+
+`passthrough` 与 `direct` 都通常只调用模型一次，但语义不同：
+
+- `passthrough` 保留原始调用语义，不附加策略 Prompt，也不强制 JSON 校验或格式修复，适合作为 raw baseline 和连接测试。
+- `direct` 会附加 Direct v2 策略契约，要求恰好一个最终 JSON 对象，并可使用统一运行追踪、预算和一次低温格式修复。
+
+公开的 `agent.name` 为：
+
+```text
+passthrough
+direct
+cot
+self-consistency
+best-of-n
+tot
+plan-then-solve
+critic-refine
+least-to-most
+```
+
+未显式填写名称时 factory 默认使用 `direct`。旧 YAML 名称 `openai-compatible` 已从公开列表移除，但仍会在发出 `FutureWarning` 后解析为 `passthrough`，完整保留 raw baseline 语义；它绝不会静默映射为 `direct`。旧代码直接导入的 `OpenAICompatibleAgent` 也只作为兼容包装保留。
+
+### 5.2 各架构的算法与调用数
+
+下表是单次静态题的正常调用数，不包含响应非法后可能发生的格式修复调用：
+
+| `agent.name` | 正常模型调用数 | 算法 |
 | --- | ---: | --- |
-| `openai-compatible` | 1 | 最小基线；直接进行一次模型调用 |
-| `direct` | 1 | 强制直接输出最终 JSON |
-| `cot` | 2 | 先推理，再整理最终 JSON |
-| `self-consistency` | `samples + 1` | 多条推理路径后评选 |
-| `tot` | `samples + 1` | 多候选 thought branches 后评选 |
-| `plan-then-solve` | 3 | 计划、求解、最终格式化 |
-| `critic-refine` | 3 | 草稿、批评、修订 |
+| `passthrough` | 1 | 原样调用；支持真实历史 messages |
+| `direct` | 1 | 一次调用直接生成最终 JSON |
+| `cot` | 2 | reasoning → finalizer |
+| `self-consistency` | `N` | `N=samples` 条独立 CoT 路径，程序化 JSON 投票 |
+| `best-of-n` | `N + 1` | `N` 条 CoT 候选 + 一次只选 ID 的 LLM judge |
+| `tot` | 随搜索树变化 | beam/BFS 展开 → 每层 value 评分 → finalizer |
+| `plan-then-solve` | 3 | plan → solve → finalizer |
+| `critic-refine` | 3 | draft → critique → refine |
+| `least-to-most` | `K + 2` | decompose → 顺序解决 `K` 个子问题 → finalizer |
 
-所有内置 agent 都支持分阶段多轮 messages。动态棋局/牌局会在每个正式行动回合重复上述推理过程；多模态推理包装器还会在各阶段重复发送图片，因此调用量和图片 token 成本会明显增加。
+Self-Consistency 不再调用 LLM judge。它从每个样本提取最后一个完整 JSON 对象，用排序键和紧凑序列化 canonicalize 后计票；非法候选被忽略，多数票获胜，最高票平局时稳定选择最早生成的候选。若所有样本都非法，且允许格式修复，则只对一个候选执行一次低温修复。`samples` 默认 3、最小 2，`reasoning_temperature` 必须非零。
 
-复制一份 YAML 后修改 agent：
+Best-of-N 保留 LLM judge，但 judge 只能返回 `selected_id` 和每个候选的评分，不能改写任务答案。候选使用稳定 ID，展示顺序按 `selection_seed` 确定性打乱，默认 seed 为 42；程序最终返回被选候选中的 JSON。
+
+当前 `tot` 是任务无关的真正 beam/BFS Tree of Thoughts，而不是多候选别名。它为 beam 中的非终止节点生成子 thought，每层批量调用 value evaluator 得到 `[0,1]` 分数并裁剪到 `beam_width`；终止节点不再展开。同分按稳定 node ID 排序。搜索在 beam 全终止、深度/节点/调用预算耗尽时停止，优先选择最高分终止节点，否则选最高分叶节点，再由统一 finalizer 生成任务 JSON。它不读取数据集标准答案或任务评分器。
+
+Least-to-Most 先结构化分解，随后按依赖顺序解决子问题；每一步只能引用原题和此前结果。合法但为空的分解会把原题作为唯一子问题，最终再合成严格 JSON。默认最多 4 个子问题。
+
+动态棋局或牌局会在每个 Agent 行动回合重复上述过程。多模态推理的每个需要观察原题的阶段都会传递图片，因此调用量和图片 token 成本会明显增加。
+
+### 5.3 严格 YAML 字段
+
+Agent 配置现在严格校验。字段放在不支持它的架构下会直接报错，不再静默忽略。字段组如下：
+
+- 基础字段：`name`、`predictions`、`max_tokens`。
+- 运行字段：`prompt_version`、`trace`、`max_llm_calls`、`max_total_tokens`、`max_format_repairs`。
+- 推理字段：`reasoning_temperature`、`final_temperature`、`max_reasoning_tokens`。
+
+各架构允许的额外字段为：
+
+| Agent | 允许字段 |
+| --- | --- |
+| `passthrough` | 仅基础字段；不接受运行字段、reasoning 字段或 `samples` |
+| `direct` | 基础字段 + 运行字段 + `final_temperature` |
+| `cot` / `plan-then-solve` / `critic-refine` | 基础字段 + 运行字段 + 推理字段 |
+| `self-consistency` | 上述推理 Agent 字段 + `samples` |
+| `best-of-n` | 上述推理 Agent 字段 + `samples` + `selection_seed` |
+| `tot` | 上述推理 Agent 字段 + `max_depth`、`branching_factor`、`beam_width`、`max_search_nodes` |
+| `least-to-most` | 上述推理 Agent 字段 + `max_subproblems` |
+
+`prompt_version` 默认 `v2`。`v1` 完整保留旧 Direct、CoT、Plan、Critic 等模板，供旧实验显式复现；新架构 `best-of-n`、真正的 `tot` 和 `least-to-most` 只支持 `v2`。v2 每个阶段都使用固定的 `<OBJECTIVE>`、`<INPUT>`、`<PRIOR_STATE>`、`<CONSTRAINTS>`、`<OUTPUT_CONTRACT>`、`<STOP_POLICY>` 六段契约，候选和状态以 JSON 安全编码。运行轨迹会记录 Prompt 版本和 SHA-256 hash。
+
+`trace` 默认 `summary`：
+
+- `off`：不保留逐阶段轨迹。
+- `summary`：保留阶段名、Prompt hash、耗时、usage、解析状态和算法元数据，不保存原文。
+- `full`：额外保存完整 Prompt、可见响应、独立 reasoning 和解析后 JSON。它可能包含原题或模型敏感内容，应谨慎启用。
+
+预算与修复字段：
+
+- `max_llm_calls`：一次 Agent run 的逻辑 LLM 调用上限；内部阶段和格式修复都计数。
+- `max_total_tokens`：依据 provider `usage.total_tokens` 累积的软上限。单次调用可能越过上限；达到上限后会在下一次调用前停止。Provider 不返回 usage 时无法精确执行该限制。
+- `max_format_repairs`：只能是 0 或 1，默认 1；控制需要严格 JSON 的阶段是否允许一次低温格式修复。`passthrough` 始终不修复。
+- `max_search_nodes`：ToT 的可选硬节点上限；留空时由深度、分支数和 beam 宽度推导。
+
+最终字符串接口保持不变；对使用统一运行内核的策略 Agent（即除 `passthrough` 外的公开策略），可通过 `agent.last_run` 查看最近一次运行的阶段、预算、状态和停止原因。
+
+### 5.4 配置示例
+
+复制正式 YAML 到 Git 已忽略的 `tmp/` 后再修改：
 
 ```bash
 mkdir -p tmp/configs
-cp config/experiments/mahjong.yaml tmp/configs/mahjong-cot.yaml
-nano tmp/configs/mahjong-cot.yaml
+cp config/experiments/mahjong.yaml tmp/configs/mahjong-agent.yaml
+nano tmp/configs/mahjong-agent.yaml
 ```
 
-例如 CoT：
+Raw passthrough 只写基础字段：
+
+```yaml
+agent:
+  name: passthrough
+  max_tokens: 512
+```
+
+CoT 不接受 `samples`：
 
 ```yaml
 agent:
   name: cot
-  samples: 1
+  prompt_version: v2
+  trace: summary
   reasoning_temperature: 0.0
   final_temperature: 0.0
   max_reasoning_tokens: 1024
   max_tokens: 512
+  max_llm_calls: 3
+  max_total_tokens: 8192
+  max_format_repairs: 1
 ```
 
-例如 self-consistency：
+真正的 Self-Consistency：
 
 ```yaml
 agent:
@@ -409,21 +551,67 @@ agent:
   final_temperature: 0.0
   max_reasoning_tokens: 1024
   max_tokens: 512
+  max_llm_calls: 6
+```
+
+Best-of-N：
+
+```yaml
+agent:
+  name: best-of-n
+  samples: 5
+  selection_seed: 42
+  reasoning_temperature: 0.7
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+  max_tokens: 512
+  max_llm_calls: 8
+```
+
+默认规模的 beam/BFS ToT：
+
+```yaml
+agent:
+  name: tot
+  prompt_version: v2
+  max_depth: 3
+  branching_factor: 3
+  beam_width: 2
+  max_search_nodes: 16
+  reasoning_temperature: 0.7
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+  max_tokens: 512
+  max_llm_calls: 24
+```
+
+Least-to-Most：
+
+```yaml
+agent:
+  name: least-to-most
+  prompt_version: v2
+  max_subproblems: 4
+  reasoning_temperature: 0.0
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
+  max_tokens: 512
+  max_llm_calls: 12
 ```
 
 运行修改后的配置：
 
 ```bash
-minibench run-config tmp/configs/mahjong-cot.yaml
+minibench run-config tmp/configs/mahjong-agent.yaml
 ```
 
 选择建议：
 
-- 先用 `openai-compatible` 做一题连通性 smoke test。
-- 再用 `direct` 或 `cot` 建基线。
-- 只有在预算允许时再用 `self-consistency`、`tot`、`plan-then-solve`、`critic-refine`。
-- Zebra、一笔画和麻将 history 均可切换内置推理 agent；`intermediate` 轮只累积上下文，`final` 轮执行所选推理流程。
-- 象棋 history 可以切换 agent，但会在多步对局中产生很多模型调用。
+- 先用 `passthrough` 做一题连接和 provider 响应 smoke test。
+- 再用 `direct` 或 `cot` 建立可比较基线。
+- 只有在预算允许时再用 `self-consistency`、`best-of-n`、`tot`、`least-to-most`、`plan-then-solve` 或 `critic-refine`。
+- Zebra history 和一笔画 history 支持 `passthrough` 以及实现 phase-aware 消息接口的推理 Agent。
+- 象棋 history 可以切换 Agent，但会在多步对局中产生很多模型调用。
 
 ## 6. 多模态：DeepSeek 文本 + Qwen 图片的正确跑法
 
@@ -435,18 +623,18 @@ minibench run-config tmp/configs/mahjong-cot.yaml
 export DASHSCOPE_API_KEY
 
 minibench run-config config/experiments/xiangqi_multimodal.yaml
-minibench run-config config/experiments/one_stroke_a4.yaml
-minibench run-config config/experiments/one_stroke_a4_ablation.yaml
+minibench run-config config/experiments/one_stroke_multimodal.yaml
+minibench run-config config/experiments/one_stroke_multimodal_ablation.yaml
 minibench run-config config/experiments/mahjong_multimodal.yaml
 ```
 
 其中：
 
 - 象棋运行 `text`、`chinese-piece-image`、`latin-piece-image`。
-- 一笔画 A4 正式运行 `challenge_image`，消融运行 `text`、`clear_image`、`challenge_image`。
-- 麻将多模态运行静态 90 题的一一对应 `image` 版本；文本基线由 `mahjong.yaml` 单独运行。
+- 一笔画 multimodal 正式运行 `image`，消融运行 `text`、`image`。
+- 麻将正式运行 `image`，配对文字输入使用 `mahjong.yaml` 的同源静态题。
 
-麻将静态和图片结果可按相同任务 ID 做跨模态比较。图片模式额外要求转录手牌及适用时的公开牌，因此该比较是跨模态性能差距，而不是完全纯净的单变量输出消融。
+配对消融应让同一个 Qwen 模型同时跑文本和图片，才能把差异主要归因于输入模态，而不是模型能力差异。
 
 ### 6.2 另跑 DeepSeek 文本基线
 
@@ -475,9 +663,6 @@ provider:
 evaluation:
   input_modes:
     - text
-  opponent_depth: 4
-  optimal_depth: 3
-  max_plies: 20
 ```
 
 然后运行：
@@ -504,25 +689,27 @@ nano tmp/configs/xiangqi-multimodal-qwen-cot.yaml
 ```yaml
 agent:
   name: cot
-  samples: 1
   reasoning_temperature: 0.0
   final_temperature: 0.0
   max_reasoning_tokens: 1024
   max_tokens: 512
 ```
 
-先用一题验证：
+按正式冻结题单运行 CoT 图片条件（不是一题）：
 
 ```bash
 minibench run-task xiangqi-multimodal \
   --agent cot \
   --provider qwen \
   --model qwen3.8-max \
-  --sample-count 1 \
-  --input-modes chinese-piece-image
+  --input-modes chinese-piece-image \
+  --run-name xiangqi-m2-qwen-cot-image-new
 ```
 
 该 CLI 命令继承正式 YAML 中的 `DASHSCOPE_API_KEY` 和其他评测设置；完整自定义仍建议运行刚复制的 YAML。
+若只想试一题，在复制的 YAML 中删除 `task.selection`，显式设置
+`task.sampling: {enabled: true, count: 1, seed: 42, strategy: stratified}`，
+并换一个 `run.run_name`。不要改写冻结题单。
 
 ## 7. 结果、复现与离线运行
 
@@ -531,7 +718,7 @@ minibench run-task xiangqi-multimodal \
 - `predictions.jsonl`：原始输出与逐题结果。
 - `results.json`：汇总指标。
 - `summary.txt`：人类可读摘要。
-- 象棋 v2 额外保存 `resolved_config.yaml` 与 `run_metadata.json`，记录数据哈希、schema、renderer 和依赖版本。
+- 象棋 v2 额外保存 `selected_tasks.jsonl`、`resolved_config.yaml` 与 `run_metadata.json`，记录精确抽样、数据与配置哈希、schema、renderer、运行环境和 Pikafish 指纹。
 
 在 WSL 中查看最近产生的文件：
 
@@ -545,26 +732,14 @@ find runs -maxdepth 2 -type f -printf '%TY-%Tm-%Td %TH:%TM  %p\n' \
 
 ```yaml
 agent:
-  name: openai-compatible
+  name: passthrough
   predictions: path/to/predictions.jsonl
 ```
 
 存在 `predictions` 时会使用确定性的 prediction-file agent，不访问 API。
 
-旧象棋 0.1.x 数据或 run 目录必须显式迁移：
-
-```bash
-minibench migrate-xiangqi-v2 \
-  --input old-run \
-  --output migrated-run \
-  --dry-run
-
-minibench migrate-xiangqi-v2 \
-  --input old-run \
-  --output migrated-run
-```
-
-迁移映射位于 `data/xiangqi/migration_v1_to_v2.json`；工具不会改写 `raw_output` 或模型自由文本。
+象棋不再提供旧格式迁移或旧配置兼容。历史数据与结果原样保留；新实验只使用当前
+四份正式 YAML 或 `config/experiments/xiangqi_smoke/` 的四份小样本 YAML。
 
 ## 8. 常见错误
 
@@ -588,7 +763,7 @@ env | grep -E 'DEEPSEEK_API_KEY|DASHSCOPE_API_KEY' | sed 's/=.*/=<set>/'
 
 ### 模型输出为空、超时或 JSON 被截断
 
-先使用 `openai-compatible`、关闭 provider 原生 thinking，并提高 `provider.timeout` 与 `agent.max_tokens`/`provider.max_tokens`。不要一开始就运行多样本 agent 或完整多模态消融。
+先使用 `passthrough`、关闭 provider 原生 thinking，并提高 `provider.timeout` 与 `agent.max_tokens`/`provider.max_tokens`。不要一开始就运行多样本 agent 或完整多模态消融。
 
 ### `Pikafish executable was not found`
 

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 import hashlib
+import platform
+import subprocess
+import sys
 from importlib.metadata import PackageNotFoundError, version
 import json
+import os
 from pathlib import Path
 from time import strftime
 from typing import Any, Callable
@@ -40,12 +44,12 @@ class TaskFamilySpec:
 
 
 def _load_xiangqi_task_objects(path: str | Path | None, family: str) -> list[Any]:
-    from minibench.datasets.xiangqi.dataset import xiangqi_task_from_v2_record
+    from minibench.datasets.xiangqi.dataset import xiangqi_task_from_dict
     from minibench.datasets.xiangqi.schema import FAMILY_PATHS, load_records
 
     source = Path(path) if path is not None else FAMILY_PATHS[family]
     return [
-        xiangqi_task_from_v2_record(record)
+        xiangqi_task_from_dict(record)
         for record in load_records(source, expected_family=family)
     ]
 
@@ -100,11 +104,11 @@ def _xiangqi_rule_variants_spec() -> TaskFamilySpec:
 
 def _xiangqi_history_spec() -> TaskFamilySpec:
     from minibench.datasets.xiangqi.history import (
+        HISTORY_SYSTEM_PROMPT,
         evaluate_history_tasks,
         summarize_history,
         write_history_run,
     )
-    from minibench.datasets.xiangqi.prompting import XIANGQI_SYSTEM_PROMPT
 
     family = "xiangqi-history"
     return TaskFamilySpec(
@@ -113,7 +117,7 @@ def _xiangqi_history_spec() -> TaskFamilySpec:
         evaluate_tasks=evaluate_history_tasks,
         summarize=summarize_history,
         write_run=write_history_run,
-        system_prompt=XIANGQI_SYSTEM_PROMPT,
+        system_prompt=HISTORY_SYSTEM_PROMPT,
     )
 
 
@@ -144,7 +148,7 @@ def _one_stroke_spec() -> TaskFamilySpec:
     from minibench.datasets.one_stroke.prompting import ONE_STROKE_SYSTEM_PROMPT
 
     return TaskFamilySpec(
-        default_path=Path("data/one_stroke/tasks.jsonl"),
+        default_path=Path("data/one_stroke/direct.jsonl"),
         load_tasks=load_one_stroke_tasks,
         evaluate_tasks=evaluate_one_stroke_tasks,
         summarize=summarize_one_stroke,
@@ -261,6 +265,8 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
 
     task_path = task_config.get("path") or spec.default_path
     tasks = spec.load_tasks(task_path)
+    if task_config.get("selection") is not None:
+        tasks = _select_frozen_xiangqi_tasks(tasks, task_config, Path(task_path), family)
     tasks = _select_tasks(tasks, task_config.get("task_ids") or [])
     sampling = task_config.get("sampling") or {}
     if sampling.get("enabled"):
@@ -269,6 +275,7 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
             family=family,
             count=int(sampling["count"]),
             seed=int(sampling["seed"]),
+            strategy=str(sampling.get("strategy", "family-default")),
         )
     evaluation_config = dict(config.get("evaluation") or {})
     if family == "mahjong_rule_variants":
@@ -295,6 +302,21 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
             run_config,
         )
 
+    if family == "one_stroke":
+        return _run_checkpointed_one_stroke_experiment(
+            spec,
+            tasks,
+            config,
+            Path(task_path),
+            evaluation_config,
+            run_config,
+        )
+
+    if family.startswith("xiangqi-"):
+        return _run_checkpointed_xiangqi_experiment(
+            spec, tasks, config, Path(task_path), family, evaluation_config, run_config
+        )
+
     agent = make_agent_from_config(
         config["agent"],
         config.get("provider", {}),
@@ -317,18 +339,115 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
         run_config.get("output_dir", "runs"),
         run_config.get("run_name"),
     )
-    if family.startswith("xiangqi-"):
-        _write_xiangqi_run_metadata(
-            run_dir,
-            config=config,
-            data_path=Path(task_path),
-            family=family,
-        )
     return run_dir, spec.summarize(results)
 
 
+def _select_frozen_xiangqi_tasks(
+    tasks: list[Any], task_config: dict[str, Any], data_path: Path, family: str
+) -> list[Any]:
+    """Use one hashed roster across architectures, without sampling it again."""
+    from minibench.datasets.xiangqi.schema import load_records
+
+    if not family.startswith("xiangqi-"):
+        raise ValueError("task.selection is currently supported only for Xiangqi")
+    selection = task_config["selection"]
+    if (not isinstance(selection, dict) or not isinstance(selection.get("path"), str)
+            or not isinstance(selection.get("sha256"), str)):
+        raise ValueError("task.selection needs path and sha256")
+    if (task_config.get("task_ids") or task_config.get("limit") is not None
+            or (task_config.get("sampling") or {}).get("enabled")):
+        raise ValueError("task.selection cannot be combined with task_ids, limit, or sampling")
+    path = Path(selection["path"])
+    if sha256_file(path) != selection["sha256"]:
+        raise ValueError("task.selection sha256 mismatch")
+    records = load_records(path, expected_family=family)
+    originals = {r["id"]: r for r in load_records(data_path, expected_family=family)}
+    if not records:
+        raise ValueError("task.selection must be nonempty")
+    for record in records:
+        if originals.get(record["id"]) != record:
+            raise ValueError(f"task.selection differs from the source dataset: {record['id']}")
+    indexed = {str(t["id"] if isinstance(t, dict) else t.id): t for t in tasks}
+    return [indexed[r["id"]] for r in records]
+
+
+def _run_checkpointed_xiangqi_experiment(
+    spec: TaskFamilySpec, tasks: list[Any], config: dict[str, Any], data_path: Path,
+    family: str, evaluation_config: dict[str, Any], run_config: dict[str, Any],
+) -> tuple[Path, dict[str, Any]]:
+    """Persist inputs before model setup and fsync each completed observation."""
+    if not tasks:
+        raise ValueError("Xiangqi evaluation requires at least one selected task")
+    name = run_config.get("run_name") or f"{family}-{strftime('%Y%m%d-%H%M%S')}"
+    run_dir = Path(run_config.get("output_dir", "runs")) / name
+    # Reusing a name must never truncate an earlier run, including an interrupted one.
+    run_dir.mkdir(parents=True, exist_ok=False)
+    predictions = run_dir / "predictions.jsonl"
+    predictions.touch(exist_ok=False)
+    completed: list[Any] = []
+    identities: set[tuple[str, str]] = set()
+    state = {
+        "version": 1, "family": family, "status": "preparing",
+        "selected_tasks": len(tasks), "completed_results": 0,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    def save_state(status: str, **extra: Any) -> None:
+        state.update(status=status, completed_results=len(completed),
+                     updated_at=datetime.now(timezone.utc).isoformat(), **extra)
+        atomic_write_json(run_dir / "run_state.json", state)
+
+    save_state("preparing")
+    try:
+        selected_path = _write_xiangqi_selected_tasks(
+            run_dir, tasks=tasks, data_path=data_path, family=family
+        )
+        _write_xiangqi_run_metadata(
+            run_dir, config=config, data_path=data_path, family=family,
+            selected_tasks_path=selected_path,
+        )
+        save_state("running")
+        agent = make_agent_from_config(
+            config["agent"], config.get("provider", {}), system_prompt=spec.system_prompt
+        )
+
+        def persist(result: Any) -> None:
+            record = asdict(result) if is_dataclass(result) else dict(result)
+            task_id = str(record.get("task_id", record.get("id", "")))
+            mode = str(record.get("input_mode") or record.get("history_mode") or "single")
+            identity = task_id, mode
+            if not task_id or identity in identities:
+                raise ValueError(f"Invalid or duplicate Xiangqi checkpoint result: {identity}")
+            line = json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
+            with predictions.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            identities.add(identity)
+            completed.append(result)
+            save_state("running", last_task_id=task_id, last_mode=mode)
+
+        results = _evaluate(spec, tasks, agent, family, evaluation_config, on_result=persist)
+        if len(results) != len(completed):
+            raise RuntimeError("Xiangqi evaluator returned results without checkpoint callbacks")
+        # Writers retain their native summaries while leaving the durable JSONL intact.
+        spec.write_run(results, run_dir.parent, run_dir.name, write_predictions=False)
+        summary = spec.summarize(results)
+        save_state("completed")
+        return run_dir, summary
+    except BaseException as exc:
+        save_state("interrupted" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "error",
+                   error_type=type(exc).__name__, error=str(exc))
+        raise
+
+
 def _sample_xiangqi_tasks(
-    tasks: list[Any], *, family: str, count: int, seed: int
+    tasks: list[Any],
+    *,
+    family: str,
+    count: int,
+    seed: int,
+    strategy: str = "family-default",
 ) -> list[Any]:
     if not family.startswith("xiangqi-"):
         return tasks[:count]
@@ -355,7 +474,7 @@ def _sample_xiangqi_tasks(
             }
         indexed[record["id"]] = task
         records.append(record)
-    selected = sample_records(records, count=count, seed=seed)
+    selected = sample_records(records, count=count, seed=seed, strategy=strategy)
     return [indexed[record["id"]] for record in selected]
 
 
@@ -365,6 +484,7 @@ def _write_xiangqi_run_metadata(
     config: dict[str, Any],
     data_path: Path,
     family: str,
+    selected_tasks_path: Path,
 ) -> None:
     from minibench.datasets.xiangqi.multimodal import XIANGQI_RENDERER_VERSION
     from minibench.datasets.xiangqi.schema import SCHEMA_VERSION
@@ -373,20 +493,79 @@ def _write_xiangqi_run_metadata(
     dependencies: dict[str, str] = {}
     for distribution in (
         "Pillow", "matplotlib", "networkx", "numpy", "PyYAML",
-        "gym-xiangqi", "mahjong", "datasets",
+        "mahjong", "datasets",
     ):
         try:
             dependencies[distribution] = version(distribution)
         except PackageNotFoundError:
             dependencies[distribution] = "not-installed"
+    resolved_config = yaml.safe_dump(
+        _plain_config(config), sort_keys=False, allow_unicode=True
+    ).encode("utf-8")
     metadata = {
         "family": family,
+        "protocol": {"version": "xiangqi-reasoning-v2", "evaluation": _plain_config(config.get("evaluation") or {})},
         "schema_version": SCHEMA_VERSION,
         "renderer_version": XIANGQI_RENDERER_VERSION,
         "data_file": data_path.as_posix(),
         "data_sha256": hashlib.sha256(data_bytes).hexdigest(),
+        "selected_tasks_file": selected_tasks_path.name,
+        "selected_tasks_sha256": sha256_file(selected_tasks_path),
+        "selected_record_count": sum(
+            1
+            for line in selected_tasks_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ),
+        "resolved_config_sha256": hashlib.sha256(resolved_config).hexdigest(),
         "dependencies": dependencies,
+        "runtime": {
+            "python": sys.version,
+            "platform": platform.platform(),
+            "git_commit": _git_revision(Path.cwd()),
+            "git_dirty": _git_is_dirty(Path.cwd()),
+        },
+        "model_request": _model_request_metadata(config.get("provider", {})),
     }
+    package_root = Path(__file__).resolve().parents[1]
+    code_hashes = {path.relative_to(package_root).as_posix(): sha256_file(path)
+                   for path in sorted(package_root.rglob("*.py"))}
+    metadata["runtime"]["source_files_sha256"] = code_hashes
+    metadata["runtime"]["source_sha256"] = fingerprint_payload(code_hashes)
+    selection = (config.get("task") or {}).get("selection")
+    if selection is not None:
+        metadata["selection_file"] = str(selection["path"])
+        metadata["selection_sha256"] = selection["sha256"]
+    for provenance_path in (data_path.parent / "provenance.json", data_path.parent.parent / "provenance.json"):
+        if provenance_path.is_file():
+            provenance = read_json_object(provenance_path)
+            if provenance.get("release_id"):
+                metadata["release_id"] = provenance["release_id"]
+                metadata["protocol"]["release_id"] = provenance["release_id"]
+                metadata["dataset_provenance_sha256"] = sha256_file(provenance_path)
+                break
+    evaluation = config.get("evaluation") or {}
+    pikafish_path = evaluation.get("pikafish_path")
+    uses_pikafish = family in {
+        "xiangqi-mate-in-one",
+        "xiangqi-history",
+        "xiangqi-multimodal",
+    } and bool(evaluation.get("verify_with_pikafish", True))
+    if pikafish_path or uses_pikafish:
+        from minibench.datasets.xiangqi.engines.pikafish import (
+            pikafish_fingerprint,
+            resolve_pikafish_executable,
+        )
+
+        try:
+            executable = resolve_pikafish_executable(
+                pikafish_path, start_dir=Path.cwd()
+            )
+            metadata["pikafish"] = pikafish_fingerprint(executable)
+        except (FileNotFoundError, RuntimeError, ValueError):
+            # Static/prediction-only tests may intentionally skip engine setup.
+            metadata["pikafish"] = None
+    else:
+        metadata["pikafish"] = None
     (run_dir / "resolved_config.yaml").write_text(
         yaml.safe_dump(_plain_config(config), sort_keys=False, allow_unicode=True),
         encoding="utf-8",
@@ -394,6 +573,78 @@ def _write_xiangqi_run_metadata(
     (run_dir / "run_metadata.json").write_text(
         json.dumps(metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
+
+
+def _write_xiangqi_selected_tasks(
+    run_dir: Path,
+    *,
+    tasks: list[Any],
+    data_path: Path,
+    family: str,
+) -> Path:
+    """Persist the exact sampled records used by a Xiangqi run."""
+    from minibench.datasets.xiangqi.schema import load_records
+
+    selected_ids = [
+        str(task["id"] if isinstance(task, dict) else task.id) for task in tasks
+    ]
+    records = load_records(data_path, expected_family=family)
+    by_id = {record["id"]: record for record in records}
+    missing = [task_id for task_id in selected_ids if task_id not in by_id]
+    if missing:
+        raise ValueError(
+            "selected Xiangqi tasks are absent from the source dataset: "
+            + ", ".join(missing)
+        )
+    path = run_dir / "selected_tasks.jsonl"
+    path.write_text(
+        "".join(
+            json.dumps(by_id[task_id], ensure_ascii=False, sort_keys=True) + "\n"
+            for task_id in selected_ids
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _git_revision(path: Path) -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def _git_is_dirty(path: Path) -> bool | None:
+    try:
+        return bool(
+            subprocess.check_output(
+                ["git", "-C", str(path), "status", "--porcelain"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def _model_request_metadata(provider: dict[str, Any]) -> dict[str, Any]:
+    """Preserve request identity without capturing credentials or environment values."""
+    return {
+        key: provider[key]
+        for key in (
+            "name",
+            "model",
+            "base_url",
+            "api_version",
+            "json_mode",
+            "extra_body",
+        )
+        if key in provider
+    }
 
 
 def _plain_config(value: Any) -> Any:
@@ -410,8 +661,11 @@ def _select_tasks(tasks: list[Any], task_ids: list[str]) -> list[Any]:
     if not task_ids:
         return tasks
     wanted = set(task_ids)
-    selected = [task for task in tasks if getattr(task, "id", None) in wanted]
-    missing = wanted - {getattr(task, "id", None) for task in selected}
+    def task_id(task: Any) -> Any:
+        return task.get("id") if isinstance(task, dict) else getattr(task, "id", None)
+
+    selected = [task for task in tasks if task_id(task) in wanted]
+    missing = wanted - {task_id(task) for task in selected}
     if missing:
         raise ValueError(f"unknown task id(s): {', '.join(sorted(missing))}")
     return selected
@@ -479,11 +733,18 @@ def _evaluate(
     evaluation_config: dict[str, Any],
     on_result: Callable[[Any], None] | None = None,
 ) -> list[Any]:
+    if family.startswith("xiangqi-"):
+        from minibench.datasets.xiangqi.runtime import validate_evaluation_config
+
+        validate_evaluation_config(family, evaluation_config)
     if family == "xiangqi-mate-in-one":
         return spec.evaluate_tasks(
             tasks,
             agent,
+            on_result=on_result,
             pikafish_path=evaluation_config.get("pikafish_path"),
+            pikafish_binary_sha256=evaluation_config.get("pikafish_binary_sha256"),
+            pikafish_nnue_sha256=evaluation_config.get("pikafish_nnue_sha256"),
             pikafish_depth=evaluation_config.get("pikafish_depth", 8),
             pikafish_timeout=evaluation_config.get("pikafish_timeout", 60.0),
         )
@@ -491,16 +752,19 @@ def _evaluate(
         return spec.evaluate_tasks(
             tasks,
             agent,
-            max_steps=int(evaluation_config.get("max_plies", 12)),
-            search_depth=int(evaluation_config.get("search_depth", 3)),
+            on_result=on_result,
+            oracle_depth=int(evaluation_config.get("oracle_depth", 3)),
         )
     if family == "xiangqi-history":
         return spec.evaluate_tasks(
             tasks,
             agent,
-            history_mode=evaluation_config.get("history_mode", "full-state"),
+            on_result=on_result,
+            history_mode=evaluation_config.get("history_mode", "move-history-only"),
             pikafish_path=evaluation_config.get("pikafish_path"),
-            pikafish_depth=int(evaluation_config.get("pikafish_depth", 8)),
+            pikafish_binary_sha256=evaluation_config.get("pikafish_binary_sha256"),
+            pikafish_nnue_sha256=evaluation_config.get("pikafish_nnue_sha256"),
+            pikafish_depth=int(evaluation_config.get("pikafish_depth", 16)),
             pikafish_timeout=float(evaluation_config.get("pikafish_timeout", 60.0)),
         )
     if family == "xiangqi-multimodal":
@@ -508,37 +772,31 @@ def _evaluate(
             "input_modes",
             ("text", "chinese-piece-image", "latin-piece-image"),
         )
-        if isinstance(modes, str):
-            modes = tuple(part.strip() for part in modes.split(",") if part.strip())
         return spec.evaluate_tasks(
             tasks,
             agent,
+            on_result=on_result,
             modes=tuple(modes),
-            opponent_depth=int(evaluation_config.get("opponent_depth", 4)),
-            optimal_depth=int(evaluation_config.get("optimal_depth", 3)),
-            max_steps=int(evaluation_config.get("max_plies", 20)),
+            pikafish_path=evaluation_config.get("pikafish_path"),
+            pikafish_binary_sha256=evaluation_config.get("pikafish_binary_sha256"),
+            pikafish_nnue_sha256=evaluation_config.get("pikafish_nnue_sha256"),
+            pikafish_depth=int(evaluation_config.get("pikafish_depth", 8)),
+            pikafish_timeout=float(
+                evaluation_config.get("pikafish_timeout", 60.0)
+            ),
+            verify_with_pikafish=bool(
+                evaluation_config.get("verify_with_pikafish", True)
+            ),
             step_dir=evaluation_config.get("step_dir"),
         )
     if family == "one_stroke":
-        memory_modes = evaluation_config.get(
-            "memory_modes",
-            ("incremental_state", "step_history_only"),
-        )
-        if isinstance(memory_modes, str):
-            memory_modes = (memory_modes,)
-        rule_modes = evaluation_config.get("rule_modes", ("full",))
-        if isinstance(rule_modes, str):
-            rule_modes = (rule_modes,)
-        input_modes = evaluation_config.get("input_modes", ("challenge_image",))
-        if isinstance(input_modes, str):
-            input_modes = (input_modes,)
+        memory_modes, input_modes = _one_stroke_selected_modes(evaluation_config)
         final_max_tokens = evaluation_config.get("final_max_tokens")
         return spec.evaluate_tasks(
             tasks,
             agent,
             prompt_variant=evaluation_config.get("prompt_variant", "baseline"),
             memory_modes=tuple(memory_modes),
-            rule_modes=tuple(rule_modes),
             input_modes=tuple(input_modes),
             state_max_tokens=int(evaluation_config.get("state_max_tokens", 512)),
             ack_max_tokens=int(evaluation_config.get("ack_max_tokens", 32)),
@@ -594,6 +852,455 @@ def _evaluate(
             on_result=on_result,
         )
     return spec.evaluate_tasks(tasks, agent)
+
+
+def _one_stroke_selected_modes(
+    evaluation_config: dict[str, Any],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    from minibench.datasets.one_stroke.prompting import ONE_STROKE_INPUT_MODES
+
+    removed_fields = sorted({"rule_mode", "rule_modes"} & evaluation_config.keys())
+    if removed_fields:
+        fields = ", ".join(f"evaluation.{field}" for field in removed_fields)
+        raise ValueError(f"one-stroke rule evaluation was removed; unsupported: {fields}")
+
+    def normalized(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+        configured = evaluation_config.get(name, default)
+        if isinstance(configured, str):
+            configured = tuple(
+                part.strip() for part in configured.split(",") if part.strip()
+            )
+        if not isinstance(configured, (list, tuple)):
+            raise ValueError(f"evaluation.{name} must be a list or comma-separated string")
+        return tuple(str(item) for item in configured)
+
+    input_modes = normalized("input_modes", ("image",))
+    if not input_modes or set(input_modes) - set(ONE_STROKE_INPUT_MODES):
+        raise ValueError(
+            "one-stroke input_modes must contain only text or image; "
+            f"received {input_modes!r}"
+        )
+
+    return (
+        normalized(
+            "memory_modes",
+            ("incremental_state", "step_history_only"),
+        ),
+        input_modes,
+    )
+
+
+def _run_checkpointed_one_stroke_experiment(
+    spec: TaskFamilySpec,
+    tasks: list[Any],
+    config: dict[str, Any],
+    task_path: Path,
+    evaluation_config: dict[str, Any],
+    run_config: dict[str, Any],
+) -> tuple[Path, dict[str, Any]]:
+    from minibench.core.one_stroke_checkpoint import (
+        OneStrokeCheckpointRun,
+        make_manifest,
+        one_stroke_result_from_dict,
+        validate_run_name,
+    )
+    from minibench.datasets.one_stroke.evaluation import (
+        one_stroke_result_key,
+        plan_one_stroke_work_items,
+    )
+
+    memory_modes, input_modes = _one_stroke_selected_modes(
+        evaluation_config
+    )
+    work_plan = tuple(
+        plan_one_stroke_work_items(
+            tasks,
+            memory_modes=memory_modes,
+            input_modes=input_modes,
+        )
+    )
+    for key in work_plan:
+        if (
+            not isinstance(key, tuple)
+            or len(key) != 2
+            or not all(isinstance(value, str) and value for value in key)
+        ):
+            raise ValueError(
+                "one-stroke work planner must return (task_id, mode_key) pairs"
+            )
+
+    on_existing = str(run_config.get("on_existing", "error"))
+    run_name = validate_run_name(
+        run_config.get("run_name"),
+        on_existing=on_existing,
+    )
+    model_identity = _one_stroke_model_identity(config)
+    task_sha256 = sha256_file(task_path)
+    input_assets = _one_stroke_input_assets(tasks)
+    dataset_profile, interpretation_warnings = _one_stroke_dataset_profile(
+        tasks,
+        work_plan=work_plan,
+        input_modes=input_modes,
+    )
+    fingerprint_inputs = _one_stroke_fingerprint_inputs(
+        config,
+        task_sha256=task_sha256,
+        model_identity=model_identity,
+        work_plan=work_plan,
+        input_assets=input_assets,
+        dataset_profile=dataset_profile,
+    )
+    repository_root = Path(__file__).resolve().parents[3]
+    manifest = make_manifest(
+        resolved_config=_plain_config(config),
+        task_path=task_path,
+        task_sha256=task_sha256,
+        model_identity=model_identity,
+        work_plan=work_plan,
+        input_assets=input_assets,
+        dataset_profile=dataset_profile,
+        interpretation_warnings=interpretation_warnings,
+        fingerprint_inputs=fingerprint_inputs,
+        repository_root=repository_root,
+    )
+
+    with OneStrokeCheckpointRun(
+        output_dir=run_config.get("output_dir", "runs"),
+        run_name=run_name,
+        on_existing=on_existing,
+        manifest=manifest,
+        work_plan=work_plan,
+        result_key=one_stroke_result_key,
+        result_from_dict=one_stroke_result_from_dict,
+        summarize=spec.summarize,
+    ) as checkpoint:
+        if checkpoint.completed_keys == set(work_plan):
+            return checkpoint.run_dir, checkpoint.mark_completed()
+
+        try:
+            # The run directory, manifest, state, and empty predictions snapshot
+            # all exist before constructing an agent that can make API calls.
+            agent = make_agent_from_config(
+                config["agent"],
+                config.get("provider", {}),
+                system_prompt=spec.system_prompt,
+            )
+            final_max_tokens = evaluation_config.get("final_max_tokens")
+            spec.evaluate_tasks(
+                tasks,
+                agent,
+                prompt_variant=evaluation_config.get(
+                    "prompt_variant", "baseline"
+                ),
+                memory_modes=memory_modes,
+                input_modes=input_modes,
+                state_max_tokens=int(
+                    evaluation_config.get("state_max_tokens", 512)
+                ),
+                ack_max_tokens=int(
+                    evaluation_config.get("ack_max_tokens", 32)
+                ),
+                final_max_tokens=(
+                    int(final_max_tokens)
+                    if final_max_tokens is not None
+                    else None
+                ),
+                show_progress=bool(
+                    evaluation_config.get("show_progress", False)
+                ),
+                skip_keys=set(checkpoint.completed_keys),
+                on_work_item_start=checkpoint.start_work_item,
+                on_result=checkpoint.record_result,
+            )
+            missing = set(work_plan) - checkpoint.completed_keys
+            if missing:
+                rendered = ", ".join(
+                    f"{task_id}/{mode}" for task_id, mode in sorted(missing)
+                )
+                raise RuntimeError(
+                    "one-stroke evaluator returned without completing work "
+                    f"item(s): {rendered}"
+                )
+        except (Exception, KeyboardInterrupt) as exc:
+            checkpoint.mark_interrupted(exc)
+            if isinstance(exc, KeyboardInterrupt):
+                raise
+            raise RuntimeError(
+                "one-stroke evaluation failed after "
+                f"{len(checkpoint.results)}/{checkpoint.planned_total} results; "
+                f"partial results saved to {checkpoint.run_dir}. To resume with "
+                "the unchanged semantic config, set "
+                f"run.run_name={checkpoint.run_name!r} and "
+                f"run.on_existing='resume': {exc}"
+            ) from exc
+
+        return checkpoint.run_dir, checkpoint.mark_completed()
+
+
+def _one_stroke_model_identity(config: dict[str, Any]) -> dict[str, Any]:
+    agent_config = config["agent"]
+    provider_config = config.get("provider", {})
+    prediction_path = agent_config.get("predictions")
+    if prediction_path:
+        return {
+            "kind": "prediction_file",
+            "provider": None,
+            "model": None,
+            "sha256": sha256_file(Path(prediction_path)),
+        }
+
+    from minibench.factory.providers import resolve_provider
+
+    provider_name = str(provider_config.get("name", "generic"))
+    resolved_model, resolved_base_url, _ = resolve_provider(
+        provider_name,
+        model=provider_config.get("model"),
+        base_url=provider_config.get("base_url"),
+        api_key_env=provider_config.get("api_key_env"),
+    )
+    return {
+        "kind": "model",
+        "provider": provider_name,
+        "model": resolved_model,
+        "base_url": resolved_base_url,
+    }
+
+
+def _one_stroke_fingerprint_inputs(
+    config: dict[str, Any],
+    *,
+    task_sha256: str,
+    model_identity: dict[str, Any],
+    work_plan: tuple[tuple[str, str], ...],
+    input_assets: list[dict[str, str]],
+    dataset_profile: dict[str, Any],
+) -> dict[str, Any]:
+    semantic_config = {
+        section: _plain_config(config.get(section, {}))
+        for section in ("task", "agent", "provider", "evaluation")
+    }
+    return {
+        "family": "one_stroke",
+        "data_sha256": task_sha256,
+        "work_plan": [
+            {"task_id": task_id, "mode": mode}
+            for task_id, mode in work_plan
+        ],
+        "input_asset_hashes": [
+            {
+                "task_id": asset["task_id"],
+                "sha256": asset["sha256"],
+            }
+            for asset in input_assets
+        ],
+        "config": semantic_config,
+        "model_identity": model_identity,
+        "dataset_profile": dataset_profile,
+        "code_sha256": _one_stroke_code_sha256(),
+    }
+
+
+def _one_stroke_input_assets(tasks: list[Any]) -> list[dict[str, str]]:
+    assets: list[dict[str, str]] = []
+    for task in tasks:
+        if task.capability != "multimodal":
+            continue
+        if task.image_path is None:
+            raise ValueError(f"{task.id}: multimodal tasks require an image")
+        path = Path(task.image_path).resolve()
+        assets.append(
+            {"task_id": task.id, "path": str(path), "sha256": sha256_file(path)}
+        )
+    return sorted(assets, key=lambda asset: asset["task_id"])
+
+
+def _one_stroke_dataset_profile(
+    tasks: list[Any],
+    *,
+    work_plan: tuple[tuple[str, str], ...],
+    input_modes: tuple[str, ...],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    from minibench.datasets.one_stroke.dataset import (
+        has_one_stroke_solution,
+        one_stroke_edge_ids,
+        simulate_one_stroke_history,
+    )
+
+    def counts(field: str) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for task in tasks:
+            key = str(getattr(task, field))
+            result[key] = result.get(key, 0) + 1
+        return dict(sorted(result.items()))
+
+    history_tasks = [task for task in tasks if task.capability == "history_memory"]
+    multimodal_tasks = [task for task in tasks if task.capability == "multimodal"]
+    tasks_by_id = {task.id: task for task in tasks}
+    protocol_generation_total = sum(
+        len(tasks_by_id[task_id].history_events) + 1
+        if mode.startswith("memory:")
+        else 1
+        for task_id, mode in work_plan
+    )
+    base_solution_flags = [
+        has_one_stroke_solution(
+            task.vertices,
+            task.edges,
+            start=task.start,
+            end=task.end,
+        )
+        for task in tasks
+    ]
+    history_completion_flags: list[bool] = []
+    for task in history_tasks:
+        state = simulate_one_stroke_history(task)
+        remaining_ids = set(state.remaining_edge_ids)
+        remaining_edges = tuple(
+            edge
+            for edge_id, edge in zip(one_stroke_edge_ids(task.edges), task.edges)
+            if edge_id in remaining_ids
+        )
+        history_completion_flags.append(
+            has_one_stroke_solution(
+                task.vertices,
+                remaining_edges,
+                start=state.current_vertex,
+                end=task.end,
+            )
+        )
+    negative_history_count = sum(int(not value) for value in history_completion_flags)
+    visual_gap_not_estimable = bool(multimodal_tasks) and not {
+        "text", "image"
+    }.issubset(input_modes)
+    profile = {
+        "task_total": len(tasks),
+        "work_item_total": len(work_plan),
+        "protocol_generation_total": protocol_generation_total,
+        "protocol_generation_semantics": {
+            "kind": "minimum_protocol_generate_calls",
+            "ordinary_work_item_calls": 1,
+            "history_work_item_calls": "history_event_count + 1 final call",
+            "reasoning_wrapper_may_add_internal_final_calls": True,
+        },
+        "by_capability": counts("capability"),
+        "by_difficulty": counts("difficulty"),
+        "solution_exists_semantics": "task_base_graph",
+        "by_solution_exists": {
+            "true": sum(int(value) for value in base_solution_flags),
+            "false": sum(int(not value) for value in base_solution_flags),
+        },
+        "history": {
+            "task_total": len(history_tasks),
+            "negative_history_count": negative_history_count,
+            "no_negative_history_cases": (
+                negative_history_count == 0 if history_tasks else None
+            ),
+        },
+        "multimodal": {
+            "task_total": len(multimodal_tasks),
+            "selected_input_modes": list(input_modes),
+            "visual_gap_not_estimable": visual_gap_not_estimable,
+        },
+    }
+
+    warnings: list[dict[str, Any]] = [
+        {
+            "code": "cross_track_raw_scores_not_attributable",
+            "category": "interpretation",
+            "applies_to": ["direct", "history", "multimodal"],
+            "condition": "model_identity_or_task_fingerprint_differs",
+            "comparison_keys": [
+                "model_identity",
+                "fingerprint_inputs.data_sha256",
+                "fingerprint_inputs.input_asset_hashes",
+            ],
+            "message": (
+                "Do not attribute raw score differences across direct, history, "
+                "and multimodal tracks to the capability alone when model "
+                "identity or dataset fingerprint differs."
+            ),
+        }
+    ]
+    if history_tasks:
+        warnings.append(
+            {
+                "code": "history_transcript_context_not_persistent_memory",
+                "category": "design",
+                "applies_to": ["history"],
+                "message": (
+                    "History tasks measure state tracking inside the supplied "
+                    "conversation transcript, not persistent memory across sessions."
+                ),
+            }
+        )
+        if negative_history_count == 0:
+            warnings.append(
+                {
+                    "code": "history_no_negative_history_cases",
+                    "category": "design",
+                    "applies_to": ["history"],
+                    "message": (
+                        "All loaded history tasks are structurally completable; "
+                        "there are no negative history cases."
+                    ),
+                }
+            )
+    if multimodal_tasks:
+        warnings.append(
+            {
+                "code": "multimodal_report_path_transcription_and_joint",
+                "category": "interpretation",
+                "applies_to": ["multimodal"],
+                "required_score_views": [
+                    "multimodal_path_score",
+                    "multimodal_transcription_score",
+                    "multimodal_joint_score",
+                ],
+                "message": (
+                    "Interpret multimodal tasks using separate path, "
+                    "graph-transcription, and joint scores; no single "
+                    "component is a substitute for all three."
+                ),
+            }
+        )
+    if visual_gap_not_estimable:
+        warnings.append(
+            {
+                "code": "multimodal_visual_gap_not_estimable",
+                "category": "design",
+                "applies_to": ["multimodal"],
+                "selected_input_modes": list(input_modes),
+                "message": (
+                    "A paired text/image visual gap requires both text "
+                    "and image results from this run."
+                ),
+            }
+        )
+    return profile, warnings
+
+
+def _one_stroke_code_sha256() -> str:
+    package_root = Path(__file__).resolve().parents[1]
+    paths = [
+        Path(__file__).resolve(),
+        package_root / "core" / "agent.py",
+        package_root / "core" / "checkpoint.py",
+        package_root / "core" / "metrics.py",
+        package_root / "core" / "multimodal.py",
+        package_root / "core" / "one_stroke_checkpoint.py",
+        package_root / "factory" / "agents.py",
+        package_root / "factory" / "providers.py",
+        package_root / "datasets" / "one_stroke" / "dataset.py",
+        package_root / "datasets" / "one_stroke" / "evaluation.py",
+        package_root / "datasets" / "one_stroke" / "multimodal.py",
+        package_root / "datasets" / "one_stroke" / "prompting.py",
+        *sorted((package_root / "agents").glob("*.py")),
+    ]
+    file_hashes = {
+        path.relative_to(package_root).as_posix(): sha256_file(path)
+        for path in paths
+    }
+    return fingerprint_payload(file_hashes)
 
 
 _ZEBRA_MANIFEST_SCHEMA_VERSION = 1

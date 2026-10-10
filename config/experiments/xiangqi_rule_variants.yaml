@@ -1,25 +1,24 @@
 task:
+  prompt_version: xiangqi-reasoning-v2
   family: xiangqi-rule-variants
   path: data/xiangqi/rule_variants/tasks.jsonl
-  sampling:
-    enabled: false
-    seed: 42
-    count: 10
-    strategy: proportional
-
+  selection:
+    path: data/xiangqi/evaluation_samples/formal/c2.jsonl
+    sha256: ae1b0510cd33e246dffb26645b2abc5ff99563271d7dc5212f5ac2313096d0b1
 agent:
-  name: openai-compatible
+  name: direct
   max_tokens: 512
-
 provider:
-  name: deepseek
-  model: deepseek-v4-flash
-  api_key_env: DEEPSEEK_API_KEY
-
+  name: qwen
+  model: qwen3.8-max
+  api_key_env: DASHSCOPE_API_KEY
+  max_retries: 3
+  json_mode: true
+  extra_body:
+    enable_thinking: false
 evaluation:
-  search_depth: 3
-  max_plies: 12
-
+  oracle_depth: 3
 run:
   output_dir: runs
-  run_name: null
+  run_name: xiangqi_c2_direct_formal_r1
+  on_existing: error

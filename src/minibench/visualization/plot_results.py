@@ -25,7 +25,8 @@ AGENT_DISPLAY_NAMES = {
     "simple": "Simple (基础策略)",
     
     # 评测基线
-    "openai-compatible": "OpenAI-Compatible (基线)",
+    "passthrough": "Passthrough (原样基线)",
+    "openai-compatible": "Passthrough (旧名称)",
     "openai_compatible": "OpenAI-Compatible (基线)",
     "oracle": "Oracle (黄金答案)",
     "noisy": "Noisy (噪声提取)"

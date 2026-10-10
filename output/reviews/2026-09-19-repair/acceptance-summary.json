@@ -1,0 +1,26 @@
+{
+  "release_id": "xiangqi-2026-09-19-r1",
+  "protocol_version": "xiangqi-reasoning-v2",
+  "base_commit": "eab452b069b40a1cfaec39fe2b3895d7503484f2",
+  "independent_data_records": 1000,
+  "independent_data_gate": "passed",
+  "unit_tests": 508,
+  "unit_tests_passed": 508,
+  "real_engine_results": 28,
+  "real_engine_assertions": 30,
+  "prepare_only_assertions": 27,
+  "language_model_calls": 0,
+  "technical_ready": true,
+  "frozen_selection": "data/xiangqi/evaluation_samples/manifest.json",
+  "evidence": {
+    "data/xiangqi/independent_validation.json": "87fa8f3e300dea0f13627ab6822f9f7119224fddc78329ac59fa13dda4064112",
+    "data/xiangqi/release_audit.json": "82ae4ff60763bf5f3d60aeaa552d229f6a9d747326115631de30c4b86eda2afc",
+    "data/xiangqi/repair_manifest.json": "23d75401a9d0ebef417f6ca73f8a48e374515bde9b0382c51f1be494e1db2e32",
+    "data/xiangqi/history/validation_report.json": "fab5b71273f1ad95598daa3f9965d41fa8007a9512ecd19e87da085508212c5f",
+    "data/xiangqi/rule_variants/generation_report.json": "6e174415159dbf3d3497e8bb6b6e7da8a651810f31640c6f90a358a55adc5d95",
+    "output/acceptance/xiangqi-protocol-final2/protocol_acceptance.json": "553dd24e2d9eaf02c149b145f342d1af2ac24da987b47e5b1d43c6dc0be27d43",
+    "output/acceptance/prepare_only_verification-final2.json": "4459e0b4c4c4ae58249c45f40ae2621c82decbf0efeb7e06e13e76ad7c5fc8c4",
+    "output/reviews/2026-09-19-repair/unittest-final-2.log": "5a19a5d1d8c353ec3e4aa253626181ca1446da6b349597c0036d2238ae0adb49",
+    "output/reviews/2026-09-19-repair/scoring-acceptance.log": "2b594e5710c1a12493365db74f0a80e6dbabcd09c551b957b2ad5263b6ac49ef"
+  }
+}

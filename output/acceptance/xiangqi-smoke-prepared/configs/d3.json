@@ -1,0 +1,45 @@
+{
+  "agent": {
+    "max_tokens": 1024,
+    "name": "direct"
+  },
+  "evaluation": {
+    "max_plies": 1,
+    "pikafish_binary_sha256": "0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3",
+    "pikafish_depth": 8,
+    "pikafish_nnue_sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e",
+    "pikafish_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe",
+    "pikafish_timeout": 60.0
+  },
+  "provider": {
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "extra_body": {
+      "enable_thinking": false
+    },
+    "json_mode": true,
+    "max_retries": 3,
+    "model": "qwen3.8-max",
+    "name": "qwen",
+    "timeout": 300
+  },
+  "run": {
+    "on_existing": "error",
+    "output_dir": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/output/acceptance/xiangqi-smoke-prepared",
+    "run_name": "d3"
+  },
+  "task": {
+    "family": "xiangqi-mate-in-one",
+    "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/mate_in_one/tasks.jsonl",
+    "prompt_version": "xiangqi-reasoning-v2",
+    "sampling": {
+      "count": 30,
+      "enabled": false,
+      "seed": 42,
+      "strategy": "stratified"
+    },
+    "selection": {
+      "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/output/acceptance/xiangqi-smoke-prepared/samples/d3.jsonl",
+      "sha256": "791d46e36e90a8bdf66dd884ace345763b369e1daed8aae8f43c7be0c66d7876"
+    }
+  }
+}

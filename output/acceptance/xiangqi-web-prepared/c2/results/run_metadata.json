@@ -1,0 +1,11 @@
+{
+  "protocol_version": "xiangqi-reasoning-v2",
+  "agent_adapter": "manual-web using direct prompts without automatic format repair",
+  "source_sha256": "dd1cc29e88b0faf763968c5decd2d11d940e89cb32088ccae03fee209ac06924",
+  "selection_sha256": "a86f811d402a45f1fdc0bd82b137f74528381414f9a7c47c95ec1f0bc929cf4f",
+  "engine": null,
+  "evaluation": {
+    "max_plies": 1,
+    "oracle_depth": 3
+  }
+}

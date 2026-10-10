@@ -1,0 +1,112 @@
+{
+  "created_at": "2026-09-19T05:15:39.134321+00:00",
+  "depths": {
+    "c2_search": 3,
+    "d3_m2_diagnostics": 8,
+    "h2_opponent": 16
+  },
+  "engine": {
+    "binary_sha256": "0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3",
+    "binary_size_bytes": 6944256,
+    "eval_file": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/tmp/resources/pikafish/pikafish.nnue",
+    "eval_file_sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e",
+    "executable": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe",
+    "options": {
+      "Hash": 128,
+      "Threads": 1,
+      "clear_hash_per_analysis": true
+    }
+  },
+  "note": "Only credential environment variable names are saved, never their values.",
+  "protocol_version": "xiangqi-reasoning-v2",
+  "selection_policy": "frozen-smoke-roster-no-resampling",
+  "suite": "xiangqi-frozen-smoke-v2",
+  "tasks": {
+    "c2": {
+      "config_path": "configs/c2.json",
+      "config_sha256": "0986fd006a7c4c805a37d7830c2606303bca995db015a76e5c29f002a5f87c99",
+      "family": "xiangqi-rule-variants",
+      "frozen_selection_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/evaluation_samples/smoke/c2.jsonl",
+      "sample_path": "samples/c2.jsonl",
+      "sample_sha256": "a86f811d402a45f1fdc0bd82b137f74528381414f9a7c47c95ec1f0bc929cf4f",
+      "selected_record_count": 12,
+      "selection_sha256": "a86f811d402a45f1fdc0bd82b137f74528381414f9a7c47c95ec1f0bc929cf4f",
+      "source_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/rule_variants/tasks.jsonl",
+      "source_sha256": "dd1cc29e88b0faf763968c5decd2d11d940e89cb32088ccae03fee209ac06924",
+      "task_ids": [
+        "xiangqi-rule-variants-c2-r1-0009-53be37100c",
+        "xiangqi-rule-variants-c2-r1-0010-53be37100c",
+        "xiangqi-rule-variants-c2-r1-0011-53be37100c",
+        "xiangqi-rule-variants-c2-r1-0012-53be37100c",
+        "xiangqi-rule-variants-c2-r1-0089-b55da9d4ac",
+        "xiangqi-rule-variants-c2-r1-0090-b55da9d4ac",
+        "xiangqi-rule-variants-c2-r1-0091-b55da9d4ac",
+        "xiangqi-rule-variants-c2-r1-0092-b55da9d4ac",
+        "xiangqi-rule-variants-c2-r1-0181-619ab768c4",
+        "xiangqi-rule-variants-c2-r1-0182-619ab768c4",
+        "xiangqi-rule-variants-c2-r1-0183-619ab768c4",
+        "xiangqi-rule-variants-c2-r1-0184-619ab768c4"
+      ]
+    },
+    "d3": {
+      "config_path": "configs/d3.json",
+      "config_sha256": "b89d7b5dff186012bcc7c601f7b7274d755212c464a0da3012890b71bd28438d",
+      "family": "xiangqi-mate-in-one",
+      "frozen_selection_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/evaluation_samples/smoke/d3.jsonl",
+      "sample_path": "samples/d3.jsonl",
+      "sample_sha256": "791d46e36e90a8bdf66dd884ace345763b369e1daed8aae8f43c7be0c66d7876",
+      "selected_record_count": 6,
+      "selection_sha256": "791d46e36e90a8bdf66dd884ace345763b369e1daed8aae8f43c7be0c66d7876",
+      "source_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/mate_in_one/tasks.jsonl",
+      "source_sha256": "f4edbfb1a4eadf88e1ee4bfc0e0d6e800bd7bcf211dc022881282e86646e8f1e",
+      "task_ids": [
+        "xiangqi-mate-in-one-0009",
+        "xiangqi-mate-in-one-0013",
+        "xiangqi-mate-in-one-0110",
+        "xiangqi-mate-in-one-0115",
+        "xiangqi-mate-in-one-0207",
+        "xiangqi-mate-in-one-0211"
+      ]
+    },
+    "h2": {
+      "config_path": "configs/h2.json",
+      "config_sha256": "978dbd86c4b2f7f580500d1b91b203948944a22eec22c9440565cc4c0cad16d4",
+      "family": "xiangqi-history",
+      "frozen_selection_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/evaluation_samples/smoke/h2.jsonl",
+      "sample_path": "samples/h2.jsonl",
+      "sample_sha256": "98a023e8a664f9659f154194bfd09729f82914160977423b12d803d2d286e6e4",
+      "selected_record_count": 6,
+      "selection_sha256": "98a023e8a664f9659f154194bfd09729f82914160977423b12d803d2d286e6e4",
+      "source_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/history/tasks.jsonl",
+      "source_sha256": "228610b9a1a5cb7e8604cd420d353d76dd30d7b3b2258bc7adc49f18e7259b74",
+      "task_ids": [
+        "xiangqi-history-0009",
+        "xiangqi-history-0012",
+        "xiangqi-history-0106",
+        "xiangqi-history-0199",
+        "xiangqi-history-r1-0013-981252a10b",
+        "xiangqi-history-r1-0032-615f0234f1"
+      ]
+    },
+    "m2": {
+      "config_path": "configs/m2.json",
+      "config_sha256": "fe853bc6aec526783ae67718f492f7ddc3a196ce82308cdbf0922a4a41749227",
+      "family": "xiangqi-multimodal",
+      "frozen_selection_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/evaluation_samples/smoke/m2.jsonl",
+      "sample_path": "samples/m2.jsonl",
+      "sample_sha256": "ddaa18fda992d4b80654bb9e0919c2e69186c3d06079606a4221846f480e4509",
+      "selected_record_count": 6,
+      "selection_sha256": "ddaa18fda992d4b80654bb9e0919c2e69186c3d06079606a4221846f480e4509",
+      "source_path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/multimodal/tasks.jsonl",
+      "source_sha256": "0efe16c4e0ca4e3a6a71642cbde392e926785ed274e5a7f5712b90b3736c405e",
+      "task_ids": [
+        "xiangqi-multimodal-m2-0009",
+        "xiangqi-multimodal-m2-0013",
+        "xiangqi-multimodal-m2-0110",
+        "xiangqi-multimodal-m2-0115",
+        "xiangqi-multimodal-m2-0207",
+        "xiangqi-multimodal-m2-0211"
+      ]
+    }
+  }
+}

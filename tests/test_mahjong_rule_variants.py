@@ -601,6 +601,8 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 "by_channel",
                 "by_reason",
                 "metrics",
+                "average_score",
+                "average_process_score",
             },
         )
         self.assertEqual(summary["total"], 1)
@@ -793,6 +795,8 @@ class MahjongRuleVariantTests(unittest.TestCase):
                 "by_channel",
                 "by_reason",
                 "metrics",
+                "average_score",
+                "average_process_score",
             },
         )
         self.assertEqual(

@@ -64,7 +64,7 @@ class MahjongCompletionTraceTests(unittest.TestCase):
                     api_key_env="TRACE_TEST_API_KEY",
                     extra_body={"enable_thinking": False},
                 )
-                agent = CoTAgent(client, ReasoningConfig(max_reasoning_tokens=1024, final_max_tokens=1024))
+                agent = CoTAgent(client, ReasoningConfig(prompt_version="v1", max_reasoning_tokens=1024, final_max_tokens=1024))
                 replies = [
                     response("Incomplete draft 1", finish_reason="length", native_reasoning="Native 1", tokens=1024),
                     response(final),
@@ -111,7 +111,15 @@ class MahjongCompletionTraceTests(unittest.TestCase):
         final = json.dumps({"winning_tiles": ["4s"], "live_winning_copies": {"4s": 4}})
         for agent_type, drafts in (
             (DirectAgent, []),
-            (TreeOfThoughtAgent, ["Candidate 1", "Candidate 2", "Candidate 3"]),
+            (TreeOfThoughtAgent, [
+                *[json.dumps({"thought": f"Candidate {i}", "state_summary": "done",
+                              "terminal": True, "proposed_answer": json.loads(final)})
+                  for i in range(1, 4)],
+                json.dumps({"evaluations": [
+                    {"node_id": f"n{i:04d}", "score": 1, "valid": True,
+                     "terminal": True, "reason": "complete"} for i in range(1, 4)
+                ]}),
+            ]),
         ):
             with self.subTest(agent=agent_type.name):
                 client = OpenAICompatibleAgent(
@@ -126,13 +134,17 @@ class MahjongCompletionTraceTests(unittest.TestCase):
                 ):
                     result = evaluate_mahjong_tasks([task], agent)[0]
                 self.assertTrue(result.success)
-                self.assertEqual(result.raw_output, final)
+                self.assertEqual(json.loads(result.raw_output), json.loads(final))
                 self.assertEqual(
                     [call["content"] for call in result.completion_traces],
                     [*drafts, final],
                 )
                 if drafts:
-                    self.assertEqual(result.reasoning_trace["candidates"], drafts)
+                    self.assertEqual(
+                        [stage["output"] for stage in result.reasoning_trace["stages"]],
+                        [*drafts, final],
+                    )
+                    self.assertEqual(result.reasoning_trace["metadata"]["search_strategy"], "beam_bfs")
 
     def test_capture_does_not_record_other_calls_and_is_restored_after_error(self):
         client = OpenAICompatibleAgent(
@@ -152,7 +164,7 @@ class MahjongCompletionTraceTests(unittest.TestCase):
             with client.capture_completion_traces() as captured:
                 self.assertEqual(client.complete("first"), "captured")
             self.assertEqual(client.complete("second"), "outside")
-            with self.assertRaisesRegex(RuntimeError, "empty message content"):
+            with self.assertRaisesRegex(RuntimeError, "truncated"):
                 with client.capture_completion_traces() as failed:
                     client.complete("third")
             self.assertEqual(client.complete("fourth"), "outside after error")

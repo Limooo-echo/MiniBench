@@ -6,10 +6,11 @@
 from __future__ import annotations
 
 from .board import Move, VariantBoard
-from .rules import PIECE_VALUE, Rule
+from .rules import PIECE_VALUE
 
 # 将杀/被将杀分值
 MATE_SCORE = 10000.0
+TIE_TOLERANCE = 1e-6
 # 局部目标达成加分
 LOCAL_GOAL_SCORE = 5000.0
 # 将军威胁惩罚 (被将军方受罚, 引导搜索主动将军/解将)
@@ -50,88 +51,142 @@ def _local_goal_bonus(board: VariantBoard, agent_side: int) -> float:
     return bonus
 
 
-def evaluate(board: VariantBoard, agent_side: int) -> float:
-    """局面评分: 红方视角 (正 = 红优), 局部目标加分对 agent 方有效.
+def _terminal_value(board: VariantBoard, side: int) -> float | None:
+    if board.find_general(1) is None:
+        return -MATE_SCORE
+    if board.find_general(-1) is None:
+        return MATE_SCORE
+    if not board.has_legal_moves(side):
+        # Xiangqi stalemate, like checkmate, loses for the side to move.
+        return -MATE_SCORE if side > 0 else MATE_SCORE
+    return None
 
-    包含将军威胁惩罚: 被将军的一方受 CHECK_PENALTY 罚分,
-    引导搜索优先将军/避免被将军.
+
+def evaluate(
+    board: VariantBoard, agent_side: int, *, side_to_move: int | None = None,
+) -> float:
+    """Red-perspective utility, with exact terminal values before heuristics.
+
+    ``side_to_move`` is essential for stalemate. Legacy direct callers default
+    to the agent's turn; search always supplies the actual side to move.
     """
+    side = agent_side if side_to_move is None else side_to_move
+    terminal = _terminal_value(board, side)
+    if terminal is not None:
+        return terminal
     score = _material_score(board)
-    # 将死判定 (红方视角: 黑被将死 = 红赢 +MATE; 红被将死 = 黑赢 -MATE)
-    if board.is_checkmate(-1):
-        score += MATE_SCORE
-    if board.is_checkmate(1):
-        score -= MATE_SCORE
-    # 将军威胁 (仅当将还存在时)
-    if board.find_general(-1) is not None and board._is_in_check(-1):
+    if board._is_in_check(-1):
         score += CHECK_PENALTY
-    if board.find_general(1) is not None and board._is_in_check(1):
+    if board._is_in_check(1):
         score -= CHECK_PENALTY
-    # 局部目标加分
-    if agent_side > 0:
-        score += _local_goal_bonus(board, agent_side)
-    else:
-        score -= _local_goal_bonus(board, agent_side)
+    score += _local_goal_bonus(board, agent_side) * (1 if agent_side > 0 else -1)
     return score
 
 
-def minimax(board: VariantBoard, depth: int, side: int, agent_side: int) -> float:
-    """深度受限 minimax (返回红方视角评分, 正 = 红优)."""
+def _ordered_moves(board: VariantBoard, side: int) -> list[Move]:
+    # Ordering only affects speed; every root receives a fresh full window.
+    return sorted(board.legal_moves(side), key=lambda move: (
+        -PIECE_VALUE.get(abs(board.board[move.tr][move.tc]), 0), move.to_uci(),
+    ))
+
+
+def _search(
+    board: VariantBoard, depth: int, side: int, agent_side: int,
+    alpha: float, beta: float, exact: dict,
+) -> float:
+    key = (tuple(map(tuple, board.board)), depth, side)
+    if key in exact:
+        return exact[key]
+    if board.find_general(1) is None:
+        return -MATE_SCORE
+    if board.find_general(-1) is None:
+        return MATE_SCORE
     if depth == 0:
-        return evaluate(board, agent_side)
-    moves = board.legal_moves(side)
+        if not board.has_legal_moves(side):
+            return -MATE_SCORE if side > 0 else MATE_SCORE
+        value = _material_score(board)
+        value += CHECK_PENALTY * (int(board._is_in_check(-1)) - int(board._is_in_check(1)))
+        value += _local_goal_bonus(board, agent_side) * (1 if agent_side > 0 else -1)
+        exact[key] = value
+        return value
+    moves = _ordered_moves(board, side)
     if not moves:
-        # 当前走棋方无合法走法: 被将死/被吃将 = 对方获胜 (红方视角)
-        if board._is_in_check(side):
-            return MATE_SCORE if side < 0 else -MATE_SCORE
-        return 0.0  # 困毙: 平局
-    best = -float("inf") if side > 0 else float("inf")
-    for mv in moves:
+        return -MATE_SCORE if side > 0 else MATE_SCORE
+    original_alpha, original_beta = alpha, beta
+    value = -float("inf") if side > 0 else float("inf")
+    for move in moves:
         trial = board.copy()
-        trial.apply(mv)
-        val = minimax(trial, depth - 1, -side, agent_side)
+        trial.apply(move)
+        child = _search(trial, depth - 1, -side, agent_side, alpha, beta, exact)
         if side > 0:
-            best = max(best, val)
+            value = max(value, child)
+            alpha = max(alpha, value)
         else:
-            best = min(best, val)
-    return best
+            value = min(value, child)
+            beta = min(beta, value)
+        if alpha >= beta:
+            break
+    # A cut-off result is a bound, not an exact utility; never reuse it as one.
+    if original_alpha < value < original_beta:
+        exact[key] = value
+    return value
+
+
+def minimax(board: VariantBoard, depth: int, side: int, agent_side: int) -> float:
+    """Exact depth-limited minimax, accelerated by alpha-beta and exact caching."""
+    if depth < 0:
+        raise ValueError("depth must be non-negative")
+    if side not in (-1, 1) or agent_side not in (-1, 1):
+        raise ValueError("side and agent_side must be 1 or -1")
+    return _search(board, depth, side, agent_side, -float("inf"), float("inf"), {})
 
 
 def score_moves(
     board: VariantBoard, side: int, depth: int, agent_side: int,
 ) -> list[tuple[Move, float]]:
-    """返回所有合法走法及其 minimax 评分 (按分数降序)."""
+    """Rank by the mover's best utility; retain Red-perspective numeric values.
+
+    Root moves are evaluated with independent full alpha-beta windows, so every
+    returned utility is exact at the requested depth, not merely a search bound.
+    """
+    if depth < 1:
+        raise ValueError("depth must be at least 1")
+    if side not in (-1, 1) or agent_side not in (-1, 1):
+        raise ValueError("side and agent_side must be 1 or -1")
     scored = []
-    for mv in board.legal_moves(side):
+    exact: dict = {}
+    for move in _ordered_moves(board, side):
         trial = board.copy()
-        trial.apply(mv)
-        val = minimax(trial, depth - 1, -side, agent_side)
-        scored.append((mv, val))
-    scored.sort(key=lambda x: x[1], reverse=True)
+        trial.apply(move)
+        value = _search(trial, depth - 1, -side, agent_side,
+                        -float("inf"), float("inf"), exact)
+        scored.append((move, value))
+    # UCI breaks exact ties deterministically; optimality uses TIE_TOLERANCE.
+    scored.sort(key=lambda item: (-side * item[1], item[0].to_uci()))
     return scored
+
+
+def best_moves(scored: list[tuple[Move, float]]) -> list[Move]:
+    """All moves tied with the already mover-sorted best value."""
+    if not scored:
+        return []
+    return [move for move, value in scored
+            if abs(value - scored[0][1]) <= TIE_TOLERANCE]
 
 
 def find_unique_best(
     board: VariantBoard, side: int, depth: int, agent_side: int,
 ) -> tuple[Move, float] | None:
-    """找唯一最优动作. 返回 (move, score) 或 None (无唯一最优)."""
     scored = score_moves(board, side, depth, agent_side)
-    if not scored:
-        return None
-    best_score = scored[0][1]
-    best_moves = [mv for mv, s in scored if abs(s - best_score) < 1e-6]
-    if len(best_moves) != 1:
-        return None
-    return best_moves[0], best_score
+    best = best_moves(scored)
+    return (best[0], scored[0][1]) if len(best) == 1 else None
 
 
 def is_blunder(board: VariantBoard, mv: Move, side: int, depth: int, agent_side: int) -> bool:
-    """走 mv 是否明显送子 (评分比最优低很多)."""
     scored = score_moves(board, side, depth, agent_side)
     if not scored:
         return True
-    best_score = scored[0][1]
-    for m, s in scored:
-        if m == mv:
-            return (best_score - s) > 4.0  # 损失超过一个兵的价值
+    for candidate, value in scored:
+        if candidate == mv:
+            return side * (scored[0][1] - value) > 4.0
     return True

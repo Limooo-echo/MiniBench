@@ -1,0 +1,46 @@
+{
+  "base_commit": "cbcc338b72973ce07c0a7efba60544a19dfe243c",
+  "github_run_id": 35424011669,
+  "github_job_id": 105847194070,
+  "github_log_url": "https://github.com/Limooo-echo/MiniBench/actions/runs/35424011669/job/105847194070",
+  "cause": "CI installed only the base project, omitting the xiangqi-generation extra and cchess==1.25.5.",
+  "github_result": {
+    "tests": 508,
+    "failures": 3,
+    "skipped": 12
+  },
+  "reproduction": {
+    "environment": "fresh Python 3.10.12 virtualenv on WSL/Linux; GitHub uses Python 3.10.20",
+    "before_targeted_tests": {
+      "tests": 3,
+      "failures": 3
+    },
+    "missing_dependency_preflight_exit": 1,
+    "fixed_workflow_install_exit": 0,
+    "fixed_workflow_preflight_exit": 0,
+    "after_full_tests": {
+      "tests": 508,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "pip_check_exit": 0
+  },
+  "changed_files": [
+    ".github/workflows/ci.yml",
+    "constraints/ci-py310.txt",
+    "README.md"
+  ],
+  "pushed": false,
+  "remote_fixed_run_verified": false,
+  "evidence": {
+    "github-failure-excerpt.txt": "630a071369646c6133b2ee0f0e8b88ee52b9df8f26c98334332c1065faa615fc",
+    "before-preflight.log": "dbad46ed71e40dd5758d37dfd4bc8298780e5465442557dde8069f7ba0bd888a",
+    "before-three-tests.log": "1bb2a6067229a36009601eced2a6e82c829b1c3d69ef412ed53ae7203d4f6d00",
+    "fixed-install.log": "a350c16fd3a419f72db5317e0345b420a3fa0020ed1934e4a57fbddc2716cbaf",
+    "after-preflight.log": "32687e0f1be2ad6317c1faae7633a55ce12732a882fddddf51be7cc389d8df3e",
+    "after-full-tests.log": "a7e41fad375884345a550e8645ed7f5086daba38c82e4208d1c9e96e730d9704",
+    "installed-package-check.log": "9261363b733079a641c2e4cc9bc46ffa1d8336945a87f807b6cf68847dbc9b09",
+    "reproduction-summary.log": "38da1325925bede4e72f9362a26a96fab796fa79946f9d455477a13c24b406bb"
+  }
+}

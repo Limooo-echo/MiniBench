@@ -1,0 +1,40 @@
+{
+  "agent": {
+    "max_tokens": 512,
+    "name": "direct"
+  },
+  "evaluation": {
+    "max_plies": 1,
+    "oracle_depth": 3
+  },
+  "provider": {
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "extra_body": {
+      "enable_thinking": false
+    },
+    "json_mode": true,
+    "max_retries": 3,
+    "model": "qwen3.8-max",
+    "name": "qwen"
+  },
+  "run": {
+    "on_existing": "error",
+    "output_dir": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/output/acceptance/xiangqi-web-prepared/c2",
+    "run_name": "results"
+  },
+  "task": {
+    "family": "xiangqi-rule-variants",
+    "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/data/xiangqi/rule_variants/tasks.jsonl",
+    "prompt_version": "xiangqi-reasoning-v2",
+    "sampling": {
+      "count": 10,
+      "enabled": false,
+      "seed": 42,
+      "strategy": "paired-stratified"
+    },
+    "selection": {
+      "path": "/mnt/c/Users/Limo/.codex/worktrees/review-xiangqi-scoring/MiniBench/output/acceptance/xiangqi-web-prepared/c2/results/selected_tasks.jsonl",
+      "sha256": "a86f811d402a45f1fdc0bd82b137f74528381414f9a7c47c95ec1f0bc929cf4f"
+    }
+  }
+}

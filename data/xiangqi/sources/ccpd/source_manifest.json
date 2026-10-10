@@ -1,0 +1,200 @@
+{
+  "repository": "https://github.com/Yvonne761/Chinese-Chess-Practical-Dataset",
+  "revision": "368a47a947773dd8692c026e286dd19b6277b993",
+  "license": "CC-BY-4.0",
+  "purpose": "Original PGNs needed to independently replay the released C2 positions",
+  "files": {
+    "Dataset/中局/00001689.pgn": {
+      "sha256": "9b51324b30e1490555ec8e0b9cd36c64a3efd9541a6392b8e2ab9f438407abab",
+      "bytes": 1713
+    },
+    "Dataset/中局/00001676.pgn": {
+      "sha256": "6d5fd68f6418c42702ccba57e82531ff7493eb4f9b91a2de8988215abfc22013",
+      "bytes": 1682
+    },
+    "Dataset/中局/00001802.pgn": {
+      "sha256": "e6470b3a9dc410a0309e9020465ded048597aceb1df947cf4be58df9ff6226d1",
+      "bytes": 931
+    },
+    "Dataset/中局/00000440.pgn": {
+      "sha256": "76724c2c8ae39779410524803cb68c4440b8df73129c040e5d77aeb7f8e555e7",
+      "bytes": 1174
+    },
+    "Dataset/中局/00001668.pgn": {
+      "sha256": "abae4b96dd714843e5da8a1ccefe3c09d2f25a6ae59702edd1fd530b053b2648",
+      "bytes": 1339
+    },
+    "Dataset/中局/00001941.pgn": {
+      "sha256": "b2747ad79cabb6a1ca81b0a6c32c9547922ec34ec2b2e20a6a6e9314bf5eedb9",
+      "bytes": 334
+    },
+    "Dataset/中局/00001678.pgn": {
+      "sha256": "4cf11cfa931b2cdf1915384d82a896dd9d2a06eebdf37c6ff47ea0c658a01802",
+      "bytes": 1719
+    },
+    "Dataset/中局/00000578.pgn": {
+      "sha256": "27bdd44b4b03ef564bc007e0f20a851370e5e803d67ccd6496f6fee4bebd42a0",
+      "bytes": 963
+    },
+    "Dataset/中局/00000211.pgn": {
+      "sha256": "8b283bde86de6521074e83f0ae99054a5e398a35fbafa97559c3f24a14f78bed",
+      "bytes": 656
+    },
+    "Dataset/中局/00000439.pgn": {
+      "sha256": "922a2c10da5bd1a78887ee2bbc5d807114887e2ce135f62633ebc433ba35118a",
+      "bytes": 716
+    },
+    "Dataset/中局/00000023.pgn": {
+      "sha256": "8e2f9eea176908396857bec8dd2c513a094af42ae50fd181ca595ccb81233404",
+      "bytes": 651
+    },
+    "Dataset/中局/00001060.pgn": {
+      "sha256": "e5f10f33976dc16cd6d5ec726366d039e48976bb84d3c95e73144f6507ae83da",
+      "bytes": 354
+    },
+    "Dataset/中局/00001688.pgn": {
+      "sha256": "2b1d3872cc9146a1836c4188db4d63df9e9cf5237751bf07be73bb75e1316001",
+      "bytes": 2764
+    },
+    "Dataset/中局/00001565.pgn": {
+      "sha256": "c2c7d8ae0bd10ed3a72f21c63b65e88b47ee429d877f46126eaf78263ae1aa82",
+      "bytes": 303
+    },
+    "Dataset/中局/00001832.pgn": {
+      "sha256": "0e1d6a52814f3ad9165af918e97db1f378be19481ba4305d29cbbfe849fdeecc",
+      "bytes": 801
+    },
+    "Dataset/中局/00001681.pgn": {
+      "sha256": "d7522e2a97a4382ccfb5d94f403c2b9b88a06e31713990c4b977d935ca26e4fc",
+      "bytes": 2564
+    },
+    "Dataset/中局/00001080.pgn": {
+      "sha256": "c65debf2a7eab75ab7e66aa70400923c596ed2c03839a8476e206e14705789c0",
+      "bytes": 327
+    },
+    "Dataset/中局/00000107.pgn": {
+      "sha256": "17abb2f4e77756361d21ad31ab3c8360ce82be8c2328639f857e5318f29d0348",
+      "bytes": 388
+    },
+    "Dataset/中局/00001999.pgn": {
+      "sha256": "3b9dba9392029e510407b3126e394de9be2a0773b91d2ee368f95edbe43135fd",
+      "bytes": 1408
+    },
+    "Dataset/中局/00001493.pgn": {
+      "sha256": "b2dcbcce97d30a91e5af4ffd07494a03f4b3788c946a93bf0338f3fe55ea1037",
+      "bytes": 364
+    },
+    "Dataset/中局/00001974.pgn": {
+      "sha256": "475133d55d293eb584639d72867882653ea247eaf7e2a93e0f4a9aac4f408f43",
+      "bytes": 762
+    },
+    "Dataset/中局/00001694.pgn": {
+      "sha256": "4c2797f7d26a3b89dfee8f144f0649f32fddacb4680cc32cf1d16edf6ddee1a9",
+      "bytes": 1472
+    },
+    "Dataset/中局/00001710.pgn": {
+      "sha256": "0e487dbddc8b50fabceb4ff108938e89648df2c7cb25fe675683e52e05f66d83",
+      "bytes": 1577
+    },
+    "Dataset/中局/00001684.pgn": {
+      "sha256": "160f0cd2208bc295504ca848b56ce1ce4c6fafd825246ebd50b5b56b7849e227",
+      "bytes": 2172
+    },
+    "Dataset/中局/00001722.pgn": {
+      "sha256": "4d7f55e722e82dcff621aed31f7a6d43c1243430bb667945375ef7e4c9e87d13",
+      "bytes": 509
+    },
+    "Dataset/中局/00001691.pgn": {
+      "sha256": "207f665d06efd6e7473aa459f7e3144af9cb295ef2534ef108d836401cc80d60",
+      "bytes": 1053
+    },
+    "Dataset/中局/00001245.pgn": {
+      "sha256": "9f2b035b03387f1a5bde88a3c9c774abc0aca6e1b42662decdba73958ebe0f2a",
+      "bytes": 346
+    },
+    "Dataset/中局/00001098.pgn": {
+      "sha256": "7c524fa50144a4945d9444399708ea5ef0e79c00c78cacaab18f98efd456f4f5",
+      "bytes": 358
+    },
+    "Dataset/中局/00001144.pgn": {
+      "sha256": "ea63d9ea01e90b6f5f562548490b5c162269b64ee002495c8e2885d927439885",
+      "bytes": 2855
+    },
+    "Dataset/中局/00000363.pgn": {
+      "sha256": "513f6f0c2f7535aa5c2c0a2a99bc27fddfee34751796a26d5ccefeb8d3aab3af",
+      "bytes": 842
+    },
+    "Dataset/中局/00001262.pgn": {
+      "sha256": "f3f8f66d0df051d79361e54c1bdeaf184757ef1df09ddd9b8eea21530e87d856",
+      "bytes": 407
+    },
+    "Dataset/中局/00001501.pgn": {
+      "sha256": "48443d0bda89c3815c8ebe1e4cdf5a94fe3f60dd659417c6e8b9d2abeeb197da",
+      "bytes": 271
+    },
+    "Dataset/中局/00001709.pgn": {
+      "sha256": "2becc72454454ae555be7595413ac33bbe36f159c1393acd9159749e2c421100",
+      "bytes": 1708
+    },
+    "Dataset/中局/00001677.pgn": {
+      "sha256": "73829656318ae99de7584dd5789c5ad80faf68bc927937e01f930542e2d32d02",
+      "bytes": 1498
+    },
+    "Dataset/中局/00000732.pgn": {
+      "sha256": "675db52f61d2c30ec980128765025c111d2ebfaa4b14aef952c492179595e34f",
+      "bytes": 547
+    },
+    "Dataset/中局/00001666.pgn": {
+      "sha256": "512af29945c18dade524ea5fc2cf45ad1d1cf84164c2940ed8d324419374f4d8",
+      "bytes": 2042
+    },
+    "Dataset/中局/00000876.pgn": {
+      "sha256": "2a60bdb766c2a705afe59f59c7b5aa60563bee484a2dcaa97350e223ed572f34",
+      "bytes": 713
+    },
+    "Dataset/中局/00001545.pgn": {
+      "sha256": "746638e9eedce01d109e67e1ccf4f64434708eb6abbaa8073240d79d25c0ba2f",
+      "bytes": 304
+    },
+    "Dataset/中局/00001734.pgn": {
+      "sha256": "864d795cbfe47798844baf3587ec26ed4e0acb98051f6e93472e5ac678c0ef44",
+      "bytes": 621
+    },
+    "Dataset/中局/00001630.pgn": {
+      "sha256": "d2aefa0233b3be3fe28cff9c6bf8fe60fd969c5805a7f421862c964d42141ecf",
+      "bytes": 398
+    },
+    "Dataset/中局/00000187.pgn": {
+      "sha256": "af9df6d3e9c7344da2f2fae887f7d65a6d601ce73c87cc34928c447cff6c377f",
+      "bytes": 976
+    },
+    "Dataset/中局/00001119.pgn": {
+      "sha256": "30cc42daa614a343e89a8e92471aaf7540ebc49009501ffe3a41db659de09df1",
+      "bytes": 296
+    },
+    "Dataset/中局/00000343.pgn": {
+      "sha256": "44a3e0665da2d59123437eaace1c22ed418b7c756f30844ee56ebf61342ae8ae",
+      "bytes": 1425
+    },
+    "Dataset/中局/00001919.pgn": {
+      "sha256": "e95bcbf7a62e1d035d4c03219205b6b09e844f2aa17d100a36e4f82916c4743b",
+      "bytes": 386
+    },
+    "Dataset/中局/00001665.pgn": {
+      "sha256": "50b15bdd785dd19a8161bba26cedd50fb35cb773aa1a70e4448a68f46f777c73",
+      "bytes": 2577
+    },
+    "Dataset/中局/00001662.pgn": {
+      "sha256": "9db521b08468c9ba45c9e2dc1ad3cbc3dd7e56c4570f237bea29f4a3e11befdf",
+      "bytes": 2285
+    },
+    "Dataset/中局/00001424.pgn": {
+      "sha256": "6a250b8492cf55b63f18c3bdca28862739b63f1b87cb3d092939c4d5d15710ad",
+      "bytes": 278
+    },
+    "Dataset/中局/00001995.pgn": {
+      "sha256": "8684e719d28bba75886dcd6b774b51c7394ff328244ea6d06e74b8f22a1ee42e",
+      "bytes": 1606
+    }
+  }
+}
