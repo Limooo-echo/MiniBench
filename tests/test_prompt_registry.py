@@ -60,8 +60,8 @@ class PromptRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             cot_prompt(task, version="v1"),
-            "TASK\n\nReason step by step about the task. End with the answer in "
-            "the required schema.",
+            "TASK\n\nReason step by step about the task. State the proposed answer at the "
+            "end in plain text; do not emit the final JSON object in this internal stage.",
         )
         self.assertEqual(
             plan_prompt(task, version="v1"),
@@ -69,13 +69,15 @@ class PromptRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             solve_with_plan_prompt(task, "PLAN", version="v1"),
-            "TASK\n\nPlan:\n\nPLAN\n\nUse the plan to solve the task. End with the "
-            "answer in the required schema.",
+            "TASK\n\nPlan:\n\nPLAN\n\nUse the plan to solve the task with substantive reasoning. "
+            "State the proposed answer at the end in plain text; do not emit the final JSON "
+            "object in this internal stage.",
         )
         self.assertEqual(
             candidate_prompt(task, 2, version="v1"),
-            "TASK\n\nGenerate candidate reasoning path 2. End with the answer in "
-            "the required schema.",
+            "TASK\n\nGenerate a distinct, substantive candidate reasoning path 2. "
+            "State its proposed answer in plain text; do not emit the final JSON "
+            "object in this internal stage.",
         )
         self.assertEqual(
             judge_prompt(task, ["A", "B"], version="v1"),

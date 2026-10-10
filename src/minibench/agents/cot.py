@@ -125,9 +125,12 @@ class CoTAgent(RuntimeBackedAgent, Agent):
         reasoning = complete_transformed_messages(
             self.runtime,
             messages,
-            transform=lambda prompt: cot_prompt(
-                prompt,
-                version=self.config.prompt_version,
+            transform=lambda prompt: (
+                "\n\n".join((prompt,
+                    "Reason step by step about the current turn. State the proposed action "
+                    "in plain text; do not emit the final JSON object in this internal stage."))
+                if self.config.prompt_version == "v1"
+                else cot_prompt(prompt, version=self.config.prompt_version)
             ),
             phase_system_prompt=self.prompt_set.reasoning_system_prompt,
             temperature=self.config.reasoning_temperature,
@@ -138,10 +141,12 @@ class CoTAgent(RuntimeBackedAgent, Agent):
         return complete_transformed_messages(
             self.runtime,
             messages,
-            transform=lambda prompt: finalize_prompt(
-                prompt,
-                reasoning,
-                version=self.config.prompt_version,
+            transform=lambda prompt: (
+                "\n\n".join((prompt, "Reasoning or draft answer:\n" + reasoning,
+                    "Convert the action to exactly one JSON object using the schema "
+                    "requested for this conversation."))
+                if self.config.prompt_version == "v1"
+                else finalize_prompt(prompt, reasoning, version=self.config.prompt_version)
             ),
             phase_system_prompt=self.prompt_set.final_answer_system_prompt,
             temperature=resolved_temperature,

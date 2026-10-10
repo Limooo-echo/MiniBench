@@ -239,7 +239,19 @@ def _mahjong(record: dict, task: dict | None, dimension: str) -> dict:
             return _unavailable(record, "missing_expected_winning_tiles", y)
         predicted_set = {x for x in predicted if isinstance(x, str)}
         truth_set = set(truth)
-        y = float(predicted_set == truth_set)
+        if parsed_task is None:
+            # Retain strict set-answer validation even without the original hand.
+            from minibench.datasets.mahjong.api import normalize_tile
+            valid_tiles = all(isinstance(x, str) for x in predicted)
+            if valid_tiles:
+                try:
+                    normalized = [normalize_tile(x) for x in predicted]
+                except ValueError:
+                    valid_tiles = False
+                else:
+                    valid_tiles = len(normalized) == len(set(normalized))
+            y = float(valid_tiles and predicted_set == truth_set
+                      and not (set(parsed) - {"winning_tiles"}))
         return _result(record, y, _counter_f1(Counter(predicted_set), Counter(truth_set)),
                        evidence={"method": "winning_tile_set_f1", "predicted": sorted(predicted_set),
                                  "expected": sorted(truth_set)})

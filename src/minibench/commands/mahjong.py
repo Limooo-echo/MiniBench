@@ -8,7 +8,6 @@ from time import strftime
 from typing import Any
 
 from minibench.commands.common import (
-    ENV_AGENT_CHOICES,
     STATIC_GENERATIVE_AGENT_CHOICES,
     _add_provider_args,
     _add_run_args,
@@ -127,23 +126,18 @@ def _cmd_generate_mahjong_static(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_generate_mahjong_visual(args: argparse.Namespace) -> int:
-    from minibench.datasets.mahjong.generation import generate_mahjong_visual_tasks
+def _cmd_render_mahjong_visual(args: argparse.Namespace) -> int:
+    from minibench.datasets.mahjong.generation import render_mahjong_visual_tasks
 
     try:
-        summary = generate_mahjong_visual_tasks(
+        summary = render_mahjong_visual_tasks(
+            tasks_path=args.tasks,
             output=args.output,
             render_dir=args.render_dir,
-            count_per_type=args.count_per_type,
-            visible_count=args.visible_count or (10, 20),
-            table_columns=args.table_columns,
-            seed=args.seed,
-            prefix=args.prefix,
-            max_attempts=args.max_attempts,
             overwrite=args.overwrite,
         )
     except (RuntimeError, ValueError) as exc:
-        raise SystemExit(f"mahjong visual task generation failed: {exc}") from exc
+        raise SystemExit(f"mahjong visual rendering failed: {exc}") from exc
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     return 0
 
@@ -206,10 +200,6 @@ def _cmd_evaluate_mahjong_solo(args: argparse.Namespace) -> int:
         results = evaluate_mahjong_solo_tasks(
             tasks,
             agent,
-            move_scorer=args.move_scorer,
-            mahjong_ai_command=args.mahjong_ai_command,
-            mahjong_ai_mode=args.mahjong_ai_mode,
-            mahjong_ai_timeout=args.mahjong_ai_timeout,
             observation_mode=args.observation_mode,
             show_progress=args.progress,
             on_result=checkpoint,
@@ -346,37 +336,6 @@ def _cmd_evaluate_mahjong_rules(args: argparse.Namespace) -> int:
     return 0 if summary["success"] == summary["total"] else 1
 
 
-def _cmd_evaluate_mahjong_riichi(args: argparse.Namespace) -> int:
-    from minibench.datasets.mahjong_riichi.dataset import load_mahjong_riichi_tasks
-    from minibench.datasets.mahjong_riichi.evaluation import (
-        evaluate_mahjong_riichi_tasks,
-        summarize_mahjong_riichi,
-        write_mahjong_riichi_run,
-    )
-    from minibench.datasets.mahjong_riichi.prompting import MAHJONG_RIICHI_SYSTEM_PROMPT
-
-    tasks = load_mahjong_riichi_tasks(args.mahjong_riichi_tasks)
-    tasks = _select_tasks(tasks, args.task_id)
-    if args.limit is not None:
-        tasks = tasks[: args.limit]
-    try:
-        agent = _make_cli_agent(args, system_prompt=MAHJONG_RIICHI_SYSTEM_PROMPT)
-        results = evaluate_mahjong_riichi_tasks(
-            tasks,
-            agent,
-            opponent=args.riichi_opponent,
-            mahjong_ai_command=args.mahjong_ai_command,
-            mahjong_ai_mode=args.mahjong_ai_mode,
-            mahjong_ai_timeout=args.mahjong_ai_timeout,
-        )
-    except (KeyError, RuntimeError, ValueError) as exc:
-        raise SystemExit(f"mahjong riichi evaluation failed: {exc}") from exc
-    run_dir = write_mahjong_riichi_run(results, args.output_dir, args.run_name)
-    summary = summarize_mahjong_riichi(results)
-    print(json.dumps({"run_dir": str(run_dir), **summary}, indent=2, ensure_ascii=False))
-    return 0 if summary["success"] == summary["total"] else 1
-
-
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     evaluate_mahjong = subparsers.add_parser(
         "evaluate-mahjong",
@@ -430,10 +389,10 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     generate_mahjong_static.add_argument(
         "--count",
         type=int,
-        default=60,
+        default=90,
         help=(
-            "Total number of tasks, balanced across easy/hard and "
-            "winning_tiles/max_wait_discard."
+            "Total number of tasks, balanced across the four original static "
+            "groups and two Easy groups with 12 public visible tiles."
         ),
     )
     generate_mahjong_static.add_argument("--seed", type=int, default=20260807)
@@ -441,31 +400,25 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     generate_mahjong_static.add_argument("--max-attempts", type=int, default=None)
     generate_mahjong_static.add_argument("--overwrite", action="store_true")
     generate_mahjong_static.set_defaults(func=_cmd_generate_mahjong_static)
-    generate_mahjong_visual = subparsers.add_parser(
-        "generate-mahjong-visual",
-        help="Generate visual waiting-tile and maximum-ukeire Mahjong tasks.",
+
+    render_mahjong_visual = subparsers.add_parser(
+        "render-mahjong-visual",
+        help="Render an image-only mirror of existing static Mahjong tasks.",
     )
-    generate_mahjong_visual.add_argument(
+    render_mahjong_visual.add_argument(
+        "--tasks",
+        type=Path,
+        default=Path("data/mahjong/tasks.jsonl"),
+    )
+    render_mahjong_visual.add_argument(
         "--output",
         type=Path,
         default=Path("data/mahjong/visual_tasks.jsonl"),
     )
-    generate_mahjong_visual.add_argument("--render-dir", type=Path, default=None)
-    generate_mahjong_visual.add_argument("--count-per-type", type=int, default=15)
-    generate_mahjong_visual.add_argument(
-        "--visible-count",
-        type=int,
-        action="append",
-        default=None,
-        metavar="COUNT",
-        help="Repeat for multiple public-table tile counts; defaults to 10 and 20.",
-    )
-    generate_mahjong_visual.add_argument("--table-columns", type=int, default=6)
-    generate_mahjong_visual.add_argument("--seed", type=int, default=20260803)
-    generate_mahjong_visual.add_argument("--prefix", default="mj-visual")
-    generate_mahjong_visual.add_argument("--max-attempts", type=int, default=None)
-    generate_mahjong_visual.add_argument("--overwrite", action="store_true")
-    generate_mahjong_visual.set_defaults(func=_cmd_generate_mahjong_visual)
+    render_mahjong_visual.add_argument("--render-dir", type=Path, default=None)
+    render_mahjong_visual.add_argument("--overwrite", action="store_true")
+    render_mahjong_visual.set_defaults(func=_cmd_render_mahjong_visual)
+
     generate_mahjong_solo = subparsers.add_parser(
         "generate-mahjong-solo",
         help="Generate single-player Riichi Mahjong draw-discard tasks.",
@@ -536,15 +489,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default="passthrough",
     )
     evaluate_mahjong_solo.add_argument(
-        "--move-scorer",
-        choices=["none", "shanten", "akochan-choice"],
-        default="shanten",
-        help=(
-            "Per-discard scoring mode. shanten uses local shanten/ukeire scoring; "
-            "akochan-choice compares each discard with an external Akochan wrapper choice."
-        ),
-    )
-    evaluate_mahjong_solo.add_argument(
         "--observation-mode",
         choices=["full-hand", "history-only"],
         default="full-hand",
@@ -552,26 +496,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
             "full-hand shows the current hand; history-only shows the initial "
             "deal and completed draw-discard history."
         ),
-    )
-    evaluate_mahjong_solo.add_argument(
-        "--mahjong-ai-command",
-        default=None,
-        help=(
-            "Command for --move-scorer akochan-choice. Also supports "
-            "MAHJONG_AI_COMMAND."
-        ),
-    )
-    evaluate_mahjong_solo.add_argument(
-        "--mahjong-ai-mode",
-        choices=["stdio", "oneshot"],
-        default="stdio",
-        help="stdio keeps one wrapper process; oneshot starts one process per decision.",
-    )
-    evaluate_mahjong_solo.add_argument(
-        "--mahjong-ai-timeout",
-        type=float,
-        default=30.0,
-        help="Timeout in seconds for each external Mahjong AI scoring decision.",
     )
     evaluate_mahjong_solo.add_argument(
         "--progress",
@@ -631,53 +555,3 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     _add_provider_args(evaluate_mahjong_rules, max_tokens=256)
     _add_run_args(evaluate_mahjong_rules)
     evaluate_mahjong_rules.set_defaults(func=_cmd_evaluate_mahjong_rules)
-    evaluate_mahjong_riichi = subparsers.add_parser(
-        "evaluate-mahjong-riichi",
-        help="Run local four-player Riichi Mahjong v1 evaluation.",
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--mahjong-riichi-tasks",
-        type=Path,
-        default=None,
-        help=(
-            "Path to Riichi Mahjong tasks JSONL. Defaults to "
-            "data/mahjong_riichi/tasks.jsonl."
-        ),
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--agent",
-        choices=ENV_AGENT_CHOICES,
-        default="passthrough",
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--riichi-opponent",
-        choices=["shanten", "external"],
-        default="shanten",
-        help=(
-            "Opponent controller for non-agent seats. shanten uses the local "
-            "baseline bot; external calls a real Mahjong AI wrapper process."
-        ),
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--mahjong-ai-command",
-        default=None,
-        help=(
-            "Command for the external Mahjong AI wrapper. Also supports "
-            "MAHJONG_AI_COMMAND."
-        ),
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--mahjong-ai-mode",
-        choices=["stdio", "oneshot"],
-        default="stdio",
-        help="stdio keeps one wrapper process per opponent seat; oneshot starts one per decision.",
-    )
-    evaluate_mahjong_riichi.add_argument(
-        "--mahjong-ai-timeout",
-        type=float,
-        default=30.0,
-        help="Timeout in seconds for each external Mahjong AI decision.",
-    )
-    _add_provider_args(evaluate_mahjong_riichi, max_tokens=256)
-    _add_run_args(evaluate_mahjong_riichi)
-    evaluate_mahjong_riichi.set_defaults(func=_cmd_evaluate_mahjong_riichi)

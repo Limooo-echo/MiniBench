@@ -1,19 +1,44 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 from time import strftime
 from typing import Any
 
-from minibench.core.agent import Agent
+from minibench.core.agent import Agent, ChatMessage
+from minibench.core.metrics import (
+    finish_task_metrics,
+    start_task_metrics,
+    summarize_metrics,
+)
 from minibench.datasets.mahjong.api import normalize_tile
-from minibench.datasets.mahjong_solo.evaluation import extract_mahjong_solo_action
-from minibench.datasets.mahjong_solo.prompting import MAHJONG_SOLO_OBSERVATION_MODES
+from minibench.datasets.mahjong.evaluation import MahjongPublicTaskContext, run_mahjong_generation
+from minibench.datasets.mahjong_solo.evaluation import (
+    _episode_process_fields,
+    _summarize_process_scores,
+    _action_history_content,
+    _evaluation_coverage,
+    _read_generation_trace,
+    _summarize_action_retry_metrics,
+    _valid_evaluation_results,
+    extract_mahjong_solo_action,
+    generate_mahjong_history_action,
+)
+from minibench.datasets.mahjong_solo.prompting import (
+    MAHJONG_SOLO_OBSERVATION_MODES,
+    build_mahjong_solo_history_turn_prompt,
+)
+from minibench.datasets.mahjong_solo.shanten_strategy import (
+    evaluate_shanten_discard_strategy,
+    mean_episode_shanten_discard_rate,
+)
 from minibench.datasets.mahjong_rule_variants.dataset import MahjongRuleVariantTask
 from minibench.datasets.mahjong_rule_variants.prompting import (
     build_mahjong_rule_variant_prompt,
+    rule_texts_for_channel,
 )
 from minibench.datasets.mahjong_rule_variants.rules import (
     STANDARD_RULES,
@@ -32,8 +57,8 @@ class MahjongRuleVariantInstanceResult:
     channel: str
     active_rules: tuple[str, ...]
     observation_mode: str
-    success: bool
-    score: float
+    success: bool | None
+    score: float | None
     win_rule: str | None
     variant_only_win: bool
     variant_only_tsumo_draws: list[int]
@@ -41,12 +66,21 @@ class MahjongRuleVariantInstanceResult:
     draws: list[str]
     discards: list[str]
     raw_outputs: list[str]
+    first_attempt_outputs: list[str | None]
+    shanten_optimal_steps: list[dict[str, Any]]
+    shanten_optimal_hit_count: int
+    shanten_assessed_step_count: int
+    shanten_optimal_discard_rate: float | None
+    reasoning_traces: list[dict[str, Any] | None]
+    conversation: list[ChatMessage]
     agent_actions: list[dict[str, Any]]
     action_errors: list[dict[str, Any]]
     final_hand: list[str]
     reasons: list[str]
     tags: tuple[str, ...]
-    process_score: float = 0.0
+    metrics: dict[str, object]
+    evaluation_status: str = "completed"
+    process_score: float | None = None
     correct_steps: int = 0
     total_steps: int = 0
     step_scores: list[dict[str, Any]] = field(default_factory=list)
@@ -63,13 +97,9 @@ def evaluate_mahjong_rule_variant_tasks(
     _validate_observation_mode(observation_mode)
     results: list[MahjongRuleVariantInstanceResult] = []
     total = len(tasks)
+    if show_progress:
+        print(f"[mahjong-rules] total={total} completed=0 success=0", flush=True)
     for index, task in enumerate(tasks, start=1):
-        if show_progress:
-            print(
-                f"[mahjong-rules] {index}/{total} {task.source_task_id} "
-                f"({task.channel})",
-                flush=True,
-            )
         result = evaluate_mahjong_rule_variant_task(
             task,
             agent,
@@ -78,6 +108,14 @@ def evaluate_mahjong_rule_variant_tasks(
         results.append(result)
         if on_result is not None:
             on_result(results)
+        if show_progress:
+            success_count = sum(bool(item.success) for item in results)
+            coverage = _evaluation_coverage(results, total)
+            print(
+                f"[mahjong-rules] completed={coverage['evaluated_total']}/{total} "
+                f"success={success_count} api_errors={coverage['api_error_total']}",
+                flush=True,
+            )
     return results
 
 
@@ -88,10 +126,18 @@ def evaluate_mahjong_rule_variant_task(
     observation_mode: str = "full-hand",
 ) -> MahjongRuleVariantInstanceResult:
     _validate_observation_mode(observation_mode)
+    metrics_start = start_task_metrics(agent)
+    public_context = MahjongPublicTaskContext(
+        task_id=task.id,
+        family="mahjong_rule_variants",
+    )
     hand = list(task.initial_hand)
     draws: list[str] = []
     discards: list[str] = []
     raw_outputs: list[str] = []
+    first_attempt_outputs: list[str | None] = []
+    reasoning_traces: list[dict[str, Any] | None] = []
+    conversation: list[ChatMessage] = []
     agent_actions: list[dict[str, Any]] = []
     action_errors: list[dict[str, Any]] = []
     prior_turns: list[tuple[str, str]] = []
@@ -102,6 +148,7 @@ def evaluate_mahjong_rule_variant_task(
     for draw_number, drawn_tile in enumerate(task.wall[: task.max_draws], start=1):
         hand.append(drawn_tile)
         draws.append(drawn_tile)
+        first_attempt_outputs.append(None)
         channel_win = is_rule_variant_winning_hand(hand, task.channel)
         standard_win = is_standard_winning_hand(hand)
         if channel_win and not standard_win:
@@ -113,21 +160,44 @@ def evaluate_mahjong_rule_variant_task(
         turn_completed = False
         last_error = "action_attempts_exhausted"
         for attempt_number in range(1, MAX_ACTION_ATTEMPTS + 1):
-            prompt = build_mahjong_rule_variant_prompt(
-                task,
-                draw_number=draw_number,
-                drawn_tile=drawn_tile,
-                hand=hand,
-                discards=discards,
-                remaining_draws=task.max_draws - draw_number,
-                observation_mode=observation_mode,
-                prior_turns=tuple(prior_turns),
-                attempt_number=attempt_number,
-                max_attempts=MAX_ACTION_ATTEMPTS,
-                action_feedback=tuple(action_feedback),
-            )
+            if observation_mode == "history-only":
+                prompt = build_mahjong_solo_history_turn_prompt(
+                    task,
+                    draw_number=draw_number,
+                    drawn_tile=drawn_tile,
+                    previous_discard=(prior_turns[-1][1] if prior_turns else None),
+                    remaining_draws=task.max_draws - draw_number,
+                    attempt_number=attempt_number,
+                    max_attempts=MAX_ACTION_ATTEMPTS,
+                    action_feedback=tuple(action_feedback),
+                    rule_texts=rule_texts_for_channel(task.channel),
+                )
+                conversation.append({"role": "user", "content": prompt})
+            else:
+                prompt = build_mahjong_rule_variant_prompt(
+                    task,
+                    draw_number=draw_number,
+                    drawn_tile=drawn_tile,
+                    hand=hand,
+                    discards=discards,
+                    remaining_draws=task.max_draws - draw_number,
+                    observation_mode=observation_mode,
+                    prior_turns=tuple(prior_turns),
+                    attempt_number=attempt_number,
+                    max_attempts=MAX_ACTION_ATTEMPTS,
+                    action_feedback=tuple(action_feedback),
+                )
             try:
-                raw_output = agent.generate(prompt, task)
+                if observation_mode == "history-only":
+                    raw_output = generate_mahjong_history_action(
+                        agent,
+                        tuple(conversation),
+                        public_context,
+                    )
+                else:
+                    raw_output = run_mahjong_generation(
+                        agent, lambda: agent.generate(prompt, public_context)
+                    )
             except RuntimeError as exc:
                 error_detail = str(exc)
                 action_errors.append(
@@ -149,13 +219,24 @@ def evaluate_mahjong_rule_variant_task(
                     draws=draws,
                     discards=discards,
                     raw_outputs=raw_outputs,
+                    first_attempt_outputs=first_attempt_outputs,
+                    reasoning_traces=reasoning_traces,
+                    conversation=conversation,
                     agent_actions=agent_actions,
                     action_errors=action_errors,
                     final_hand=hand,
                     reasons=reasons,
+                    metrics=finish_task_metrics(agent, metrics_start),
                 )
             raw_outputs.append(raw_output)
+            if attempt_number == 1:
+                first_attempt_outputs[-1] = raw_output
+            reasoning_traces.append(_read_generation_trace(agent))
             action = extract_mahjong_rule_variant_action(raw_output)
+            if observation_mode == "history-only":
+                conversation.append({
+                    "role": "assistant", "content": _action_history_content(action)
+                })
 
             if action is None:
                 last_error = "no_json_action_extracted"
@@ -176,10 +257,14 @@ def evaluate_mahjong_rule_variant_task(
                             draws=draws,
                             discards=discards,
                             raw_outputs=raw_outputs,
+                            first_attempt_outputs=first_attempt_outputs,
+                            reasoning_traces=reasoning_traces,
+                            conversation=conversation,
                             agent_actions=agent_actions,
                             action_errors=action_errors,
                             final_hand=hand,
                             reasons=reasons,
+                            metrics=finish_task_metrics(agent, metrics_start),
                         )
                     last_error = f"illegal_tsumo_at_draw_{draw_number}"
                 elif action_name != "discard":
@@ -230,10 +315,14 @@ def evaluate_mahjong_rule_variant_task(
         draws=draws,
         discards=discards,
         raw_outputs=raw_outputs,
+        first_attempt_outputs=first_attempt_outputs,
+        reasoning_traces=reasoning_traces,
+        conversation=conversation,
         agent_actions=agent_actions,
         action_errors=action_errors,
         final_hand=hand,
         reasons=reasons,
+        metrics=finish_task_metrics(agent, metrics_start),
     )
 
 
@@ -252,10 +341,15 @@ def summarize_mahjong_rule_variants(
     planned = total if planned_total is None else planned_total
     if planned < total:
         raise ValueError("planned_total cannot be smaller than completed results")
-    success = sum(result.success for result in results)
+    valid_results = _valid_evaluation_results(results)
+    coverage = _evaluation_coverage(results, planned)
+    evaluated_total = len(valid_results)
+    if run_status == "completed" and coverage["api_error_total"]:
+        run_status = "completed_with_api_errors"
+    success = sum(bool(result.success) for result in valid_results)
     illegal_tsumo_total = sum(
         1
-        for result in results
+        for result in valid_results
         for action_error in result.action_errors
         if str(action_error.get("error", "")).startswith("illegal_tsumo_at_draw_")
     )
@@ -271,6 +365,8 @@ def summarize_mahjong_rule_variants(
             {
                 "active_rules": list(result.active_rules),
                 "total": 0,
+                "evaluated_total": 0,
+                "api_error_total": 0,
                 "success": 0,
                 "success_rate": 0.0,
                 "variant_only_wins": 0,
@@ -283,6 +379,10 @@ def summarize_mahjong_rule_variants(
                 f"channel {result.channel!r} has inconsistent active_rules"
             )
         channel_summary["total"] += 1
+        if not _valid_evaluation_results([result]):
+            channel_summary["api_error_total"] += 1
+            continue
+        channel_summary["evaluated_total"] += 1
         channel_summary["success"] += int(result.success)
         channel_summary["variant_only_wins"] += int(result.variant_only_win)
         channel_summary["added_win_opportunity_draws"] += len(
@@ -292,28 +392,45 @@ def summarize_mahjong_rule_variants(
             result.blocked_standard_tsumo_draws
         )
 
-    for channel_summary in by_channel.values():
-        channel_total = channel_summary["total"]
+    for channel, channel_summary in by_channel.items():
+        channel_total = channel_summary["evaluated_total"]
         channel_summary["success_rate"] = (
-            channel_summary["success"] / channel_total if channel_total else 0.0
+            channel_summary["success"] / channel_total if channel_total else None
+        )
+        channel_summary["evaluation_coverage"] = channel_total / channel_summary["total"]
+        channel_summary.update(_summarize_process_scores(
+            [result for result in valid_results if result.channel == channel]
+        ))
+        channel_summary["shanten_optimal_discard_rate"] = (
+            mean_episode_shanten_discard_rate(
+                [result for result in valid_results if result.channel == channel]
+            )
+        )
+        channel_summary.update(
+            _summarize_action_retry_metrics(
+                [result for result in results if result.channel == channel]
+            )
         )
 
     summary = {
         "total": total,
         "success": success,
-        "success_rate": success / total if total else 0.0,
-        "average_score": sum(result.score for result in results) / total if total else 0.0,
-        "average_process_score": sum(result.process_score for result in results) / total if total else 0.0,
+        "success_rate": success / evaluated_total if evaluated_total else None,
+        **_summarize_process_scores(valid_results),
+        **coverage,
         "illegal_tsumo_total": illegal_tsumo_total,
+        "shanten_optimal_discard_rate": mean_episode_shanten_discard_rate(valid_results),
+        **_summarize_action_retry_metrics(results),
         "by_channel": by_channel,
         "by_reason": by_reason,
+        "metrics": summarize_metrics(results),
     }
     if planned_total is not None or run_status != "completed" or error is not None:
         summary.update(
             {
                 "planned_total": planned,
-                "completed_total": total,
-                "remaining_total": planned - total,
+                "completed_total": evaluated_total,
+                "remaining_total": planned - evaluated_total,
                 "run_status": run_status,
             }
         )
@@ -346,15 +463,26 @@ def write_mahjong_rule_variant_run(
                         "channel": result.channel,
                         "active_rules": result.active_rules,
                         "observation_mode": result.observation_mode,
-                        "raw_outputs": result.raw_outputs,
-                        "agent_actions": result.agent_actions,
-                        "action_errors": result.action_errors,
+                        "evaluation_status": result.evaluation_status,
+                        "success": result.success,
+                        "score": result.score,
                         "process_score": result.process_score,
                         "correct_steps": result.correct_steps,
                         "total_steps": result.total_steps,
                         "step_scores": result.step_scores,
+                        "raw_outputs": result.raw_outputs,
+                        "first_attempt_outputs": result.first_attempt_outputs,
+                        "shanten_optimal_steps": result.shanten_optimal_steps,
+                        "shanten_optimal_hit_count": result.shanten_optimal_hit_count,
+                        "shanten_assessed_step_count": result.shanten_assessed_step_count,
+                        "shanten_optimal_discard_rate": result.shanten_optimal_discard_rate,
+                        "reasoning_traces": result.reasoning_traces,
+                        "conversation": result.conversation,
+                        "agent_actions": result.agent_actions,
+                        "action_errors": result.action_errors,
                         "win_rule": result.win_rule,
                         "variant_only_win": result.variant_only_win,
+                        "metrics": result.metrics,
                     },
                     ensure_ascii=False,
                 )
@@ -387,25 +515,36 @@ def _make_result(
     draws: list[str],
     discards: list[str],
     raw_outputs: list[str],
+    first_attempt_outputs: list[str | None],
+    reasoning_traces: list[dict[str, Any] | None],
+    conversation: list[ChatMessage],
     agent_actions: list[dict[str, Any]],
     action_errors: list[dict[str, Any]],
     final_hand: list[str],
     reasons: list[str],
+    metrics: dict[str, object],
 ) -> MahjongRuleVariantInstanceResult:
-    from minibench.datasets.mahjong_solo.oracle import score_episode
-    process = score_episode(task, raw_outputs, channel=task.channel)
+    api_error = any(item.get("error") == "agent_request_error" for item in action_errors)
+    process = _episode_process_fields(task, raw_outputs, api_error, task.channel)
+    strategy = evaluate_shanten_discard_strategy(
+        task.initial_hand,
+        draws,
+        discards,
+        first_attempt_outputs,
+        task.channel,
+        lambda hand: is_rule_variant_winning_hand(hand, task.channel),
+        extract_mahjong_rule_variant_action,
+    )
     return MahjongRuleVariantInstanceResult(
         task_id=task.id,
         source_task_id=task.source_task_id,
         channel=task.channel,
         active_rules=task.active_rules,
         observation_mode=observation_mode,
-        success=success,
-        score=1.0 if success else process["process_score"],
-        process_score=process["process_score"],
-        correct_steps=process["correct_steps"],
-        total_steps=process["total_steps"],
-        step_scores=process["steps"],
+        success=None if api_error else success,
+        score=None if api_error else (1.0 if success else process["process_score"]),
+        **process,
+        evaluation_status="api_error" if api_error else "completed",
         win_rule=win_rule,
         variant_only_win=(
             success and task.channel != STANDARD_RULES and win_rule == task.channel
@@ -415,11 +554,16 @@ def _make_result(
         draws=list(draws),
         discards=list(discards),
         raw_outputs=list(raw_outputs),
+        first_attempt_outputs=list(first_attempt_outputs),
+        **strategy,
+        reasoning_traces=deepcopy(reasoning_traces),
+        conversation=list(conversation),
         agent_actions=list(agent_actions),
         action_errors=list(action_errors),
         final_hand=list(final_hand),
         reasons=list(reasons),
         tags=task.tags,
+        metrics=metrics,
     )
 
 
@@ -433,7 +577,11 @@ def _validate_observation_mode(observation_mode: str) -> None:
 
 def _action_error_feedback(error: str) -> str:
     if error == "no_json_action_extracted":
-        return "The previous response was not a parseable action JSON object."
+        return (
+            "The previous response was not a valid action JSON object. "
+            "Use only action for tsumo, or action and tile for discard; "
+            "do not add other fields."
+        )
     if error.startswith("illegal_tsumo_at_draw_"):
         return (
             "The previous tsumo declaration was illegal: the current 14 tiles "

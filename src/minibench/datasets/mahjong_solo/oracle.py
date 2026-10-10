@@ -23,6 +23,11 @@ from minibench.datasets.mahjong_rule_variants.rules import (
 def _winning_subset(pool: tuple[int, ...], required: int, channel: str) -> bool:
     """Does the pool contain a legal winning hand using the final drawn tile?"""
     rules = rules_for_channel(channel)
+    if rules.cyclic_one_tile_substitution:
+        translated = list(pool)
+        translated[0], translated[9], translated[18] = pool[18], pool[0], pool[9]
+        pool = tuple(translated)
+        required = {18: 0, 0: 9, 9: 18}.get(required, required)
     wildcard = 33 if rules.red_dragon_is_wildcard else None
     wilds = pool[33] if wildcard is not None else 0
     real = list(pool)
@@ -89,35 +94,27 @@ def _winning_subset(pool: tuple[int, ...], required: int, channel: str) -> bool:
         if tile != wildcard:
             pair_options.update(physical_options((tile, tile)))
             meld_options.update((option, None) for option in physical_options((tile,) * 3))
-    for pattern in _sequence_patterns(rules.allow_cyclic_sequences):
-        tag = (tuple(sorted(i % 9 for i in pattern)), pattern[0] // 9)
-        meld_options.update((option, tag) for option in physical_options(pattern))
+    for pattern in _sequence_patterns():
+        meld_options.update((option, None) for option in physical_options(pattern))
     # Canonical order removes permutations of the four melds.
     melds = sorted(meld_options, key=repr)
 
     @lru_cache(maxsize=None)
     def complete(counts: tuple[int, ...], start: int, needed: int,
-                 used_required: bool, sequences: tuple) -> bool:
+                 used_required: bool) -> bool:
         if needed == 0:
             return used_required
         if sum(counts) < 3 * needed:
             return False
         for position in range(start, len(melds)):
-            option, tag = melds[position]
+            option, _ = melds[position]
             if any(counts[i] < amount for i, amount in option):
-                continue
-            if (rules.forbid_cross_suit_duplicate_sequences and tag is not None
-                    and any(signature == tag[0] and suit != tag[1]
-                            for signature, suit in sequences)):
                 continue
             remaining = list(counts)
             for tile, amount in option:
                 remaining[tile] -= amount
-            next_sequences = sequences
-            if rules.forbid_cross_suit_duplicate_sequences and tag is not None:
-                next_sequences = tuple(sorted(set((*sequences, tag))))
             if complete(tuple(remaining), position, needed - 1,
-                        used_required or any(i == required for i, _ in option), next_sequences):
+                        used_required or any(i == required for i, _ in option)):
                 return True
         return False
 
@@ -125,7 +122,7 @@ def _winning_subset(pool: tuple[int, ...], required: int, channel: str) -> bool:
         remaining = list(pool)
         for tile, amount in option:
             remaining[tile] -= amount
-        if complete(tuple(remaining), 0, 4, any(i == required for i, _ in option), ()):
+        if complete(tuple(remaining), 0, 4, any(i == required for i, _ in option)):
             return True
     return False
 

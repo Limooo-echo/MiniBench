@@ -3,20 +3,33 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 import random
+from typing import Any
 
+HandCalculator: Any
+HandConfig: Any
+Meld: Any
+OptionalRules: Any
+Shanten: Any
+_MAHJONG_IMPORT_ERROR: ImportError | None
 try:
-    from mahjong.hand_calculating.hand import HandCalculator
-    from mahjong.hand_calculating.hand_config import HandConfig, OptionalRules
-    from mahjong.meld import Meld
-    from mahjong.shanten import Shanten
+    from mahjong.hand_calculating.hand import HandCalculator as _HandCalculator
+    from mahjong.hand_calculating.hand_config import HandConfig as _HandConfig
+    from mahjong.hand_calculating.hand_config import OptionalRules as _OptionalRules
+    from mahjong.meld import Meld as _Meld
+    from mahjong.shanten import Shanten as _Shanten
 except ImportError as exc:  # pragma: no cover - exercised only without dependency.
-    HandCalculator = None  # type: ignore[assignment]
-    HandConfig = None  # type: ignore[assignment]
-    Meld = None  # type: ignore[assignment]
-    OptionalRules = None  # type: ignore[assignment]
-    Shanten = None  # type: ignore[assignment]
+    HandCalculator = None
+    HandConfig = None
+    Meld = None
+    OptionalRules = None
+    Shanten = None
     _MAHJONG_IMPORT_ERROR = exc
 else:
+    HandCalculator = _HandCalculator
+    HandConfig = _HandConfig
+    Meld = _Meld
+    OptionalRules = _OptionalRules
+    Shanten = _Shanten
     _MAHJONG_IMPORT_ERROR = None
 
 
@@ -145,7 +158,7 @@ def full_tile_wall() -> list[str]:
 def deal_table(seed: int) -> tuple[list[list[str]], list[str]]:
     wall = full_tile_wall()
     random.Random(seed).shuffle(wall)
-    hands = [[] for _seat in range(4)]
+    hands: list[list[str]] = [[] for _seat in range(4)]
     for _round in range(13):
         for seat in range(4):
             hands[seat].append(wall.pop(0))
@@ -260,6 +273,7 @@ def live_wait_counts(
     visible_tiles: list[str] | tuple[str, ...] = (),
     *,
     additional_visible: list[str] | tuple[str, ...] = (),
+    include_zero: bool = False,
 ) -> dict[str, int]:
     """Return each structural wait and the number of unseen copies remaining."""
 
@@ -276,7 +290,7 @@ def live_wait_counts(
     return {
         tile: 4 - known_counts[tile]
         for tile in winning_tiles(normalized)
-        if known_counts[tile] < 4
+        if include_zero or known_counts[tile] < 4
     }
 
 
@@ -369,7 +383,7 @@ def score_closed_hand(
         "han": result.han,
         "fu": result.fu,
         "cost": result.cost,
-        "yaku": [str(yaku) for yaku in result.yaku],
+        "yaku": [str(yaku) for yaku in (result.yaku or [])],
     }
 
 
@@ -377,12 +391,12 @@ def _build_meld_objects(
     melds: Sequence[Mapping[str, object]],
     normalized_tiles: list[str],
     tiles_136: list[int],
-) -> tuple[list[object], set[int]]:
+) -> tuple[list[Any], set[int]]:
     pools: dict[str, list[int]] = defaultdict(list)
     for tile, tile_id in zip(normalized_tiles, tiles_136):
         pools[tile].append(tile_id)
 
-    meld_objects: list[object] = []
+    meld_objects: list[Any] = []
     used: set[int] = set()
     for meld in melds:
         meld_type = meld.get("type") or meld.get("action")
@@ -438,7 +452,7 @@ def _choose_win_tile_id(
     return tiles_136[normalized_tiles.index(win_tile)]
 
 
-def _optional_int(value: object) -> int | None:
+def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)

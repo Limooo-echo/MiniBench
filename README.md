@@ -1,6 +1,6 @@
 # MiniBench 0.2.0
 
-MiniBench 是一个用统一 YAML、统一 agent/provider 接口和统一结果格式评测推理模型的小型基准。当前包含 Zebra 逻辑题、象棋、一笔画、麻将与四人立直麻将。
+MiniBench 是一个用统一 YAML、统一 agent/provider 接口和统一结果格式评测推理模型的小型基准。当前包含 Zebra 逻辑题、象棋、一笔画与麻将。
 
 本 README 以 **WSL 2 + Ubuntu 22.04 + Python 3.10** 为标准环境。进入 Ubuntu 后，下面所有安装、配置、运行和排错命令都在 WSL 终端执行。
 
@@ -372,23 +372,37 @@ CoT/ToT 等 phase-aware 包装器会在中间轮使用轻量消息调用，只�
 
 ### 4.4 麻将
 
+合并兼容说明：当前麻将 CoT 配置显式使用 `prompt_version: v1`，沿用本地已验证的内部推理提示词及 history-only 的 current-turn 包装；推理阶段不要求只输出任务 JSON。`samples` 已移除（新配置校验不接受 CoT 中无效的采样参数），原有温度和 token 上限保持不变。麻将评测使用原有三次动作尝试，关闭 runtime 的额外格式修复，避免首次回答指标被隐式修复改变；内部阶段输出按轮保存。非空截断推理仍进入 final，并保留 `finish_reason`。
+
+main 的新 ToT 是 beam/BFS 搜索，使用 `prompt_version: v2` 及 `max_depth`、`branching_factor`、`beam_width`，不再是旧版三个候选再选择；旧 ToT 成绩不能当成新版 ToT 成绩混合汇总。要切换为新 ToT，请同时修改 `name` 和 `prompt_version`，并使用新的实验目录。
+
 | 配置 | 内容 |
 | --- | --- |
 | `mahjong.yaml` | 静态牌型文本推理 |
-| `mahjong_rule_variants.yaml` | 全手牌规则适应，默认扩展全部规则通道 |
-| `mahjong_riichi.yaml` | 本地四人立直麻将；默认其余座位使用 shanten bot |
-| `mahjong_multimodal.yaml` | 牌面图片输入，默认 Qwen |
-| `mahjong_multimodal_ablation.yaml` | 同题 text/image 配对消融，默认 Qwen |
+| `mahjong_solo.yaml` | 标准规则下的 full-hand 单人摸弃决策 |
+| `mahjong_rule_variants.yaml` | 全手牌规则适应，默认运行两种规则叠加的通道；可通过 evaluation.rule_channels 选择通道 |
+| `mahjong_history_only.yaml` | 标准规则下的在线多轮 history-only 决策 |
+| `mahjong_multimodal.yaml` | 静态 90 题的一一对应图片版本，仅运行 image，默认 Qwen |
 
 ```bash
 minibench run-config config/experiments/mahjong.yaml
+minibench run-config config/experiments/mahjong_solo.yaml
 minibench run-config config/experiments/mahjong_rule_variants.yaml
-minibench run-config config/experiments/mahjong_riichi.yaml
+minibench run-config config/experiments/mahjong_history_only.yaml
 minibench run-config config/experiments/mahjong_multimodal.yaml
-minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
 ```
 
-麻将视觉图片来自仓库内牌面素材与确定性 Pillow 渲染器。更换 Qwen provider/agent 不会改变牌局数据、答案或评分逻辑。
+麻将 history-only 只在第一轮提供初始手牌，后续只提供新摸牌和环境已接受的历史弃牌。由于每轮弃牌都是正式计分决策，每轮都以 `final` 阶段调用 agent；兼容仅实现旧 `generate_messages()` 接口的自定义 agent。
+
+麻将视觉图片来自仓库内牌面素材与确定性 Pillow 渲染器。视觉数据逐题复用静态麻将的 ID、手牌、公开牌、目标和标准答案，仅把牌码输入转换成图片。重新渲染使用：
+
+```bash
+minibench render-mahjong-visual \
+  --tasks data/mahjong/tasks.jsonl \
+  --output data/mahjong/visual_tasks.jsonl \
+  --render-dir data/mahjong/visual_tasks_visual \
+  --overwrite
+```
 
 ## 5. 如何切换 agent 架构
 
@@ -604,7 +618,7 @@ minibench run-config tmp/configs/mahjong-agent.yaml
 
 ### 6.1 推荐的主实验
 
-五份正式视觉配置已经使用 Qwen：
+四份正式视觉配置已经使用 Qwen：
 
 ```bash
 export DASHSCOPE_API_KEY
@@ -613,14 +627,13 @@ minibench run-config config/experiments/xiangqi_multimodal.yaml
 minibench run-config config/experiments/one_stroke_multimodal.yaml
 minibench run-config config/experiments/one_stroke_multimodal_ablation.yaml
 minibench run-config config/experiments/mahjong_multimodal.yaml
-minibench run-config config/experiments/mahjong_multimodal_ablation.yaml
 ```
 
 其中：
 
 - 象棋运行 `text`、`chinese-piece-image`、`latin-piece-image`。
 - 一笔画 multimodal 正式运行 `image`，消融运行 `text`、`image`。
-- 麻将正式运行 `image`，消融运行 `text`、`image`。
+- 麻将正式运行 `image`，配对文字输入使用 `mahjong.yaml` 的同源静态题。
 
 配对消融应让同一个 Qwen 模型同时跑文本和图片，才能把差异主要归因于输入模态，而不是模型能力差异。
 

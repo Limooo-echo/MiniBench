@@ -5,7 +5,7 @@ import random
 import unittest
 
 from minibench.datasets.mahjong_rule_variants.rules import (
-    RULE_CHANNELS, STANDARD_RULES, CYCLIC_SEQUENCES,
+    RULE_CHANNELS, STANDARD_RULES, CYCLIC_ONE_TILE_SUBSTITUTION,
     is_rule_variant_winning_hand,
 )
 from minibench.datasets.mahjong_solo.dataset import mahjong_solo_task_from_dict
@@ -64,7 +64,7 @@ class MahjongOracleTests(unittest.TestCase):
             extra = "5m" if hand.count("5m") < 4 else "6m"
             hand.append(extra)
             for wall in ((removed,), ("8p", removed)):
-                for channel in RULE_CHANNELS:
+                for channel in (STANDARD_RULES, *RULE_CHANNELS):
                     with self.subTest(hand=hand, wall=wall, channel=channel):
                         answers, best = brute_actions(hand, wall, channel)
                         actual = optimal_actions(hand, wall, channel=channel)
@@ -108,9 +108,9 @@ class MahjongOracleTests(unittest.TestCase):
         self.assertEqual((result["process_score"], result["total_steps"]), (0, 0))
 
     def test_variant_adapter_uses_active_rules_and_recomputes_outcome(self):
-        hand = "8m 9m 1m 2p 3p 4p 5s 6s 7s E E E N".split()
+        hand = "1s 2m 3m 2p 3p 4p 5s 6s 7s E E E N".split()
         task = {"id": "rule", "initial_hand": hand, "wall": ["N"], "max_draws": 1,
-                "channel": CYCLIC_SEQUENCES}
+                "channel": CYCLIC_ONE_TILE_SUBSTITUTION}
         result = score_record("mahjong_rule_variants", "R", {"success": False,
             "raw_outputs": [json.dumps({"action": "tsumo"})]}, task, mode="full-hand")
         self.assertEqual((result["y"], result["p"]), (1, 1))

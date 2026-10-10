@@ -171,7 +171,7 @@ experiments:
   dimension: D
   dataset:
     path: ../../data/mahjong/tasks.jsonl
-    sha256: d7a49a933e7037bc99ced084d622ab251dce8cf57bb7467a855df11ddda9a52b
+    sha256: f2903f75b25438b8e75ec4316564a5203e277f0089ef2e51a9a1c339ed5d28c2
   protocol:
     version: existing-task-protocol-v1
     evaluation: {}
@@ -204,7 +204,7 @@ experiments:
   dimension: V
   dataset:
     path: ../../data/mahjong/visual_tasks.jsonl
-    sha256: 9348aaa2b1d0e12e4b933efdf5367bb0e5840dd0fdfc490bb106deffb8fc18de
+    sha256: b939e02d9f96ee899207884515d423c15d59f5bcacc5ea70a93a681bb281413d
   protocol:
     version: existing-task-protocol-v1
     evaluation:

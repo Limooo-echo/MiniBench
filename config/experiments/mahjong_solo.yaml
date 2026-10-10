@@ -1,0 +1,32 @@
+task:
+  # 标准麻将 Solo：不展开任何改规则通道
+  family: mahjong_solo
+  path: data/mahjong_solo/tasks_win.jsonl
+  limit: null
+  task_ids: []
+
+agent:
+  name: cot
+  prompt_version: v1
+  max_format_repairs: 0
+  reasoning_temperature: 0.0
+  final_temperature: 0.0
+  max_reasoning_tokens: 2048
+
+provider:
+  name: deepseek
+  model: deepseek-v4-flash
+  json_mode: true
+  max_tokens: 512
+  timeout: 120
+  extra_body:
+    thinking:
+      type: disabled
+
+evaluation:
+  observation_mode: full-hand
+  show_progress: true
+
+run:
+  output_dir: runs
+  run_name: mahjong-solo-cot-full-hand-2048-new1

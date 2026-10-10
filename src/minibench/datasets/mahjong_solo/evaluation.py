@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 import re
-from statistics import mean, median
 from time import strftime
 from typing import Any
 
-from minibench.core.agent import Agent
+from minibench.core.agent import Agent, ChatMessage
 from minibench.core.metrics import (
     finish_task_metrics,
     start_task_metrics,
@@ -18,23 +17,25 @@ from minibench.core.metrics import (
     summary_metrics_line,
 )
 from minibench.datasets.mahjong.api import (
-    calculate_shanten,
-    index_to_tile,
     is_winning_hand,
     normalize_tile,
     score_closed_hand,
     tile_to_index,
 )
-from minibench.datasets.mahjong_riichi.ai import (
-    ExternalMahjongAI,
-    MahjongAIError,
-    make_external_mahjong_ai,
+from minibench.datasets.mahjong.evaluation import (
+    MahjongPublicTaskContext, read_mahjong_generation_trace, run_mahjong_generation,
 )
 from minibench.datasets.mahjong_solo.dataset import MahjongSoloTask
 from minibench.datasets.mahjong_solo.prompting import (
     MAHJONG_SOLO_OBSERVATION_MODES,
+    build_mahjong_solo_history_turn_prompt,
     build_mahjong_solo_prompt,
 )
+from minibench.datasets.mahjong_solo.shanten_strategy import (
+    evaluate_shanten_discard_strategy,
+    mean_episode_shanten_discard_rate,
+)
+from minibench.datasets.mahjong_rule_variants.rules import STANDARD_RULES
 
 
 MAX_ACTION_ATTEMPTS = 3
@@ -44,41 +45,72 @@ MAX_ACTION_ATTEMPTS = 3
 class MahjongSoloInstanceResult:
     task_id: str
     observation_mode: str
-    success: bool
-    score: float
-    move_average_score: float | None
-    move_median_score: float | None
+    success: bool | None
+    score: float | None
     draws: list[str]
     discards: list[str]
     raw_outputs: list[str]
+    first_attempt_outputs: list[str | None]
+    shanten_optimal_steps: list[dict[str, Any]]
+    shanten_optimal_hit_count: int
+    shanten_assessed_step_count: int
+    shanten_optimal_discard_rate: float | None
+    reasoning_traces: list[dict[str, Any] | None]
+    conversation: list[ChatMessage]
     agent_actions: list[dict[str, Any]]
     action_errors: list[dict[str, Any]]
-    move_scores: list[dict[str, Any]]
     final_hand: list[str]
     win_score: dict[str, Any] | None
     reasons: list[str]
     tags: tuple[str, ...]
     metrics: dict[str, object]
-    process_score: float = 0.0
+    evaluation_status: str = "completed"
+    process_score: float | None = None
     correct_steps: int = 0
     total_steps: int = 0
     step_scores: list[dict[str, Any]] = field(default_factory=list)
+
+
+def generate_mahjong_history_action(
+    agent: Agent,
+    messages: tuple[ChatMessage, ...],
+    task_context: Any,
+) -> str:
+    """Generate one scored Mahjong action from a persistent chat history."""
+
+    phase_generate = getattr(agent, "generate_messages_for_phase", None)
+    if callable(phase_generate):
+        output = run_mahjong_generation(
+            agent,
+            lambda: phase_generate(messages, task_context, phase="final", json_mode=True),
+        )
+        if not isinstance(output, str):
+            raise TypeError("Agent message generation must return a string")
+        return output
+    generate_messages = getattr(agent, "generate_messages", None)
+    if callable(generate_messages):
+        output = run_mahjong_generation(
+            agent,
+            lambda: generate_messages(messages, task_context, json_mode=True),
+        )
+        if not isinstance(output, str):
+            raise TypeError("Agent message generation must return a string")
+        return output
+    raise ValueError(
+        "Mahjong history-only evaluation requires an agent with "
+        "generate_messages_for_phase() or generate_messages(); use "
+        "direct, cot, or a message-aware test agent"
+    )
 
 
 def evaluate_mahjong_solo_tasks(
     tasks: list[MahjongSoloTask],
     agent: Agent,
     *,
-    move_scorer: str = "shanten",
-    mahjong_ai_command: str | None = None,
-    mahjong_ai_mode: str = "stdio",
-    mahjong_ai_timeout: float = 30.0,
     observation_mode: str = "full-hand",
     show_progress: bool = False,
     on_result: Callable[[list[MahjongSoloInstanceResult]], None] | None = None,
 ) -> list[MahjongSoloInstanceResult]:
-    if move_scorer not in {"none", "shanten", "akochan-choice"}:
-        raise ValueError("move_scorer must be one of: none, shanten, akochan-choice")
     if observation_mode not in MAHJONG_SOLO_OBSERVATION_MODES:
         raise ValueError(
             "observation_mode must be one of: "
@@ -86,30 +118,25 @@ def evaluate_mahjong_solo_tasks(
         )
     results: list[MahjongSoloInstanceResult] = []
     total = len(tasks)
-    external_ai: ExternalMahjongAI | None = None
-    try:
-        if move_scorer == "akochan-choice":
-            external_ai = make_external_mahjong_ai(
-                mahjong_ai_command,
-                mode=mahjong_ai_mode,
-                timeout=mahjong_ai_timeout,
+    if show_progress:
+        print(f"[mahjong-solo] total={total} completed=0 success=0", flush=True)
+    for index, task in enumerate(tasks, start=1):
+        result = evaluate_mahjong_solo_task(
+            task,
+            agent,
+            observation_mode=observation_mode,
+        )
+        results.append(result)
+        if on_result is not None:
+            on_result(results)
+        if show_progress:
+            success_count = sum(bool(item.success) for item in results)
+            coverage = _evaluation_coverage(results, total)
+            print(
+                f"[mahjong-solo] completed={coverage['evaluated_total']}/{total} "
+                f"success={success_count} api_errors={coverage['api_error_total']}",
+                flush=True,
             )
-        for index, task in enumerate(tasks, start=1):
-            if show_progress:
-                print(f"[mahjong-solo] {index}/{total} {task.id}", flush=True)
-            result = evaluate_mahjong_solo_task(
-                task,
-                agent,
-                move_scorer=move_scorer,
-                external_ai=external_ai,
-                observation_mode=observation_mode,
-            )
-            results.append(result)
-            if on_result is not None:
-                on_result(results)
-    finally:
-        if external_ai is not None:
-            external_ai.close()
     return results
 
 
@@ -117,34 +144,35 @@ def evaluate_mahjong_solo_task(
     task: MahjongSoloTask,
     agent: Agent,
     *,
-    move_scorer: str = "shanten",
-    external_ai: ExternalMahjongAI | None = None,
     observation_mode: str = "full-hand",
 ) -> MahjongSoloInstanceResult:
-    if move_scorer not in {"none", "shanten", "akochan-choice"}:
-        raise ValueError("move_scorer must be one of: none, shanten, akochan-choice")
     if observation_mode not in MAHJONG_SOLO_OBSERVATION_MODES:
         raise ValueError(
             "observation_mode must be one of: "
             + ", ".join(MAHJONG_SOLO_OBSERVATION_MODES)
         )
     metrics_start = start_task_metrics(agent)
+    public_context = MahjongPublicTaskContext(
+        task_id=task.id,
+        family="mahjong_solo",
+    )
     hand = list(task.initial_hand)
     draws: list[str] = []
     discards: list[str] = []
     raw_outputs: list[str] = []
+    first_attempt_outputs: list[str | None] = []
+    reasoning_traces: list[dict[str, Any] | None] = []
+    conversation: list[ChatMessage] = []
     agent_actions: list[dict[str, Any]] = []
     action_errors: list[dict[str, Any]] = []
-    move_scores: list[dict[str, Any]] = []
     prior_turns: list[tuple[str, str]] = []
     reasons: list[str] = []
     win_score: dict[str, Any] | None = None
-    mjai_events = _initial_mjai_events(task)
 
     for draw_number, drawn_tile in enumerate(task.wall[: task.max_draws], start=1):
         hand.append(drawn_tile)
         draws.append(drawn_tile)
-        mjai_events.append({"type": "tsumo", "actor": 0, "pai": drawn_tile})
+        first_attempt_outputs.append(None)
         current_is_win = is_winning_hand(hand)
         current_win_score = _score_tsumo(task, hand, drawn_tile) if current_is_win else None
         action_feedback: list[str] = []
@@ -152,22 +180,80 @@ def evaluate_mahjong_solo_task(
         last_error = "action_attempts_exhausted"
 
         for attempt_number in range(1, MAX_ACTION_ATTEMPTS + 1):
-            prompt = build_mahjong_solo_prompt(
-                task,
-                draw_number=draw_number,
-                drawn_tile=drawn_tile,
-                hand=hand,
-                discards=discards,
-                remaining_draws=task.max_draws - draw_number,
-                observation_mode=observation_mode,
-                prior_turns=tuple(prior_turns),
-                attempt_number=attempt_number,
-                max_attempts=MAX_ACTION_ATTEMPTS,
-                action_feedback=tuple(action_feedback),
-            )
-            raw_output = agent.generate(prompt, task)
+            if observation_mode == "history-only":
+                prompt = build_mahjong_solo_history_turn_prompt(
+                    task,
+                    draw_number=draw_number,
+                    drawn_tile=drawn_tile,
+                    previous_discard=(prior_turns[-1][1] if prior_turns else None),
+                    remaining_draws=task.max_draws - draw_number,
+                    attempt_number=attempt_number,
+                    max_attempts=MAX_ACTION_ATTEMPTS,
+                    action_feedback=tuple(action_feedback),
+                )
+                conversation.append({"role": "user", "content": prompt})
+            else:
+                prompt = build_mahjong_solo_prompt(
+                    task,
+                    draw_number=draw_number,
+                    drawn_tile=drawn_tile,
+                    hand=hand,
+                    discards=discards,
+                    remaining_draws=task.max_draws - draw_number,
+                    observation_mode=observation_mode,
+                    prior_turns=tuple(prior_turns),
+                    attempt_number=attempt_number,
+                    max_attempts=MAX_ACTION_ATTEMPTS,
+                    action_feedback=tuple(action_feedback),
+                )
+            try:
+                if observation_mode == "history-only":
+                    raw_output = generate_mahjong_history_action(
+                        agent,
+                        tuple(conversation),
+                        public_context,
+                    )
+                else:
+                    raw_output = run_mahjong_generation(
+                        agent, lambda: agent.generate(prompt, public_context)
+                    )
+            except RuntimeError as exc:
+                error_detail = str(exc)
+                action_errors.append(
+                    {
+                        "draw_number": draw_number,
+                        "attempt": attempt_number,
+                        "error": "agent_request_error",
+                        "feedback": error_detail,
+                    }
+                )
+                reasons.append(f"agent_request_error:{error_detail}")
+                return _make_result(
+                    task,
+                    observation_mode=observation_mode,
+                    success=False,
+                    draws=draws,
+                    discards=discards,
+                    raw_outputs=raw_outputs,
+                    first_attempt_outputs=first_attempt_outputs,
+                    reasoning_traces=reasoning_traces,
+                    conversation=conversation,
+                    agent_actions=agent_actions,
+                    action_errors=action_errors,
+                    final_hand=hand,
+                    win_score=win_score,
+                    reasons=reasons,
+                    metrics=finish_task_metrics(agent, metrics_start),
+                )
             raw_outputs.append(raw_output)
+            if attempt_number == 1:
+                first_attempt_outputs[-1] = raw_output
+            reasoning_traces.append(_read_generation_trace(agent))
             action = extract_mahjong_solo_action(raw_output)
+            if observation_mode == "history-only":
+                conversation.append({
+                    "role": "assistant", "content": _action_history_content(action)
+                })
 
             if action is None:
                 last_error = "no_json_action_extracted"
@@ -185,9 +271,11 @@ def evaluate_mahjong_solo_task(
                             draws=draws,
                             discards=discards,
                             raw_outputs=raw_outputs,
+                            first_attempt_outputs=first_attempt_outputs,
+                            reasoning_traces=reasoning_traces,
+                            conversation=conversation,
                             agent_actions=agent_actions,
                             action_errors=action_errors,
-                            move_scores=move_scores,
                             final_hand=hand,
                             win_score=win_score,
                             reasons=reasons,
@@ -209,48 +297,9 @@ def evaluate_mahjong_solo_task(
                             if discard not in hand:
                                 last_error = f"discard_not_in_hand:{discard}"
                             else:
-                                if move_scorer == "shanten":
-                                    move_scores.append(
-                                        score_discard_move(hand, discard, discards)
-                                    )
-                                elif move_scorer == "akochan-choice":
-                                    if external_ai is None:
-                                        reasons.append(
-                                            "akochan_choice_scorer_not_configured"
-                                        )
-                                    else:
-                                        try:
-                                            move_scores.append(
-                                                score_discard_move_with_akochan_choice(
-                                                    task,
-                                                    hand=hand,
-                                                    discard=discard,
-                                                    discards=discards,
-                                                    draw_number=draw_number,
-                                                    drawn_tile=drawn_tile,
-                                                    mjai_events=mjai_events,
-                                                    external_ai=external_ai,
-                                                    remaining_draws=(
-                                                        task.max_draws - draw_number
-                                                    ),
-                                                )
-                                            )
-                                        except MahjongAIError as exc:
-                                            reasons.append(
-                                                "akochan_choice_error_at_draw_"
-                                                f"{draw_number}:{exc}"
-                                            )
                                 hand.remove(discard)
                                 discards.append(discard)
                                 prior_turns.append((drawn_tile, discard))
-                                mjai_events.append(
-                                    {
-                                        "type": "dahai",
-                                        "actor": 0,
-                                        "pai": discard,
-                                        "tsumogiri": discard == drawn_tile,
-                                    }
-                                )
                                 turn_completed = True
                                 break
 
@@ -277,113 +326,16 @@ def evaluate_mahjong_solo_task(
         draws=draws,
         discards=discards,
         raw_outputs=raw_outputs,
+        first_attempt_outputs=first_attempt_outputs,
+        reasoning_traces=reasoning_traces,
+        conversation=conversation,
         agent_actions=agent_actions,
         action_errors=action_errors,
-        move_scores=move_scores,
         final_hand=hand,
         win_score=win_score,
         reasons=reasons,
         metrics=finish_task_metrics(agent, metrics_start),
     )
-
-
-def score_discard_move(
-    hand: list[str],
-    discard: str,
-    previous_discards: list[str] | None = None,
-) -> dict[str, Any]:
-    previous_discards = previous_discards or []
-    visible_tiles = [*hand, *previous_discards]
-    candidates = []
-    for candidate in sorted(set(hand), key=tile_to_index):
-        remaining = list(hand)
-        remaining.remove(candidate)
-        shanten = calculate_shanten(remaining)
-        ukeire = _ukeire_count(remaining, visible_tiles, shanten)
-        candidates.append(
-            {
-                "discard": candidate,
-                "after_shanten": shanten,
-                "ukeire": ukeire,
-            }
-        )
-
-    best_shanten = min(int(item["after_shanten"]) for item in candidates)
-    best_ukeire = max(
-        int(item["ukeire"]) for item in candidates
-        if int(item["after_shanten"]) == best_shanten
-    )
-    best_discards = [
-        str(item["discard"]) for item in candidates
-        if int(item["after_shanten"]) == best_shanten and int(item["ukeire"]) == best_ukeire
-    ]
-    chosen = next(item for item in candidates if item["discard"] == discard)
-    chosen_shanten = int(chosen["after_shanten"])
-    chosen_ukeire = int(chosen["ukeire"])
-    shanten_loss = max(0, chosen_shanten - best_shanten)
-    ukeire_loss = (
-        max(0, best_ukeire - chosen_ukeire)
-        if chosen_shanten == best_shanten
-        else best_ukeire
-    )
-    move_score = _move_score_from_metrics(
-        chosen_shanten=chosen_shanten,
-        best_shanten=best_shanten,
-        chosen_ukeire=chosen_ukeire,
-        best_ukeire=best_ukeire,
-    )
-    return {
-        "discard": discard,
-        "move_score": move_score,
-        "after_shanten": chosen_shanten,
-        "after_ukeire": chosen_ukeire,
-        "best_discards": best_discards,
-        "best_shanten": best_shanten,
-        "best_ukeire": best_ukeire,
-        "shanten_loss": shanten_loss,
-        "ukeire_loss": ukeire_loss,
-    }
-
-
-def score_discard_move_with_akochan_choice(
-    task: MahjongSoloTask,
-    *,
-    hand: list[str],
-    discard: str,
-    discards: list[str],
-    draw_number: int,
-    drawn_tile: str,
-    mjai_events: list[dict[str, object]],
-    external_ai: ExternalMahjongAI,
-    remaining_draws: int,
-) -> dict[str, Any]:
-    shanten_score = score_discard_move(hand, discard, discards)
-    request = _build_akochan_choice_request(
-        task,
-        hand=hand,
-        discards=discards,
-        draw_number=draw_number,
-        drawn_tile=drawn_tile,
-        mjai_events=mjai_events,
-        remaining_draws=remaining_draws,
-    )
-    response = external_ai.choose(request)
-    action = _normalize_external_action(response.action)
-    akochan_discard = action.get("tile") or action.get("discard")
-    matched = action.get("action") in {"discard", "riichi"} and akochan_discard == discard
-    result = dict(shanten_score)
-    result.update(
-        {
-            "scorer": "akochan-choice",
-            "move_score": 1.0 if matched else 0.0,
-            "matched_akochan": matched,
-            "akochan_action": action,
-            "akochan_discard": akochan_discard,
-            "akochan_raw_output": response.raw_output,
-            "shanten_move_score": shanten_score["move_score"],
-        }
-    )
-    return result
 
 
 def extract_mahjong_solo_action(output: str) -> dict[str, Any] | None:
@@ -393,8 +345,12 @@ def extract_mahjong_solo_action(output: str) -> dict[str, Any] | None:
     action = payload.get("action")
     if not isinstance(action, str):
         return None
-    parsed: dict[str, Any] = {"action": action.strip().lower()}
-    tile = payload.get("tile") or payload.get("discard")
+    action = action.strip().lower()
+    allowed_fields = {"action"} if action == "tsumo" else {"action", "tile"}
+    if set(payload) - allowed_fields:
+        return None
+    parsed: dict[str, Any] = {"action": action}
+    tile = payload.get("tile")
     if isinstance(tile, str):
         try:
             parsed["tile"] = normalize_tile(tile)
@@ -403,19 +359,108 @@ def extract_mahjong_solo_action(output: str) -> dict[str, Any] | None:
     return parsed
 
 
-def _normalize_external_action(action: dict[str, object]) -> dict[str, Any]:
-    normalized = dict(action)
-    action_name = normalized.get("action")
-    if isinstance(action_name, str):
-        normalized["action"] = action_name.lower()
-    tile = normalized.get("tile") or normalized.get("discard")
-    if isinstance(tile, str):
-        try:
-            normalized["tile"] = normalize_tile(tile)
-            normalized["discard"] = normalize_tile(tile)
-        except ValueError:
-            pass
-    return normalized
+def _action_history_content(action: dict[str, Any] | None) -> str:
+    """Keep only protocol actions in history, never rejected notes or prose."""
+    if action is not None:
+        if action.get("action") == "tsumo":
+            return json.dumps({"action": "tsumo"})
+        if action.get("action") == "discard" and isinstance(action.get("tile"), str):
+            try:
+                tile = normalize_tile(action["tile"])
+            except ValueError:
+                pass
+            else:
+                return json.dumps({"action": "discard", "tile": tile})
+    return "{}"
+
+
+def _valid_evaluation_results(results: list[Any]) -> list[Any]:
+    return [
+        result for result in results
+        if getattr(result, "evaluation_status", "completed") != "api_error"
+        and not any(
+            item.get("error") == "agent_request_error"
+            for item in result.action_errors
+        )
+    ]
+
+
+def _evaluation_coverage(
+    results: list[Any], planned_total: int | None = None,
+) -> dict[str, int | float]:
+    evaluated = len(_valid_evaluation_results(results))
+    planned = len(results) if planned_total is None else planned_total
+    return {
+        "evaluated_total": evaluated,
+        "api_error_total": len(results) - evaluated,
+        "evaluation_coverage": evaluated / planned if planned else 0.0,
+    }
+
+
+def _summarize_action_retry_metrics(results: list[Any]) -> dict[str, float | None]:
+    results = _valid_evaluation_results(results)
+    total = len(results)
+    action_attempt_total = sum(len(result.raw_outputs) for result in results)
+    illegal_tsumo_total = 0
+    illegal_discard_total = 0
+    returned_first_attempt_total = 0
+    legal_first_attempt_total = 0
+
+    for result in results:
+        request_error_draws = {
+            int(action_error["draw_number"])
+            for action_error in result.action_errors
+            if action_error.get("attempt") == 1
+            and action_error.get("error") == "agent_request_error"
+        }
+        first_attempt_errors = [
+            action_error
+            for action_error in result.action_errors
+            if action_error.get("attempt") == 1
+            and action_error.get("error") != "agent_request_error"
+        ]
+        returned_first_attempts = len(result.draws) - len(request_error_draws)
+        returned_first_attempt_total += returned_first_attempts
+        legal_first_attempt_total += returned_first_attempts - len(
+            first_attempt_errors
+        )
+
+        for action_error in result.action_errors:
+            error_name = str(action_error.get("error", ""))
+            if error_name.startswith("illegal_tsumo_at_draw_"):
+                illegal_tsumo_total += 1
+            if error_name in {"missing_discard_tile", "invalid_discard_tile"} or (
+                error_name.startswith("discard_not_in_hand:")
+            ):
+                illegal_discard_total += 1
+
+    strict_success = sum(
+        1 for result in results if result.success and not result.action_errors
+    )
+    retry_corrected_success = sum(
+        1 for result in results if result.success and result.action_errors
+    )
+    return {
+        "strict_first_attempt_success": strict_success / total if total else None,
+        "illegal_tsumo_rate": (
+            illegal_tsumo_total / action_attempt_total
+            if action_attempt_total
+            else None
+        ),
+        "illegal_discard_rate": (
+            illegal_discard_total / action_attempt_total
+            if action_attempt_total
+            else None
+        ),
+        "retry_corrected_success": (
+            retry_corrected_success / total if total else None
+        ),
+        "first_attempt_legal_action_rate": (
+            legal_first_attempt_total / returned_first_attempt_total
+            if returned_first_attempt_total
+            else None
+        ),
+    }
 
 
 def summarize_mahjong_solo(
@@ -429,33 +474,25 @@ def summarize_mahjong_solo(
     planned = total if planned_total is None else planned_total
     if planned < total:
         raise ValueError("planned_total cannot be smaller than completed results")
-    success_count = sum(1 for result in results if result.success)
+    valid_results = _valid_evaluation_results(results)
+    coverage = _evaluation_coverage(results, planned)
+    evaluated_total = len(valid_results)
+    if run_status == "completed" and coverage["api_error_total"]:
+        run_status = "completed_with_api_errors"
+    success_count = sum(1 for result in valid_results if result.success)
     illegal_tsumo_total = sum(
         1
-        for result in results
+        for result in valid_results
         for action_error in result.action_errors
         if str(action_error.get("error", "")).startswith("illegal_tsumo_at_draw_")
     )
-    all_move_scores = [
-        float(move["move_score"])
-        for result in results
-        for move in result.move_scores
-        if isinstance(move.get("move_score"), (int, float))
-    ]
-    by_tag: dict[str, dict[str, int | float]] = {}
-    for result in results:
-        for tag in result.tags:
-            item = by_tag.setdefault(tag, {"total": 0, "success": 0, "success_rate": 0.0})
-            item["total"] = int(item["total"]) + 1
-            item["success"] = int(item["success"]) + int(result.success)
-    for item in by_tag.values():
-        item["success_rate"] = int(item["success"]) / int(item["total"])
     summary = {
         "total": total,
         "planned_total": planned,
-        "completed_total": total,
-        "remaining_total": planned - total,
+        "completed_total": evaluated_total,
+        "remaining_total": planned - evaluated_total,
         "run_status": run_status,
+        **coverage,
         "observation_mode": (
             results[0].observation_mode
             if results
@@ -466,13 +503,11 @@ def summarize_mahjong_solo(
             else "mixed"
         ),
         "success": success_count,
-        "success_rate": success_count / total if total else 0.0,
-        "average_score": mean(result.score for result in results) if results else 0.0,
-        "average_process_score": mean(result.process_score for result in results) if results else 0.0,
+        "success_rate": success_count / evaluated_total if evaluated_total else None,
+        **_summarize_process_scores(valid_results),
         "illegal_tsumo_total": illegal_tsumo_total,
-        "move_scored_total": sum(1 for result in results if result.move_scores),
-        "per_move_average_score": mean(all_move_scores) if all_move_scores else None,
-        "by_tag": by_tag,
+        "shanten_optimal_discard_rate": mean_episode_shanten_discard_rate(valid_results),
+        **_summarize_action_retry_metrics(results),
         "metrics": summarize_metrics(results),
     }
     if error is not None:
@@ -508,16 +543,17 @@ def write_mahjong_solo_run(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    score = summary["per_move_average_score"]
-    score_text = f"{score:.3f}" if isinstance(score, float) else "n/a"
+    success_rate_text = (
+        f"{summary['success_rate']:.3f}"
+        if summary["success_rate"] is not None else "n/a"
+    )
     (run_dir / "summary.txt").write_text(
         f"run_status={summary['run_status']} "
         f"planned={summary['planned_total']} "
         f"completed={summary['completed_total']} "
         f"remaining={summary['remaining_total']}\n"
         f"total={summary['total']} success={summary['success']} "
-        f"success_rate={summary['success_rate']:.3f} "
-        f"per_move_average_score={score_text}\n"
+        f"success_rate={success_rate_text}\n"
         + (f"error={error}\n" if error is not None else "")
         + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
@@ -533,40 +569,76 @@ def _make_result(
     draws: list[str],
     discards: list[str],
     raw_outputs: list[str],
+    first_attempt_outputs: list[str | None],
+    reasoning_traces: list[dict[str, Any] | None],
+    conversation: list[ChatMessage],
     agent_actions: list[dict[str, Any]],
     action_errors: list[dict[str, Any]],
-    move_scores: list[dict[str, Any]],
     final_hand: list[str],
     win_score: dict[str, Any] | None,
     reasons: list[str],
     metrics: dict[str, object],
 ) -> MahjongSoloInstanceResult:
-    from minibench.datasets.mahjong_solo.oracle import score_episode
-    process = score_episode(task, raw_outputs)
-    move_values = [float(item["move_score"]) for item in move_scores]
+    api_error = any(item.get("error") == "agent_request_error" for item in action_errors)
+    process = _episode_process_fields(task, raw_outputs, api_error, STANDARD_RULES)
+    strategy = evaluate_shanten_discard_strategy(
+        task.initial_hand,
+        draws,
+        discards,
+        first_attempt_outputs,
+        STANDARD_RULES,
+        is_winning_hand,
+        extract_mahjong_solo_action,
+    )
     return MahjongSoloInstanceResult(
         task_id=task.id,
         observation_mode=observation_mode,
-        success=success,
-        score=1.0 if success else process["process_score"],
-        process_score=process["process_score"],
-        correct_steps=process["correct_steps"],
-        total_steps=process["total_steps"],
-        step_scores=process["steps"],
-        move_average_score=mean(move_values) if move_values else None,
-        move_median_score=median(move_values) if move_values else None,
+        success=None if api_error else success,
+        score=None if api_error else (1.0 if success else process["process_score"]),
+        **process,
+        evaluation_status="api_error" if api_error else "completed",
         draws=list(draws),
         discards=list(discards),
         raw_outputs=list(raw_outputs),
+        first_attempt_outputs=list(first_attempt_outputs),
+        **strategy,
+        reasoning_traces=deepcopy(reasoning_traces),
+        conversation=list(conversation),
         agent_actions=list(agent_actions),
         action_errors=list(action_errors),
-        move_scores=list(move_scores),
         final_hand=list(final_hand),
         win_score=win_score,
         reasons=list(reasons),
         tags=task.tags,
         metrics=metrics,
     )
+
+
+def _read_generation_trace(agent: Agent) -> dict[str, Any] | None:
+    return read_mahjong_generation_trace(agent)
+
+
+def _episode_process_fields(
+    task: Any, raw_outputs: list[str], api_error: bool, channel: str,
+) -> dict[str, Any]:
+    if api_error:
+        return {"process_score": None, "correct_steps": 0, "total_steps": 0,
+                "step_scores": []}
+    from minibench.datasets.mahjong_solo.oracle import score_episode
+    process = score_episode(task, raw_outputs, channel=channel)
+    return {"process_score": process["process_score"],
+            "correct_steps": process["correct_steps"],
+            "total_steps": process["total_steps"], "step_scores": process["steps"]}
+
+
+def _summarize_process_scores(results: list[Any]) -> dict[str, float | None]:
+    results = _valid_evaluation_results(results)
+    return {
+        "average_score": (sum(item.score for item in results) / len(results)
+                          if results else None),
+        "average_process_score": (sum(item.process_score for item in results) / len(results)
+                                  if results else None),
+    }
 
 
 def _score_tsumo(
@@ -587,104 +659,13 @@ def _score_tsumo(
     return score if isinstance(score, dict) else None
 
 
-def _initial_mjai_events(task: MahjongSoloTask) -> list[dict[str, object]]:
-    return [
-        {"type": "start_game"},
-        {
-            "type": "start_kyoku",
-            "bakaze": task.round_wind,
-            "dora_marker": "5m",
-            "kyoku": 1,
-            "honba": 0,
-            "kyotaku": 0,
-            "oya": 0,
-            "scores": [25000, 25000, 25000, 25000],
-            "tehais": [
-                list(task.initial_hand),
-                ["?"] * 13,
-                ["?"] * 13,
-                ["?"] * 13,
-            ],
-            "minibench_task_id": task.id,
-            "minibench_seed": task.seed,
-        },
-    ]
-
-
-def _build_akochan_choice_request(
-    task: MahjongSoloTask,
-    *,
-    hand: list[str],
-    discards: list[str],
-    draw_number: int,
-    drawn_tile: str,
-    mjai_events: list[dict[str, object]],
-    remaining_draws: int,
-) -> dict[str, object]:
-    legal_actions = [
-        {"action": "discard", "tile": tile, "discard": tile}
-        for tile in sorted(set(hand), key=tile_to_index)
-    ]
-    return {
-        "protocol": "minibench-mahjong-solo-v1",
-        "decision": "turn",
-        "task_id": task.id,
-        "seed": task.seed,
-        "seat": 0,
-        "agent_seat": 0,
-        "draw_number": draw_number,
-        "drawn_tile": drawn_tile,
-        "hand": list(hand),
-        "discards": [list(discards), [], [], []],
-        "melds": [[], [], [], []],
-        "riichi_declared": [False, False, False, False],
-        "scores": [25000, 25000, 25000, 25000],
-        "remaining_tiles": remaining_draws,
-        "mjai_events": list(mjai_events),
-        "legal_actions": legal_actions,
-    }
-
-
-def _ukeire_count(
-    thirteen_tiles: list[str],
-    visible_tiles: list[str],
-    current_shanten: int,
-) -> int:
-    visible_counts = Counter(visible_tiles)
-    total = 0
-    for index in range(34):
-        tile = index_to_tile(index)
-        remaining_copies = 4 - visible_counts[tile]
-        if remaining_copies <= 0:
-            continue
-        try:
-            next_shanten = calculate_shanten([*thirteen_tiles, tile])
-        except ValueError:
-            continue
-        if next_shanten < current_shanten:
-            total += remaining_copies
-    return total
-
-
-def _move_score_from_metrics(
-    *,
-    chosen_shanten: int,
-    best_shanten: int,
-    chosen_ukeire: int,
-    best_ukeire: int,
-) -> float:
-    if chosen_shanten > best_shanten:
-        return max(0.0, 0.35 - 0.20 * (chosen_shanten - best_shanten - 1))
-    if chosen_ukeire >= best_ukeire:
-        return 1.0
-    if best_ukeire <= 0:
-        return 0.8
-    return 0.7 + 0.3 * (chosen_ukeire / best_ukeire)
-
-
 def _action_error_feedback(error: str) -> str:
     if error == "no_json_action_extracted":
-        return "The previous response was not a parseable action JSON object."
+        return (
+            "The previous response was not a valid action JSON object. "
+            "Use only action for tsumo, or action and tile for discard; "
+            "do not add other fields."
+        )
     if error.startswith("illegal_tsumo_at_draw_"):
         return (
             "The previous tsumo declaration was illegal: the current 14 tiles "

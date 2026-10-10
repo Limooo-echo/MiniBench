@@ -175,7 +175,7 @@ class ScoringAdapterTests(unittest.TestCase):
     def test_mahjong_visual_and_text_use_identical_goal_scoring(self):
         task = {"id": "m", "goal": "winning_tiles", "hand": HAND, "tags": ["visual"]}
         predicted = list(dict.fromkeys(HAND))
-        result = self.score("mahjong", answer({"hand": predicted, "visible_tiles": [],
+        result = self.score("mahjong", answer({"hand": predicted,
                                                "winning_tiles": ["E"]}), task, "V", "image")
         text = self.score("mahjong", answer({"winning_tiles": ["E"]}), task)
         self.assertEqual((result["y"], result["p"]), (text["y"], text["p"]))

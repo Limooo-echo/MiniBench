@@ -11,17 +11,30 @@ from minibench.datasets.mahjong_rule_variants.dataset import MahjongRuleVariantT
 
 class OfflineMahjongAgent:
     def generate(self, prompt, task):
-        if isinstance(task, MahjongRuleVariantTask):
+        if task.family == "mahjong_rule_variants":
             return json.dumps({"action": "tsumo"})
-        return json.dumps(
-            {
-                "hand": list(task.hand),
-                "visible_tiles": list(task.visible_tiles),
-                "winning_tiles": ["E"],
-            }
-        )
+        answer = {"winning_tiles": ["E"]}
+        if task.task_id == "smoke-visual":
+            answer.update(
+                {
+                    "hand": list(static_wait_task().hand),
+                }
+            )
+        return json.dumps(answer)
 
     def generate_multimodal(self, prompt, task, *, images):
+        return self.generate(prompt, task)
+
+    def generate_messages(
+        self,
+        messages,
+        task,
+        *,
+        temperature=None,
+        max_tokens=None,
+        json_mode=None,
+    ):
+        prompt = str(messages[-1]["content"]) if messages else ""
         return self.generate(prompt, task)
 
 
@@ -39,11 +52,11 @@ def static_wait_task():
     )
 
 
-def standard_rule_task():
+def wildcard_rule_task():
     return MahjongRuleVariantTask(
-        id="smoke-rule--standard",
+        id="smoke-rule--red_dragon_wildcard",
         source_task_id="smoke-rule",
-        channel="standard",
+        channel="red_dragon_wildcard",
         seed=1,
         initial_hand=(
             "1m", "2m", "3m", "4p", "5p", "6p", "7s",
@@ -53,7 +66,7 @@ def standard_rule_task():
         max_draws=1,
         round_wind="E",
         seat_wind="E",
-        tags=("mahjong", "solo-draw-discard", "rule-channel:standard"),
+        tags=("mahjong", "solo-draw-discard", "rule:red_dragon_wildcard"),
     )
 
 
@@ -82,7 +95,7 @@ class MahjongCliOfflineSmokeTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmpdir, patch(
                 "minibench.datasets.mahjong_rule_variants.dataset."
                 "load_mahjong_rule_variant_tasks",
-                return_value=[standard_rule_task()],
+                return_value=[wildcard_rule_task()],
             ), patch(
                 "minibench.commands.mahjong._make_cli_agent",
                 return_value=OfflineMahjongAgent(),
@@ -91,7 +104,7 @@ class MahjongCliOfflineSmokeTests(unittest.TestCase):
                     [
                         "evaluate-mahjong-rules",
                         "--rule-channel",
-                        "standard",
+                        "red_dragon_wildcard",
                         "--observation-mode",
                         observation_mode,
                         "--output-dir",
@@ -102,7 +115,7 @@ class MahjongCliOfflineSmokeTests(unittest.TestCase):
                 )
                 self.assertEqual(args.func(args), 0)
 
-    def test_readme_visual_command_runs_paired_modes_offline(self):
+    def test_readme_visual_command_runs_image_only_offline(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             image_path = Path(tmpdir) / "visual.png"
             image_path.write_bytes(b"offline-smoke")
@@ -111,13 +124,11 @@ class MahjongCliOfflineSmokeTests(unittest.TestCase):
                     "id": "smoke-visual",
                     "goal": "winning_tiles",
                     "hand": list(static_wait_task().hand),
-                    "visible_tiles": ["1p", "2p"],
                     "image": "visual.png",
                     "tags": [
                         "easy",
                         "task:winning_tiles",
                         "visual",
-                        "visible:2",
                     ],
                 },
                 source_path=Path(tmpdir) / "tasks.jsonl",
@@ -133,7 +144,7 @@ class MahjongCliOfflineSmokeTests(unittest.TestCase):
                     [
                         "evaluate-mahjong",
                         "--input-mode",
-                        "all",
+                        "image",
                         "--output-dir",
                         tmpdir,
                         "--run-name",
@@ -147,8 +158,8 @@ class MahjongCliOfflineSmokeTests(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
-            self.assertEqual(results["planned_total"], 2)
-            self.assertEqual(results["completed_total"], 2)
+            self.assertEqual(results["planned_total"], 1)
+            self.assertEqual(results["completed_total"], 1)
 
 
 if __name__ == "__main__":

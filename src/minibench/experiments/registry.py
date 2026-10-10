@@ -216,27 +216,6 @@ def _mahjong_rule_variants_spec() -> TaskFamilySpec:
     )
 
 
-def _mahjong_riichi_spec() -> TaskFamilySpec:
-    from minibench.datasets.mahjong_riichi.dataset import load_mahjong_riichi_tasks
-    from minibench.datasets.mahjong_riichi.evaluation import (
-        evaluate_mahjong_riichi_tasks,
-        summarize_mahjong_riichi,
-        write_mahjong_riichi_run,
-    )
-    from minibench.datasets.mahjong_riichi.prompting import (
-        MAHJONG_RIICHI_SYSTEM_PROMPT,
-    )
-
-    return TaskFamilySpec(
-        default_path=Path("data/mahjong_riichi/tasks.jsonl"),
-        load_tasks=load_mahjong_riichi_tasks,
-        evaluate_tasks=evaluate_mahjong_riichi_tasks,
-        summarize=summarize_mahjong_riichi,
-        write_run=write_mahjong_riichi_run,
-        system_prompt=MAHJONG_RIICHI_SYSTEM_PROMPT,
-    )
-
-
 TASK_FAMILIES: dict[str, Callable[[], TaskFamilySpec]] = {
     "xiangqi-mate-in-one": _xiangqi_mate_in_one_spec,
     "xiangqi-rule-variants": _xiangqi_rule_variants_spec,
@@ -247,7 +226,6 @@ TASK_FAMILIES: dict[str, Callable[[], TaskFamilySpec]] = {
     "mahjong": _mahjong_spec,
     "mahjong_solo": _mahjong_solo_spec,
     "mahjong_rule_variants": _mahjong_rule_variants_spec,
-    "mahjong_riichi": _mahjong_riichi_spec,
 }
 
 

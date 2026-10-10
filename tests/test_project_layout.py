@@ -14,7 +14,7 @@ class ProjectLayoutTests(unittest.TestCase):
     def test_registry_keeps_all_current_task_families(self):
         self.assertEqual(set(TASK_FAMILIES), {
             "one_stroke", "zebra", "mahjong", "mahjong_solo",
-            "mahjong_rule_variants", "mahjong_riichi",
+            "mahjong_rule_variants",
             "xiangqi-mate-in-one", "xiangqi-rule-variants",
             "xiangqi-history", "xiangqi-multimodal",
         })
@@ -38,9 +38,8 @@ class ProjectLayoutTests(unittest.TestCase):
             "evaluate-mahjong": ([], "mahjong"),
             "evaluate-mahjong-solo": ([], "mahjong"),
             "evaluate-mahjong-rules": ([], "mahjong"),
-            "evaluate-mahjong-riichi": ([], "mahjong"),
             "generate-mahjong-static": ([], "mahjong"),
-            "generate-mahjong-visual": ([], "mahjong"),
+            "render-mahjong-visual": ([], "mahjong"),
             "generate-mahjong-solo": ([], "mahjong"),
         }
         for command, (arguments, owner) in cases.items():

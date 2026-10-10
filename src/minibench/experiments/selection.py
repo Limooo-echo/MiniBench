@@ -28,9 +28,32 @@ def _select_mahjong_rule_configuration(
     )
 
     channel = evaluation_config.get("rule_channel")
+    configured_channels = evaluation_config.get("rule_channels")
     configured_rules = evaluation_config.get("rules")
-    if channel is not None and configured_rules is not None:
-        raise ValueError("configure either evaluation.rule_channel or evaluation.rules")
+    configured_selectors = sum(
+        value is not None for value in (channel, configured_channels, configured_rules)
+    )
+    if configured_selectors > 1:
+        raise ValueError(
+            "configure only one of evaluation.rule_channel, "
+            "evaluation.rule_channels, or evaluation.rules"
+        )
+    if configured_channels is not None:
+        if not isinstance(configured_channels, (list, tuple)) or not all(
+            isinstance(item, str) for item in configured_channels
+        ):
+            raise ValueError("evaluation.rule_channels must be a list of strings")
+        if not configured_channels:
+            raise ValueError("evaluation.rule_channels must not be empty")
+        if len(configured_channels) != len(set(configured_channels)):
+            raise ValueError("evaluation.rule_channels must not contain duplicates")
+        for selected_channel in configured_channels:
+            active_rules_for_channel(selected_channel)
+        wanted_channels = set(configured_channels)
+        selected = [task for task in tasks if task.channel in wanted_channels]
+        if not selected:
+            raise ValueError("Mahjong rule configuration selected no tasks")
+        return selected
     if configured_rules is not None:
         if isinstance(configured_rules, str):
             configured_rules = [

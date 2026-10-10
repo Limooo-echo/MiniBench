@@ -12,7 +12,6 @@ from minibench.datasets.mahjong.api import (
     full_tile_wall,
     index_to_tile,
     is_winning_hand,
-    live_wait_counts,
     live_waits_by_discard,
     max_ukeire_discards,
     max_wait_discards,
@@ -20,7 +19,11 @@ from minibench.datasets.mahjong.api import (
     waits_by_discard,
     winning_tiles,
 )
-from minibench.datasets.mahjong.dataset import MahjongTask, task_to_record
+from minibench.datasets.mahjong.dataset import (
+    MahjongTask,
+    load_mahjong_tasks,
+    task_to_record,
+)
 from minibench.datasets.mahjong.visualization import (
     MAHJONG_RENDERER_VERSION,
     render_mahjong_gallery,
@@ -52,17 +55,19 @@ def default_static_generated_tasks_path() -> Path:
 
 
 STATIC_TASK_GROUPS = (
-    ("easy", "winning_tiles"),
-    ("easy", "max_wait_discard"),
-    ("hard", "winning_tiles"),
-    ("hard", "max_wait_discard"),
+    ("easy", "winning_tiles", 0),
+    ("easy", "max_wait_discard", 0),
+    ("hard", "winning_tiles", 0),
+    ("hard", "max_wait_discard", 0),
+    ("easy", "winning_tiles", 12),
+    ("easy", "max_ukeire_discard", 12),
 )
 
 
 def generate_mahjong_static_tasks(
     *,
     output: str | Path | None = None,
-    count: int = 60,
+    count: int = 90,
     seed: int = 20260807,
     prefix: str = "mj-generated",
     max_attempts: int | None = None,
@@ -89,14 +94,27 @@ def generate_mahjong_static_tasks(
     seen: set[tuple[str, tuple[str, ...]]] = set()
     attempts_by_type: dict[str, int] = {}
 
-    for difficulty, goal in STATIC_TASK_GROUPS:
-        target = targets[(difficulty, goal)]
+    for difficulty, goal, visible_count in STATIC_TASK_GROUPS:
+        target = targets[(difficulty, goal, visible_count)]
         generated = 0
         attempts = 0
         while generated < target and attempts < attempts_limit:
             attempts += 1
             waiting_hand = _random_static_waiting_hand(rng, difficulty=difficulty)
-            if goal == "winning_tiles":
+            visible_tiles: tuple[str, ...] = ()
+            if visible_count and goal == "winning_tiles":
+                hand = waiting_hand
+                visible_tiles = _draw_visible_tiles(hand, visible_count, rng)
+            elif visible_count and goal == "max_ukeire_discard":
+                candidate = _make_ukeire_candidate(
+                    waiting_hand,
+                    visible_counts=(visible_count,),
+                    rng=rng,
+                )
+                if candidate is None:
+                    continue
+                hand, visible_tiles = candidate
+            elif goal == "winning_tiles":
                 hand = waiting_hand
             else:
                 candidate = _make_static_max_wait_hand(
@@ -113,17 +131,29 @@ def generate_mahjong_static_tasks(
                 continue
             seen.add(signature)
             generated += 1
-            task_label = "wait" if goal == "winning_tiles" else "max-wait-discard"
+            task_label = {
+                "winning_tiles": "wait",
+                "max_wait_discard": "max-wait-discard",
+                "max_ukeire_discard": "max-ukeire-discard",
+            }[goal]
+            visible_id = f"-visible{visible_count}" if visible_count else ""
+            tags = [difficulty, f"task:{goal}"]
+            if visible_count:
+                tags.extend(("static-visible", f"visible:{visible_count}"))
             task = MahjongTask(
-                id=f"{prefix}-{difficulty}-{task_label}-{generated:03d}",
+                id=(
+                    f"{prefix}-{difficulty}{visible_id}-{task_label}-"
+                    f"{generated:03d}"
+                ),
                 goal=goal,
                 hand=hand,
-                tags=(difficulty, f"task:{goal}"),
+                tags=tuple(tags),
+                visible_tiles=visible_tiles,
             )
             _validate_generated_static_task(task)
             tasks.append(task)
 
-        type_key = f"{difficulty}/{goal}"
+        type_key = _static_group_key(difficulty, goal, visible_count)
         attempts_by_type[type_key] = attempts
         if generated < target:
             raise RuntimeError(
@@ -140,8 +170,10 @@ def generate_mahjong_static_tasks(
         "count": len(tasks),
         "seed": seed,
         "counts_by_type": {
-            f"{difficulty}/{goal}": targets[(difficulty, goal)]
-            for difficulty, goal in STATIC_TASK_GROUPS
+            _static_group_key(difficulty, goal, visible_count): targets[
+                (difficulty, goal, visible_count)
+            ]
+            for difficulty, goal, visible_count in STATIC_TASK_GROUPS
         },
         "attempts": sum(attempts_by_type.values()),
         "attempts_by_type": attempts_by_type,
@@ -233,6 +265,29 @@ def _make_static_max_wait_hand(
 def _validate_generated_static_task(task: MahjongTask) -> None:
     if _difficulty(task.hand) != task.tags[0]:
         raise RuntimeError(f"generated task {task.id} has an incorrect difficulty")
+    if task.visible_tiles:
+        if "static-visible" not in task.tags or len(task.visible_tiles) != 12:
+            raise RuntimeError(
+                f"generated task {task.id} must have 12 public visible tiles"
+            )
+        if task.tags[0] != "easy":
+            raise RuntimeError(f"generated task {task.id} must be easy")
+        if task.goal == "winning_tiles":
+            if len(task.hand) != 13 or not winning_tiles(task.hand):
+                raise RuntimeError(
+                    f"generated task {task.id} is not a valid visible wait task"
+                )
+            return
+        if task.goal == "max_ukeire_discard":
+            if len(task.hand) != 14 or len(
+                max_ukeire_discards(task.hand, task.visible_tiles)
+            ) != 1:
+                raise RuntimeError(
+                    f"generated task {task.id} has no unique maximum-ukeire "
+                    "discard"
+                )
+            return
+        raise RuntimeError(f"generated task {task.id} has an unsupported goal")
     if task.goal == "winning_tiles":
         if len(task.hand) != 13 or not winning_tiles(task.hand):
             raise RuntimeError(f"generated task {task.id} is not a valid wait task")
@@ -246,25 +301,23 @@ def _validate_generated_static_task(task: MahjongTask) -> None:
     raise RuntimeError(f"generated task {task.id} has an unsupported goal")
 
 
-def generate_mahjong_visual_tasks(
+def _static_group_key(difficulty: str, goal: str, visible_count: int) -> str:
+    key = f"{difficulty}/{goal}"
+    return f"{key}/visible:{visible_count}" if visible_count else key
+
+
+def render_mahjong_visual_tasks(
     *,
+    tasks_path: str | Path | None = None,
     output: str | Path | None = None,
     render_dir: str | Path | None = None,
-    count_per_type: int = 15,
-    visible_count: int | Sequence[int] = (10, 20),
-    table_columns: int = 6,
-    seed: int = 20260803,
-    prefix: str = "mj-visual",
-    max_attempts: int | None = None,
     overwrite: bool = False,
 ) -> dict[str, Any]:
-    """Generate paired visual wait/ukeire tasks and their deterministic gallery."""
+    """Render an image-only mirror of an existing static Mahjong task file."""
 
-    if count_per_type <= 0:
-        raise ValueError("count_per_type must be positive")
-    visible_counts = _normalize_visible_counts(visible_count)
-    if not 1 <= table_columns <= 18:
-        raise ValueError("table_columns must be between 1 and 18")
+    source_tasks = load_mahjong_tasks(tasks_path)
+    if any(task.image is not None for task in source_tasks):
+        raise ValueError("visual rendering source tasks must not already contain images")
     output_path = Path(output) if output else default_visual_tasks_path()
     if output_path.exists() and not overwrite:
         raise ValueError(f"{output_path} already exists; pass --overwrite")
@@ -274,89 +327,43 @@ def generate_mahjong_visual_tasks(
         if render_dir is not None
         else output_path.parent / f"{output_path.stem}_visual"
     )
-
-    rng = random.Random(seed)
-    attempts_limit = max_attempts or count_per_type * 5000
     tasks: list[MahjongTask] = []
-    seen: set[tuple[str, tuple[str, ...]]] = set()
-    attempts_by_type: dict[str, int] = {}
-    for goal, label in (("winning_tiles", "wait"), ("max_ukeire_discard", "ukeire")):
-        attempts = 0
-        generated = 0
-        while generated < count_per_type and attempts < attempts_limit:
-            attempts += 1
-            waiting_hand = _random_waiting_hand(rng)
-            if goal == "winning_tiles":
-                hand = waiting_hand
-                visible_superset = _draw_visible_tiles(hand, max(visible_counts), rng)
-                if not all(
-                    live_wait_counts(hand, visible_superset[:count])
-                    for count in visible_counts
-                ):
-                    continue
-            else:
-                candidate = _make_ukeire_candidate(
-                    waiting_hand,
-                    visible_counts=visible_counts,
-                    rng=rng,
-                )
-                if candidate is None:
-                    continue
-                hand, visible_superset = candidate
-            signature = (goal, tuple(sorted(hand, key=tile_to_index)))
-            if signature in seen:
-                continue
-            seen.add(signature)
-            generated += 1
-            for count in visible_counts:
-                task_id = f"{prefix}-v{count}-{label}-{generated:03d}"
-                tasks.append(
-                    MahjongTask(
-                        id=task_id,
-                        goal=goal,
-                        hand=tuple(sorted(hand, key=tile_to_index)),
-                        tags=(
-                            _difficulty(hand),
-                            f"task:{goal}",
-                            "visual",
-                            f"visible:{count}",
-                        ),
-                        visible_tiles=visible_superset[:count],
-                        table_columns=table_columns,
-                        image=_relative_image_path(
-                            output_path,
-                            visual_dir,
-                            f"{task_id}.png",
-                        ),
-                    )
-                )
-        attempts_by_type[goal] = attempts
-        if generated < count_per_type:
-            raise RuntimeError(
-                f"only generated {generated}/{count_per_type} paired tasks for "
-                f"{goal} after {attempts} attempts"
+    for source_task in source_tasks:
+        tags = source_task.tags
+        if "visual" not in tags:
+            tags = (*tags, "visual")
+        tasks.append(
+            MahjongTask(
+                id=source_task.id,
+                goal=source_task.goal,
+                hand=source_task.hand,
+                tags=tags,
+                visible_tiles=source_task.visible_tiles,
+                table_columns=source_task.table_columns,
+                image=_relative_image_path(
+                    output_path,
+                    visual_dir,
+                    f"{source_task.id}.png",
+                ),
             )
+        )
 
-    tasks.sort(key=lambda task: task.id)
     output_path.write_text(
         "".join(
-            json.dumps(_task_record(task), ensure_ascii=False) + "\n"
+            json.dumps(_visual_task_record(task), ensure_ascii=False) + "\n"
             for task in tasks
         ),
         encoding="utf-8",
     )
     if overwrite:
-        _remove_stale_images(visual_dir, prefix, tasks)
+        _remove_stale_images(visual_dir, tasks)
     gallery = render_mahjong_gallery(tasks, visual_dir)
     return {
+        "source": str(tasks_path or "data/mahjong/tasks.jsonl"),
         "output": str(output_path),
         "render_dir": str(visual_dir),
         "gallery": str(gallery),
         "count": len(tasks),
-        "visible_counts": list(visible_counts),
-        "seed": seed,
-        "attempts": sum(attempts_by_type.values()),
-        "attempts_by_type": attempts_by_type,
     }
 
 
@@ -395,35 +402,6 @@ def _make_ukeire_candidate(
     return None
 
 
-def _random_waiting_hand(rng: random.Random) -> tuple[str, ...]:
-    for _ in range(1000):
-        counts: Counter[str] = Counter()
-        pair = rng.choice(ALL_TILES)
-        counts[pair] = 2
-        melds: list[tuple[str, str, str]] = []
-        for _ in range(4):
-            valid = [
-                meld
-                for meld in ALL_MELDS
-                if all(counts[tile] + meld.count(tile) <= 4 for tile in set(meld))
-            ]
-            if not valid:
-                break
-            meld = rng.choice(valid)
-            counts.update(meld)
-            melds.append(meld)
-        if len(melds) != 4:
-            continue
-        winning_hand = [pair, pair, *(tile for meld in melds for tile in meld)]
-        if not is_winning_hand(winning_hand):
-            continue
-        waiting = list(winning_hand)
-        waiting.pop(rng.randrange(len(waiting)))
-        if winning_tiles(waiting):
-            return tuple(sorted(waiting, key=tile_to_index))
-    raise RuntimeError("failed to construct a waiting hand")
-
-
 def _remaining_wall(hand: Sequence[str]) -> list[str]:
     wall = full_tile_wall()
     for tile in hand:
@@ -449,26 +427,10 @@ def _difficulty(hand: Sequence[str]) -> str:
     return "hard" if len(suits) == 1 and not has_honor else "easy"
 
 
-def _normalize_visible_counts(value: int | Sequence[int]) -> tuple[int, ...]:
-    counts = (value,) if isinstance(value, int) else tuple(value)
-    if not counts or len(set(counts)) != len(counts):
-        raise ValueError("visible_count values must be non-empty and distinct")
-    if any(not isinstance(count, int) or not 0 <= count <= 80 for count in counts):
-        raise ValueError("visible_count values must be integers from 0 to 80")
-    return counts
-
-
-def _task_record(task: MahjongTask) -> dict[str, object]:
-    return {
-        "id": task.id,
-        "goal": task.goal,
-        "hand": list(task.hand),
-        "tags": list(task.tags),
-        "visible_tiles": list(task.visible_tiles),
-        "table_columns": task.table_columns,
-        "image": task.image,
-        "renderer_version": MAHJONG_RENDERER_VERSION,
-    }
+def _visual_task_record(task: MahjongTask) -> dict[str, object]:
+    record = task_to_record(task)
+    record["renderer_version"] = MAHJONG_RENDERER_VERSION
+    return record
 
 
 def _relative_image_path(output: Path, render_dir: Path, filename: str) -> str:
@@ -477,12 +439,11 @@ def _relative_image_path(output: Path, render_dir: Path, filename: str) -> str:
 
 def _remove_stale_images(
     render_dir: Path,
-    prefix: str,
     tasks: Sequence[MahjongTask],
 ) -> None:
     if not render_dir.is_dir():
         return
     expected = {f"{task.id}.png" for task in tasks}
-    for image in render_dir.glob(f"{prefix}-*.png"):
+    for image in render_dir.glob("*.png"):
         if image.name not in expected:
             image.unlink()

@@ -26,6 +26,7 @@ from minibench.core.prompts import (
     CRITIC_SYSTEM_PROMPT,
     FINAL_ANSWER_SYSTEM_PROMPT,
     critic_prompt,
+    cot_prompt,
     direct_prompt,
     refine_prompt,
 )
@@ -130,11 +131,12 @@ class CriticRefineAgent(RuntimeBackedAgent, Agent):
         draft = complete_transformed_messages(
             self.runtime,
             messages,
-            transform=lambda prompt: direct_prompt(
+            transform=lambda prompt: (direct_prompt if self._structured_internal else cot_prompt)(
                 prompt,
                 version=self.config.prompt_version,
             ),
-            phase_system_prompt=self.prompt_set.final_answer_system_prompt,
+            phase_system_prompt=(self.prompt_set.final_answer_system_prompt if self._structured_internal
+                                 else self.prompt_set.reasoning_system_prompt),
             temperature=self.config.reasoning_temperature,
             max_tokens=self.config.max_reasoning_tokens,
             json_mode=False,
@@ -181,8 +183,10 @@ class CriticRefineAgent(RuntimeBackedAgent, Agent):
         images: Sequence[ImageAttachment],
     ) -> str:
         draft = self.runtime.complete(
-            direct_prompt(prompt, version=self.config.prompt_version),
-            system_prompt=self.prompt_set.final_answer_system_prompt,
+            (direct_prompt if self._structured_internal else cot_prompt)(
+                prompt, version=self.config.prompt_version),
+            system_prompt=(self.prompt_set.final_answer_system_prompt if self._structured_internal
+                           else self.prompt_set.reasoning_system_prompt),
             temperature=self.config.reasoning_temperature,
             max_tokens=self.config.max_reasoning_tokens,
             json_mode=False,

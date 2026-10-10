@@ -159,7 +159,7 @@ class ScoringSuiteTests(unittest.TestCase):
         self.assertEqual((cell["score"], cell["expected_slots"]), (0, 1))
         self.assertTrue(any(e.get("reason") == "standard_rule_control" for e in result["exclusions"]))
 
-    def test_mahjong_rule_sources_expand_to_seven_nonstandard_channels(self):
+    def test_mahjong_rule_sources_expand_to_three_nonstandard_channels(self):
         from minibench.datasets.mahjong_rule_variants.rules import RULE_CHANNELS
         self.experiment("mahjong_rule_variants", "R", tasks=[{"id": "solo1"}], records=[
             {"task_id": f"solo1--{channel}", "observation_mode": "full-hand", "success": True}
@@ -167,8 +167,8 @@ class ScoringSuiteTests(unittest.TestCase):
         result = self.run_suite()
         cell = self.task_score(result, "mahjong", "R")
         self.assertAlmostEqual(cell["score"], 1)
-        self.assertEqual(cell["expected_slots"], 7)
-        self.assertTrue(any(e.get("task_id") == "solo1--standard" for e in result["exclusions"]))
+        self.assertEqual(cell["expected_slots"], 3)
+        self.assertNotIn("standard", RULE_CHANNELS)
 
     def test_duplicate_result_rows_are_rejected(self):
         self.experiment(records=[{"task_id": "z1", "success": False}, {"task_id": "z1", "success": False}])

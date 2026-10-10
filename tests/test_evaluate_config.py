@@ -14,7 +14,6 @@ class EvaluateConfigTests(unittest.TestCase):
     def test_visual_configs_use_qwen_3_8_max(self):
         visual_configs = (
             "mahjong_multimodal.yaml",
-            "mahjong_multimodal_ablation.yaml",
             "one_stroke_multimodal.yaml",
             "one_stroke_multimodal_ablation.yaml",
             "xiangqi_multimodal.yaml",

@@ -107,26 +107,10 @@ def _evaluate(
             ),
             show_progress=bool(evaluation_config.get("show_progress", False)),
         )
-    if family == "mahjong_riichi":
-        return spec.evaluate_tasks(
-            tasks,
-            agent,
-            opponent=evaluation_config.get(
-                "riichi_opponent",
-                evaluation_config.get("opponent", "shanten"),
-            ),
-            mahjong_ai_command=evaluation_config.get("mahjong_ai_command"),
-            mahjong_ai_mode=evaluation_config.get("mahjong_ai_mode", "stdio"),
-            mahjong_ai_timeout=evaluation_config.get("mahjong_ai_timeout", 30.0),
-        )
     if family == "mahjong_solo":
         return spec.evaluate_tasks(
             tasks,
             agent,
-            move_scorer=evaluation_config.get("move_scorer", "shanten"),
-            mahjong_ai_command=evaluation_config.get("mahjong_ai_command"),
-            mahjong_ai_mode=evaluation_config.get("mahjong_ai_mode", "stdio"),
-            mahjong_ai_timeout=evaluation_config.get("mahjong_ai_timeout", 30.0),
             observation_mode=evaluation_config.get("observation_mode", "full-hand"),
             show_progress=bool(evaluation_config.get("show_progress", False)),
             on_result=on_result,

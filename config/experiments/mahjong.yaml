@@ -5,18 +5,22 @@ task:
   task_ids: []
 
 agent:
-  name: passthrough
+  name: cot
+  prompt_version: v1
+  max_format_repairs: 0
+  reasoning_temperature: 0.0
+  final_temperature: 0.0
+  max_reasoning_tokens: 1024
 
 provider:
-  name: deepseek
-  model: deepseek-v4-flash
+  name: qwen
+  model: qwen3.8-max
   json_mode: true
-  max_tokens: 512
-  timeout: 120
+  max_tokens: 1024
+  timeout: 300
   extra_body:
-    thinking:
-      type: disabled
+    enable_thinking: false
 
 run:
   output_dir: runs
-  run_name: null
+  run_name: mahjong-cot-new-qwen

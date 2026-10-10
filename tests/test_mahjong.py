@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from minibench.datasets.mahjong.api import (
     calculate_shanten,
+    live_wait_counts,
     max_ukeire_discards,
     max_wait_discards,
     normalize_tile,
@@ -18,11 +19,17 @@ from minibench.cli import build_parser
 from minibench.datasets.mahjong.dataset import load_mahjong_tasks, mahjong_task_from_dict
 from minibench.datasets.mahjong.evaluation import (
     evaluate_mahjong_tasks,
+    expected_answer,
     extract_mahjong_answer,
+    summarize_mahjong,
     validate_mahjong_answer,
+    write_mahjong_run,
 )
 from minibench.datasets.mahjong.generation import generate_mahjong_static_tasks
-from minibench.datasets.mahjong.prompting import build_mahjong_prompt
+from minibench.datasets.mahjong.prompting import (
+    MAHJONG_SYSTEM_PROMPT,
+    build_mahjong_prompt,
+)
 
 
 class FixedMahjongAgent:
@@ -95,6 +102,29 @@ def discard_task():
     )
 
 
+def visible_wait_task():
+    return mahjong_task_from_dict(
+        {
+            "id": "unit-visible-wait",
+            "goal": "winning_tiles",
+            "hand": [
+                "1m", "2m", "3m", "4m", "5m", "6m", "7p",
+                "8p", "9p", "2s", "3s", "4s", "E",
+            ],
+            "visible_tiles": [
+                "E", "E", "E", "9m", "9m", "9m", "9m",
+                "P", "P", "P", "P", "C",
+            ],
+            "tags": [
+                "easy",
+                "task:winning_tiles",
+                "static-visible",
+                "visible:12",
+            ],
+        }
+    )
+
+
 class MahjongTests(unittest.TestCase):
     def test_cli_accepts_cot_agent_for_static_mahjong(self):
         args = build_parser().parse_args(["evaluate-mahjong", "--agent", "cot"])
@@ -120,21 +150,36 @@ class MahjongTests(unittest.TestCase):
     def test_loader_validates_builtin_tasks(self):
         tasks = load_mahjong_tasks()
 
-        self.assertEqual(len(tasks), 60)
+        self.assertEqual(len(tasks), 90)
         self.assertEqual(
-            Counter((task.tags[0], task.goal) for task in tasks),
+            Counter(
+                (task.tags[0], task.goal, len(task.visible_tiles))
+                for task in tasks
+            ),
             Counter(
                 {
-                    ("easy", "winning_tiles"): 15,
-                    ("easy", "max_wait_discard"): 15,
-                    ("hard", "winning_tiles"): 15,
-                    ("hard", "max_wait_discard"): 15,
+                    ("easy", "winning_tiles", 0): 15,
+                    ("easy", "max_wait_discard", 0): 15,
+                    ("hard", "winning_tiles", 0): 15,
+                    ("hard", "max_wait_discard", 0): 15,
+                    ("easy", "winning_tiles", 12): 15,
+                    ("easy", "max_ukeire_discard", 12): 15,
                 }
             ),
         )
         for task in tasks:
             if task.goal == "max_wait_discard":
                 self.assertEqual(len(max_wait_discards(task.hand)), 1, task.id)
+            if "static-visible" in task.tags:
+                self.assertEqual(len(task.visible_tiles), 12, task.id)
+                self.assertEqual(task.tags[0], "easy", task.id)
+                self.assertIsNone(task.image, task.id)
+            if task.goal == "max_ukeire_discard":
+                self.assertEqual(
+                    len(max_ukeire_discards(task.hand, task.visible_tiles)),
+                    1,
+                    task.id,
+                )
 
     def test_extracts_mahjong_json(self):
         parsed = extract_mahjong_answer('Answer: {"winning_tiles":["1Z"]}')
@@ -150,6 +195,58 @@ class MahjongTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(reasons, ["valid_winning_tiles"])
 
+    def test_rejects_non_string_winning_tile(self):
+        parsed = extract_mahjong_answer('{"winning_tiles":["E",123]}')
+
+        ok, reasons = validate_mahjong_answer(wait_task(), parsed)
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["winning_tiles_must_be_strings"])
+
+    def test_rejects_invalid_winning_tile(self):
+        parsed = extract_mahjong_answer('{"winning_tiles":["E","banana"]}')
+
+        ok, reasons = validate_mahjong_answer(wait_task(), parsed)
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["invalid_winning_tile"])
+
+    def test_rejects_duplicate_winning_tiles(self):
+        parsed = extract_mahjong_answer('{"winning_tiles":["E","1z"]}')
+
+        ok, reasons = validate_mahjong_answer(wait_task(), parsed)
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["duplicate_winning_tiles"])
+
+    def test_rejects_incomplete_winning_tiles(self):
+        ok, reasons = validate_mahjong_answer(
+            wait_task(),
+            {"winning_tiles": []},
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("wrong_winning_tiles", reasons)
+        self.assertIn("missing:E", reasons)
+
+    def test_rejects_undefined_winning_tile_fields(self):
+        parsed = extract_mahjong_answer(
+            '{"winning_tiles":["E"],"discard":"1m"}'
+        )
+
+        ok, reasons = validate_mahjong_answer(wait_task(), parsed)
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["unexpected_fields:discard"])
+
+    def test_rejects_waits_alias_as_an_undefined_field(self):
+        parsed = extract_mahjong_answer('{"waits":["E"]}')
+
+        ok, reasons = validate_mahjong_answer(wait_task(), parsed)
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["unexpected_fields:waits"])
+
     def test_wait_prompt_requires_full_decomposition(self):
         prompt = build_mahjong_prompt(wait_task())
 
@@ -157,6 +254,44 @@ class MahjongTests(unittest.TestCase):
         self.assertIn("Honor tiles cannot form sequences", prompt)
         self.assertIn("Thirteen orphans", prompt)
         self.assertIn("all and only", prompt)
+
+    def test_visible_wait_requires_exact_live_copy_counts_including_zero(self):
+        task = visible_wait_task()
+        answer = {
+            "winning_tiles": ["E"],
+            "live_winning_copies": {"E": 0},
+        }
+
+        self.assertEqual(
+            live_wait_counts(
+                task.hand,
+                task.visible_tiles,
+                include_zero=True,
+            ),
+            {"E": 0},
+        )
+        self.assertEqual(expected_answer(task), answer)
+        self.assertEqual(
+            validate_mahjong_answer(task, answer),
+            (True, ["valid_winning_tiles"]),
+        )
+
+        wrong_count = {
+            "winning_tiles": ["E"],
+            "live_winning_copies": {"E": 1},
+        }
+        ok, reasons = validate_mahjong_answer(task, wrong_count)
+        self.assertFalse(ok)
+        self.assertIn("wrong_live_winning_copy_counts", reasons)
+
+    def test_visible_wait_prompt_exposes_public_tiles_and_count_schema(self):
+        task = visible_wait_task()
+        prompt = build_mahjong_prompt(task)
+
+        self.assertIn(f"VISIBLE TILES: {' '.join(task.visible_tiles)}", prompt)
+        self.assertIn(f"YOUR HAND: {' '.join(task.hand)}", prompt)
+        self.assertIn("including counts of zero", prompt)
+        self.assertIn('"live_winning_copies":{"3m":2,"6m":0}', prompt)
 
     def test_max_wait_and_max_ukeire_are_distinct_goals(self):
         max_wait = mahjong_task_from_dict(
@@ -196,12 +331,12 @@ class MahjongTests(unittest.TestCase):
             second = Path(tmpdir) / "second.jsonl"
             summary = generate_mahjong_static_tasks(
                 output=first,
-                count=8,
+                count=12,
                 seed=20260807,
             )
             generate_mahjong_static_tasks(
                 output=second,
-                count=8,
+                count=12,
                 seed=20260807,
             )
 
@@ -212,9 +347,41 @@ class MahjongTests(unittest.TestCase):
                     "easy/max_wait_discard": 2,
                     "hard/winning_tiles": 2,
                     "hard/max_wait_discard": 2,
+                    "easy/winning_tiles/visible:12": 2,
+                    "easy/max_ukeire_discard/visible:12": 2,
                 },
             )
             self.assertEqual(first.read_text(encoding="utf-8"), second.read_text(encoding="utf-8"))
+
+            tasks = load_mahjong_tasks(first)
+            visible_tasks = [task for task in tasks if "static-visible" in task.tags]
+            self.assertEqual(len(visible_tasks), 4)
+            self.assertTrue(all(len(task.visible_tiles) == 12 for task in visible_tasks))
+
+    def test_visible_max_ukeire_requires_selected_discard_waits_and_counts(self):
+        task = next(
+            task
+            for task in load_mahjong_tasks()
+            if "static-visible" in task.tags
+            and task.goal == "max_ukeire_discard"
+        )
+        answer = expected_answer(task)
+
+        self.assertEqual(
+            validate_mahjong_answer(task, answer),
+            (True, ["valid_max_ukeire_discard"]),
+        )
+        missing_waits = dict(answer)
+        missing_waits.pop("winning_tiles")
+        self.assertEqual(
+            validate_mahjong_answer(task, missing_waits),
+            (False, ["missing_winning_tiles"]),
+        )
+
+    def test_static_generator_cli_defaults_to_ninety_tasks(self):
+        args = build_parser().parse_args(["generate-mahjong-static"])
+
+        self.assertEqual(args.count, 90)
 
     def test_cli_marks_static_checkpoint_interrupted(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -260,6 +427,23 @@ class MahjongTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(reasons, ["valid_tenpai_discard"])
 
+    def test_rejects_undefined_discard_fields(self):
+        ok, reasons = validate_mahjong_answer(
+            discard_task(),
+            {"discard": "9s", "winning_tiles": ["E"]},
+        )
+
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ["unexpected_fields:winning_tiles"])
+
+    def test_system_prompt_leaves_json_formatting_to_task_prompt(self):
+        self.assertNotIn("Return exactly one JSON", MAHJONG_SYSTEM_PROMPT)
+        self.assertNotIn("no markdown", MAHJONG_SYSTEM_PROMPT)
+        self.assertIn(
+            'Return only {"discard":"..."}.',
+            build_mahjong_prompt(discard_task()),
+        )
+
     def test_evaluates_agent_answer(self):
         result = evaluate_mahjong_tasks(
             [wait_task()],
@@ -268,6 +452,52 @@ class MahjongTests(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.expected_answer, {"winning_tiles": ["E"]})
+
+    def test_static_summary_omits_multimodal_metrics(self):
+        results = evaluate_mahjong_tasks(
+            [wait_task()],
+            FixedMahjongAgent({"winning_tiles": ["E"]}),
+        )
+
+        summary = summarize_mahjong(results)
+
+        multimodal_keys = {
+            "by_input_mode",
+            "visual_gap",
+            "hand_transcription_accuracy",
+            "hand_transcription_exact_rate",
+            "visible_tiles_transcription_accuracy",
+            "visible_tiles_transcription_exact_rate",
+            "transcription_exact_rate",
+            "joint_success_rate",
+        }
+        self.assertTrue(multimodal_keys.isdisjoint(summary))
+
+    def test_static_predictions_omit_multimodal_transcription_fields(self):
+        results = evaluate_mahjong_tasks(
+            [wait_task()],
+            FixedMahjongAgent({"winning_tiles": ["E"]}),
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = write_mahjong_run(
+                results,
+                output_dir=tmpdir,
+                run_name="static-prediction-fields",
+            )
+            prediction = json.loads(
+                (run_dir / "predictions.jsonl").read_text(encoding="utf-8")
+            )
+
+        transcription_fields = {
+            "expected_transcription",
+            "hand_transcription_accuracy",
+            "hand_transcription_exact",
+            "visible_tiles_transcription_accuracy",
+            "visible_tiles_transcription_exact",
+            "transcription_exact",
+            "joint_success",
+        }
+        self.assertTrue(transcription_fields.isdisjoint(prediction))
 
     def test_winning_hand_shanten_is_negative_one(self):
         hand = [
