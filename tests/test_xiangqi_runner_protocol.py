@@ -28,7 +28,8 @@ class RunnerProtocolTests(unittest.TestCase):
             record = deepcopy(seed)
             record.update(id=family + "-fixture", family=family)
             if key == "h2":
-                record.update(difficulty="short", max_plies=5)
+                record = json.loads((smoke.ROOT / "data/xiangqi/history/tasks.jsonl").read_text(encoding="utf-8").splitlines()[0])
+                record["id"] = family + "-fixture"
             other = deepcopy(record)
             other["id"] += "-other"
             source, selected, config_path = self.root / f"{key}-source.jsonl", self.root / f"{key}-selected.jsonl", self.root / f"{key}.yaml"

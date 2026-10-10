@@ -20,6 +20,12 @@ FAMILY_PATHS = {
     "xiangqi-history": Path("data/xiangqi/history/tasks.jsonl"),
     "xiangqi-multimodal": Path("data/xiangqi/multimodal/tasks.jsonl"),
 }
+LEGACY_FAMILY_NAMES = {
+    "D3": "xiangqi-mate-in-one",
+    "C2": "xiangqi-rule-variants",
+    "H2": "xiangqi-history",
+    "M2": "xiangqi-multimodal",
+}
 RULESETS = (
     "standard",
     "horse-no-leg-block",
@@ -141,11 +147,7 @@ def validate_record(record: dict[str, Any], *, expected_family: str | None = Non
     position_errors = validate_position(board, 1 if side_to_move == "red" else -1)
     if position_errors:
         raise ValueError(f"{task_id}: invalid initial position: {'; '.join(position_errors)}")
-    expected_goal = (
-        "best-move-under-rule"
-        if family == "xiangqi-rule-variants"
-        else "checkmate"
-    )
+    expected_goal = "checkmate"
     if record.get("goal") != expected_goal:
         raise ValueError(f"{task_id}: goal must be {expected_goal}")
     max_plies = record.get("max_plies")
@@ -180,13 +182,17 @@ def validate_record(record: dict[str, Any], *, expected_family: str | None = Non
         raise ValueError(f"{task_id}: oracle.evaluation_cp is invalid")
     if family == "xiangqi-mate-in-one":
         _validate_mate_in_one_record(record)
-    if family == "xiangqi-rule-variants":
-        _validate_rule_record(record)
+    elif family == "xiangqi-rule-variants":
         from minibench.datasets.xiangqi.reference import in_check
 
         side = 1 if side_to_move == "red" else -1
         if in_check(board, -side, internal_rules(record)):
             raise ValueError(f"{task_id}: active rules leave side not to move in check")
+        _validate_rule_record(record)
+    elif family == "xiangqi-history":
+        _validate_history_record(record)
+    elif family == "xiangqi-multimodal":
+        _validate_multimodal_record(record)
     return record
 
 
@@ -210,6 +216,10 @@ def _validate_mate_in_one_record(record: dict[str, Any]) -> None:
         raise ValueError(f"{record['id']}: invalid d3_analysis.mate_moves_uci")
     if analysis["mate_move_count"] != len(moves) or analysis["piece_count"] != record["piece_count"]:
         raise ValueError(f"{record['id']}: inconsistent d3_analysis counts")
+    if record["max_plies"] != 1 or record["oracle"]["mate_in_plies"] != 1:
+        raise ValueError(f"{record['id']}: D3 requires an exact one-ply mate horizon")
+    if record["oracle"]["best_move_uci"] not in moves:
+        raise ValueError(f"{record['id']}: D3 oracle move is not in the complete mate set")
     if not isinstance(analysis["difficulty_score"], (int, float)):
         raise ValueError(f"{record['id']}: invalid d3_analysis.difficulty_score")
     factors = analysis["difficulty_factors"]
@@ -248,6 +258,144 @@ def _validate_rule_record(record: dict[str, Any]) -> None:
     }[ruleset]
     if record.get("rules") != expected:
         raise ValueError(f"{task_id}: rules do not match ruleset {ruleset}")
+    source_task_id = record.get("source_task_id")
+    if not isinstance(source_task_id, str) or not source_task_id.startswith("xiangqi-history-"):
+        raise ValueError(f"{task_id}: C2 requires an audited H2 source_task_id")
+    analysis = record.get("c2_analysis")
+    required = {
+        "version", "source_task_id", "focus_ruleset", "pair_rulesets",
+        "mate_in_moves", "reference_mate_plies", "principal_variation_uci",
+        "rule_sensitive_along_reference", "search_depth", "loss_unit",
+        "max_plies_extension", "verification", "interpretation",
+    }
+    if not isinstance(analysis, dict) or set(analysis) != required:
+        raise ValueError(f"{task_id}: invalid c2_analysis schema")
+    if analysis.get("version") != "c2-multistep-rule-mate-v3":
+        raise ValueError(f"{task_id}: unsupported C2 protocol version")
+    focus = analysis.get("focus_ruleset")
+    if focus not in set(RULESETS) - {"standard"}:
+        raise ValueError(f"{task_id}: invalid C2 focus ruleset")
+    if analysis.get("pair_rulesets") != ["standard", focus] or ruleset not in {"standard", focus}:
+        raise ValueError(f"{task_id}: C2 row is not part of its declared standard/rule pair")
+    if record.get("design_stratum") != focus:
+        raise ValueError(f"{task_id}: C2 design stratum must equal focus_ruleset")
+    if analysis.get("source_task_id") != source_task_id:
+        raise ValueError(f"{task_id}: C2 source metadata disagree")
+    mate_moves = analysis.get("mate_in_moves")
+    if not isinstance(mate_moves, int) or isinstance(mate_moves, bool) or not 2 <= mate_moves <= 12:
+        raise ValueError(f"{task_id}: C2 requires a 2..12 move multi-ply mate")
+    reference_plies = 2 * mate_moves - 1
+    expected_band = "short" if mate_moves <= 3 else "medium" if mate_moves <= 5 else "long"
+    if record["difficulty"] != expected_band:
+        raise ValueError(f"{task_id}: C2 difficulty does not match mate distance")
+    if (analysis.get("reference_mate_plies") != reference_plies
+            or record["oracle"].get("mate_in_plies") != reference_plies):
+        raise ValueError(f"{task_id}: inconsistent C2 reference mate distance")
+    if analysis.get("max_plies_extension") != 4 or record["max_plies"] != reference_plies + 4:
+        raise ValueError(f"{task_id}: C2 bounded horizon must add four half-moves")
+    pv = analysis.get("principal_variation_uci")
+    if (not isinstance(pv, list) or len(pv) != reference_plies
+            or any(not isinstance(move, str) or re.fullmatch(r"[a-i][0-9][a-i][0-9]", move) is None for move in pv)):
+        raise ValueError(f"{task_id}: invalid C2 principal variation")
+    if record["oracle"].get("best_move_uci") != pv[0]:
+        raise ValueError(f"{task_id}: C2 oracle move does not match the reference line")
+    if analysis.get("search_depth") != 3:
+        raise ValueError(f"{task_id}: C2 release requires rule-aware search depth 3")
+    from minibench.datasets.xiangqi.variants.mate_search import LOSS_UNIT, replay_strict_mate_line
+    if analysis.get("loss_unit") != LOSS_UNIT:
+        raise ValueError(f"{task_id}: C2 loss unit is not the registered non-Pikafish scale")
+    if not isinstance(analysis.get("rule_sensitive_along_reference"), bool):
+        raise ValueError(f"{task_id}: invalid C2 rule-sensitivity flag")
+    verification = analysis.get("verification")
+    if not isinstance(verification, dict) or set(verification) != {"production", "independent"}:
+        raise ValueError(f"{task_id}: invalid C2 verification metadata")
+    for name in ("production", "independent"):
+        proof = verification.get(name)
+        if (not isinstance(proof, dict) or proof.get("valid") is not True
+                or proof.get("terminal") != "checkmate" or proof.get("plies") != reference_plies):
+            raise ValueError(f"{task_id}: invalid stored C2 {name} replay proof")
+    if not isinstance(analysis.get("interpretation"), str) or not analysis["interpretation"]:
+        raise ValueError(f"{task_id}: missing C2 claim limitation")
+
+    board, color = fen_to_board(record["fen"])
+    side = 1 if color == "red" else -1
+    from minibench.datasets.xiangqi.variants.board import VariantBoard
+    from minibench.datasets.xiangqi.variants.rules import Rule
+    production = replay_strict_mate_line(
+        VariantBoard(board, [Rule.from_dict(rule) for rule in internal_rules(record)]),
+        side,
+        pv,
+        attacker_side=side,
+    )
+    if not production["valid"] or production["terminal"] != "checkmate":
+        raise ValueError(f"{task_id}: C2 reference line fails production replay")
+    from minibench.datasets.xiangqi import reference
+    state = board
+    turn = side
+    active = internal_rules(record)
+    for index, uci in enumerate(pv):
+        moves = {move.to_uci(): move for move in reference.legal_moves(state, turn, active)}
+        if uci not in moves:
+            raise ValueError(f"{task_id}: C2 independent replay rejects ply {index}")
+        state = reference.apply_move(state, moves[uci])
+        turn = -turn
+    if reference.terminal_status(state, turn, active) != "checkmate" or turn != -side:
+        raise ValueError(f"{task_id}: C2 independent replay does not end in strict mate")
+
+
+def _validate_history_record(record: dict[str, Any]) -> None:
+    task_id = record["id"]
+    analysis = record.get("h2_analysis")
+    required = {
+        "version", "mate_in_moves", "reference_mate_plies", "verification_depths",
+        "requested_depths", "principal_variation_uci", "validation_runs",
+        "source_reused", "interpretation",
+    }
+    if not isinstance(analysis, dict) or not required.issubset(analysis):
+        raise ValueError(f"{task_id}: invalid h2_analysis schema")
+    mate_moves = analysis.get("mate_in_moves")
+    if not isinstance(mate_moves, int) or isinstance(mate_moves, bool) or not 2 <= mate_moves <= 12:
+        raise ValueError(f"{task_id}: H2 reference mate distance must be 2..12 moves")
+    reference_plies = 2 * mate_moves - 1
+    expected_band = "short" if mate_moves <= 3 else "medium" if mate_moves <= 5 else "long"
+    if analysis.get("reference_mate_plies") != reference_plies or record["oracle"]["mate_in_plies"] != reference_plies:
+        raise ValueError(f"{task_id}: inconsistent H2 reference distance")
+    if record["difficulty"] != expected_band:
+        raise ValueError(f"{task_id}: H2 difficulty does not match reference distance")
+    if record["max_plies"] != reference_plies + 4:
+        raise ValueError(f"{task_id}: H2 extended horizon must add four half-moves")
+    if analysis.get("requested_depths") != [16, 20] or analysis.get("source_reused") is not False:
+        raise ValueError(f"{task_id}: invalid H2 verification metadata")
+    runs = analysis.get("validation_runs")
+    if not isinstance(runs, list) or len(runs) != 2:
+        raise ValueError(f"{task_id}: H2 requires two engine validation runs")
+    pv = analysis.get("principal_variation_uci")
+    if (not isinstance(pv, list) or len(pv) != reference_plies
+            or any(not isinstance(move, str) or re.fullmatch(r"[a-i][0-9][a-i][0-9]", move) is None for move in pv)):
+        raise ValueError(f"{task_id}: invalid H2 principal variation")
+    if record["oracle"]["best_move_uci"] != pv[0]:
+        raise ValueError(f"{task_id}: H2 oracle move does not match the primary PV")
+
+
+def _validate_multimodal_record(record: dict[str, Any]) -> None:
+    task_id = record["id"]
+    if record["max_plies"] != 1 or record["oracle"]["mate_in_plies"] != 1:
+        raise ValueError(f"{task_id}: M2 requires an exact one-ply mate horizon")
+    source_task_id = record.get("source_task_id")
+    if not isinstance(source_task_id, str) or not source_task_id.startswith("xiangqi-mate-in-one-"):
+        raise ValueError(f"{task_id}: invalid M2 source_task_id")
+    analysis = record.get("m2_analysis")
+    required = {"version", "mate_moves_uci", "mate_move_count", "verification"}
+    if not isinstance(analysis, dict) or set(analysis) != required:
+        raise ValueError(f"{task_id}: invalid m2_analysis schema")
+    if analysis.get("version") != "m2-paired-mate-in-one-v1":
+        raise ValueError(f"{task_id}: unsupported M2 analysis version")
+    moves = analysis.get("mate_moves_uci")
+    if (not isinstance(moves, list) or not moves or moves != sorted(set(moves))
+            or any(not isinstance(move, str) or re.fullmatch(r"[a-i][0-9][a-i][0-9]", move) is None for move in moves)):
+        raise ValueError(f"{task_id}: invalid M2 mate move set")
+    if analysis.get("mate_move_count") != len(moves) or record["oracle"]["best_move_uci"] not in moves:
+        raise ValueError(f"{task_id}: inconsistent M2 mate metadata")
 
 
 def load_records(
@@ -379,14 +527,18 @@ def sample_records(
         groups: dict[str, list[dict[str, Any]]] = {}
         for record in records:
             groups.setdefault(record.get("scenario_id") or record["id"], []).append(record)
-        expected_rulesets = set(RULESETS)
-        paired = {
-            scenario_id: group
-            for scenario_id, group in groups.items()
-            if {record.get("ruleset") for record in group} == expected_rulesets
-            and len(group) == len(expected_rulesets)
-            and len({record["fen"] for record in group}) == 1
-        }
+        paired = {}
+        for scenario_id, group in groups.items():
+            labels = {record.get("design_stratum") for record in group}
+            if len(labels) != 1:
+                continue
+            focus = next(iter(labels))
+            if focus not in set(RULESETS) - {"standard"}:
+                continue
+            if ({record.get("ruleset") for record in group} == {"standard", focus}
+                    and len(group) == 2
+                    and len({record["fen"] for record in group}) == 1):
+                paired[scenario_id] = group
         scenarios = sorted(paired)
         if count > len(scenarios):
             raise ValueError(

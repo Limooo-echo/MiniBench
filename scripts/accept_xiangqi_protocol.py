@@ -26,8 +26,10 @@ from minibench.datasets.xiangqi.engines.pikafish import PikafishEngine, board_to
 from minibench.datasets.xiangqi.runtime import PROTOCOL_VERSION
 from minibench.datasets.xiangqi.schema import FAMILY_PATHS, runtime_dict, validate_record
 from minibench.datasets.xiangqi.variants.board import VariantBoard
+from minibench.datasets.xiangqi.variants.mate_search import score_moves_cpe
+from minibench.datasets.xiangqi.variants.certification import certificate_header_valid
 from minibench.datasets.xiangqi.variants.rules import Rule
-from minibench.datasets.xiangqi.variants.search import score_moves
+from minibench.datasets.xiangqi.text_encoding import FILES, piece_symbol
 
 FAMILIES = {"d3": "xiangqi-mate-in-one", "c2": "xiangqi-rule-variants", "h2": "xiangqi-history", "m2": "xiangqi-multimodal"}
 
@@ -45,8 +47,9 @@ def replay_history(board: list[list[int]], side: int, moves: list[str]) -> tuple
 
 class CorrectAgent:
     """A transparent rules oracle; it deliberately receives task data for testing."""
-    def __init__(self, engine: PikafishEngine | None = None):
+    def __init__(self, engine: PikafishEngine | None = None, *, c2_witnesses=None):
         self.engine, self.calls, self.resets = engine, 0, 0
+        self.c2_witnesses = c2_witnesses or {}
 
     def reset(self):
         self.resets += 1
@@ -64,14 +67,47 @@ class CorrectAgent:
             else:
                 uci = d3.enumerate_mate_in_one_moves(task.board, side)[0]
         elif task.get("family") == "xiangqi-rule-variants":
-            position = VariantBoard(task["board"], [Rule.from_dict(rule) for rule in task.get("rules", [])])
-            uci = score_moves(position, 1, 3, 1)[0][0].to_uci()
+            agent_side = 1 if task.get("agent_color") == "red" else -1
+            side = 1 if task.get("side_to_move") == "ally" else -1
+            position = VariantBoard(
+                task["board"],
+                [Rule.from_dict(rule) for rule in task.get("rules", [])],
+            )
+            for uci in moves:
+                legal = {move.to_uci(): move for move in position.legal_moves(side)}
+                if uci not in legal:
+                    raise ValueError(f"scripted C2 history contains illegal move {uci}")
+                position.apply(legal[uci])
+                side = -side
+            if side != agent_side:
+                raise ValueError("scripted C2 agent was called out of turn")
+            reference = self.c2_witnesses.get(task["id"], [])
+            if list(moves) == reference[: len(moves)] and len(moves) < len(reference):
+                uci = reference[len(moves)]
+            else:
+                scored = score_moves_cpe(
+                    position,
+                    side,
+                    depth=3,
+                    perspective_side=agent_side,
+                )
+                if not scored:
+                    raise ValueError("scripted C2 search returned no move")
+                uci = scored[0].move.to_uci()
         else:
             uci = d3.enumerate_mate_in_one_moves(task["board"], m2._agent_side(task))[0]
+        if isinstance(task, dict) and task.get("family") == "xiangqi-multimodal":
+            pieces = {f"{FILES[c]}{9-r}": piece_symbol(p)
+                      for r, row in enumerate(task["board"]) for c, p in enumerate(row) if p}
+            return json.dumps({"move": uci, "pieces": pieces})
         return json.dumps({"move": uci})
 
     def generate(self, prompt, task):
-        moves = re.findall(r"^(?:agent|pikafish): ([a-i][0-9][a-i][0-9])$", prompt, re.MULTILINE)
+        moves = re.findall(
+            r"^(?:agent|pikafish|depth-opponent): ([a-i][0-9][a-i][0-9])$",
+            prompt,
+            re.MULTILINE,
+        )
         return self._answer(task, moves)
 
     def generate_messages(self, messages, task, **_kwargs):
@@ -130,7 +166,7 @@ def _read_first(family: str, *, source_task_id: str | None = None) -> tuple[dict
     return record, {"path": str(path), "sha256": sha256(raw).hexdigest(), "selected_id": record["id"]}
 
 
-def run_acceptance(output_dir: Path, engine_path: Path, families: list[str]) -> dict[str, Any]:
+def run_acceptance(output_dir: Path, engine_path: Path, families: list[str], *, verify_all_one_move=False) -> dict[str, Any]:
     # An existing directory is never reused, even after an interrupted run.
     output_dir.mkdir(parents=True, exist_ok=False)
     selected, sources = {}, {}
@@ -148,6 +184,14 @@ def run_acceptance(output_dir: Path, engine_path: Path, families: list[str]) -> 
     (output_dir / "selected_tasks.jsonl").write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in selected.values()), encoding="utf-8")
     (output_dir / "plan.json").write_text(json.dumps({"cases": ["correct_scripted_agent", "returned_invalid_answer", "provider_timeout", "legal_wrong_d3", "diagnostic_engine_fault_d3_m2", "required_opponent_fault_h2"], "checkpoint": "append each individual task/mode result before continuing"}, indent=2) + "\n", encoding="utf-8")
     checks, recorded = {}, []
+    c2_witnesses = {}
+    if "c2" in families:
+        certificate_path = ROOT / "data/xiangqi/rule_variants/runtime_certificates.json"
+        bundle = json.loads(certificate_path.read_text())
+        records = [json.loads(line) for line in (ROOT / FAMILY_PATHS[FAMILIES["c2"]]).read_text().splitlines() if line.strip()]
+        if not certificate_header_valid(bundle, records, sources["c2"]["sha256"]):
+            raise ValueError("C2 runtime certificates do not bind the current corpus and policy")
+        c2_witnesses = {key: entry["moves_uci"] for key, entry in bundle["tasks"].items()}
     checkpoint_path = output_dir / "predictions.jsonl"
     checkpoint_path.touch(exist_ok=False)
 
@@ -173,9 +217,26 @@ def run_acceptance(output_dir: Path, engine_path: Path, families: list[str]) -> 
 
     try:
         with PikafishEngine(engine_path, timeout=60.0) as reference_engine:
+            if verify_all_one_move:
+                d3_rows = [json.loads(line) for line in (ROOT / FAMILY_PATHS[FAMILIES["d3"]]).read_text().splitlines() if line.strip()]
+                m2_rows = [json.loads(line) for line in (ROOT / FAMILY_PATHS[FAMILIES["m2"]]).read_text().splitlines() if line.strip()]
+                source_by_id = {r["id"]: r for r in d3_rows}
+                proofs = []
+                for record in m2_rows:
+                    source = source_by_id[record["source_task_id"]]
+                    if source["fen"] != record["fen"]:
+                        raise ValueError(f"D3/M2 initial board differs: {record['id']}")
+                    analysis = m2._verify_m2_oracle(runtime_dict(record), reference_engine, depth=8)
+                    proofs.append({"d3_id": source["id"], "m2_id": record["id"],
+                                   "bestmove": analysis.bestmove, "score_kind": analysis.score_kind,
+                                   "score": analysis.score, "depth": analysis.depth})
+                checks["d3_m2.all_submitted_positions_confirmed_by_pikafish"] = len(proofs) == 100
+                (output_dir / "one_move_oracles.json").write_text(json.dumps(proofs, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             for family in families:
-                results = run_case(family, "correct_scripted_agent", CorrectAgent(reference_engine))
+                results = run_case(family, "correct_scripted_agent", CorrectAgent(reference_engine, c2_witnesses=c2_witnesses))
                 checks[family + ".correct"] = all(r["status"] == "ok" and r["success"] is True for r in results)
+                if family == "m2":
+                    checks["m2.recognition"] = all(r["recognition_accuracy"] == 1 for r in results)
                 bad = FixedAgent()
                 results = run_case(family, "returned_invalid_answer", bad)
                 checks[family + ".invalid_answer"] = all(r["status"] == "invalid" and r["success"] is False for r in results)
@@ -213,11 +274,14 @@ def main():
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--pikafish-path", required=True, type=Path)
     parser.add_argument("--families", default="d3,h2,m2,c2")
+    parser.add_argument("--verify-all-one-move", action="store_true",
+                        help="Also verify all 100 paired D3/M2 positions with real Pikafish; no LLM calls")
     args = parser.parse_args()
     families = args.families.split(",")
     if len(set(families)) != len(families) or set(families) - set(FAMILIES):
         parser.error("families must be a unique comma-separated subset of d3,h2,m2,c2")
-    report = run_acceptance(args.output_dir.resolve(), args.pikafish_path.resolve(), families)
+    report = run_acceptance(args.output_dir.resolve(), args.pikafish_path.resolve(), families,
+                            verify_all_one_move=args.verify_all_one_move)
     print(json.dumps({"status": report["status"], "result_count": report["result_count"], "failed_checks": report["failed_checks"], "report": str(args.output_dir / "protocol_acceptance.json")}, ensure_ascii=False))
     return 0 if report["status"] == "passed" else 1
 

@@ -12,10 +12,11 @@ from unittest.mock import patch
 from minibench.agents.direct import DirectAgent
 from minibench.core.agent import ReasoningConfig
 from minibench.core.runtime import StrictJSONObjectError
+from minibench.datasets.xiangqi.runtime import extract_strict_uci_move
 from minibench.datasets.xiangqi.dataset import XiangqiTask
-from minibench.datasets.xiangqi.schema import board_to_fen
 from minibench.datasets.xiangqi import mate_in_one as d3, history as h2, multimodal as m2, rule_variants as c2
 from minibench.datasets.xiangqi.variants.board import VariantBoard
+from minibench.datasets.xiangqi.variants.mate_search import MoveValue
 
 
 def board_fixture(*, with_pawn=False):
@@ -32,13 +33,24 @@ def board_fixture(*, with_pawn=False):
 def task_fixture(**changes):
     task = XiangqiTask(id="runtime-unit", board=board_fixture(), side_to_move="ally", agent_side="ally",
                        max_steps=3, tags=(), difficulty="short", oracle={}, schema_version=2,
-                       family="xiangqi-history", fen=board_to_fen(board_fixture()), agent_color="red")
+                       family="xiangqi-history", fen="", agent_color="red")
     return replace(task, **changes)
 
 
 def dict_fixture(**changes):
-    return {"id": "runtime-unit", "scenario_id": "runtime-unit", "difficulty": "unit",
-            "agent_color": "red", "board": board_fixture(), "rules": [], "ruleset": "standard", **changes}
+    return {
+        "id": "runtime-unit",
+        "scenario_id": "runtime-scenario",
+        "board": board_fixture(),
+        "rules": [],
+        "ruleset": "standard",
+        "agent_color": "red",
+        "side_to_move": "ally",
+        "max_plies": 3,
+        "difficulty": "short",
+        "oracle": {"mate_in_plies": 1},
+        **changes,
+    }
 
 
 class FixedAgent:
@@ -86,6 +98,18 @@ def no_engine(module):
 
 
 class RuntimeErrorsTests(unittest.TestCase):
+    def test_move_output_requires_exact_single_field_json(self):
+        self.assertEqual(extract_strict_uci_move('{"move":"H5H9"}'), "h5h9")
+        for raw in (
+            "h5h9",
+            '{"answer":"h5h9"}',
+            '{"move":"h5h9","analysis":"extra"}',
+            '{"move":"h5h9 trailing"}',
+            '```json\n{"move":"h5h9"}\n```',
+        ):
+            with self.subTest(raw=raw):
+                self.assertIsNone(extract_strict_uci_move(raw))
+
     def test_d3_engine_start_failure_does_not_change_exact_success(self):
         agent = FixedAgent()
         received = []
@@ -118,7 +142,7 @@ class RuntimeErrorsTests(unittest.TestCase):
         self.assertEqual((bad.status, bad.success), ("invalid", False))
         summary = d3.summarize_mate_in_one([good, missing, bad])
         self.assertEqual((summary["total"], summary["evaluated"], summary["missing"], summary["invalid"]), (3, 2, 1, 1))
-        self.assertEqual(summary["mate_at_one_rate"], .5)
+        self.assertEqual(summary["mate_rate"], .5)
 
     def test_complete_response_is_preserved(self):
         raw = json.dumps({"move": "a8d8", "padding": "evidence " * 150})
@@ -136,7 +160,7 @@ class RuntimeErrorsTests(unittest.TestCase):
         self.assertEqual(received, results)
         self.assertTrue(all(r.status == "error" and r.success is None and r.error["stage"] == "model" for r in results))
         summary = h2.summarize_history(results)
-        self.assertIsNone(summary["success_rate"])
+        self.assertIsNone(summary["mate_rate"])
         self.assertEqual(summary["paired_comparison"]["paired_total"], 0)
 
     def test_h2_refuses_to_drop_history_for_unsupported_agent(self):
@@ -154,6 +178,38 @@ class RuntimeErrorsTests(unittest.TestCase):
             result = h2.evaluate_history_tasks([task_fixture()], FixedAgent('{"move":"a8a7"}'))[0]
         self.assertEqual((result.status, result.success), ("ok", False))
         self.assertEqual(result.termination_reason, "stalemate")
+
+    def test_h2_reports_strict_and_extended_mate_windows_separately(self):
+        class SequenceAgent(FixedAgent):
+            def __init__(self):
+                super().__init__()
+                self.outputs = iter(('{"move":"a8a7"}', '{"move":"a7a8"}', '{"move":"a8d8"}'))
+
+            def generate(self, *_args):
+                self.calls += 1
+                return next(self.outputs)
+
+        def analysis(_engine, board, side, **_kwargs):
+            if side == 1:
+                return "a8d8", 0.0
+            return ("a6a5", 0.0) if board.board[3][0] else ("a5a4", 0.0)
+
+        task = task_fixture(
+            board=board_fixture(with_pawn=True), max_steps=5,
+            oracle={"mate_in_plies": 3},
+        )
+        with no_engine(h2), patch.object(h2, "_pikafish_analysis", side_effect=analysis):
+            result = h2.evaluate_history_tasks([task], SequenceAgent())[0]
+        self.assertEqual(result.checkmate_ply, 5)
+        self.assertTrue(result.success)
+        self.assertTrue(result.goal_achieved)
+        self.assertTrue(result.extended_mate_success)
+        self.assertFalse(result.mate_within_prescribed_steps)
+        self.assertEqual(result.reference_mate_plies, 3)
+        self.assertIsNone(result.first_move_optimal_rate)
+        summary = h2.summarize_history([result])
+        self.assertEqual(summary["mate_rate"], 1.0)
+        self.assertEqual(summary["mate_within_prescribed_rate"], 0.0)
 
     def test_h2_unavailable_required_opponent_is_missing(self):
         with no_engine(h2):
@@ -183,11 +239,11 @@ class RuntimeErrorsTests(unittest.TestCase):
         received = []
         with patch.object(m2, "render_board_png", return_value=b"image"):
             results = m2.evaluate_xiangqi_multimodal_tasks([dict_fixture()], agent, verify_with_pikafish=False, on_result=received.append)
-        self.assertEqual(agent.calls, 3)
-        self.assertEqual(agent.resets, 3)
+        self.assertEqual(agent.calls, 2)
+        self.assertEqual(agent.resets, 2)
         self.assertEqual(received, results)
         self.assertTrue(all(r["status"] == "invalid" and r["success"] is False for r in results))
-        self.assertEqual(m2.summarize_xiangqi_multimodal(results)["by_input_mode"]["text"]["success_rate"], 0)
+        self.assertEqual(m2.summarize_xiangqi_multimodal(results)["by_input_mode"]["text"]["mate_rate"], 0)
 
     def test_m2_diagnostic_start_failure_does_not_suppress_exact_score(self):
         with no_engine(m2):
@@ -226,9 +282,9 @@ class RuntimeErrorsTests(unittest.TestCase):
         with patch.object(m2, "render_board_png", return_value=b"image"):
             results = m2.evaluate_xiangqi_multimodal_tasks([dict_fixture()], ImageOutage(), verify_with_pikafish=False)
         summary = m2.summarize_xiangqi_multimodal(results)
-        self.assertEqual(summary["missing"], 2)
-        self.assertEqual(summary["visual_gap"]["chinese-piece-image"]["paired_total"], 0)
-        self.assertIsNone(summary["by_input_mode"]["chinese-piece-image"]["success_rate"])
+        self.assertEqual(summary["missing"], 1)
+        self.assertIsNone(summary["by_input_mode"]["chinese-piece-image"]["mate_rate"])
+        self.assertIsNone(summary["by_input_mode"]["chinese-piece-image"]["legality_rate"])
 
     def test_wrong_engine_hash_preserves_d3_and_m2_exact_scores_without_startup(self):
         actual = {"binary_sha256": "a" * 64, "eval_file_sha256": "b" * 64}
@@ -252,28 +308,52 @@ class RuntimeErrorsTests(unittest.TestCase):
         self.assertTrue(all(r.error["stage"] == "opponent_engine" for r in results))
         self.assertTrue(all("fingerprint mismatch" in r.diagnostics[0]["reason"] for r in results))
 
-    def test_c2_all_equivalent_best_moves_are_accepted(self):
+    def test_c2_mate_success_is_separate_from_loss_and_search_depth_is_fixed(self):
         legal = VariantBoard(board_fixture(), []).legal_moves(1)
-        scored = [(legal[0], 20.0), (legal[1], 20.0000005), (legal[2], 10.0)]
-        with patch.object(c2, "score_moves", return_value=scored) as oracle:
-            first = c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent(json.dumps({"move": legal[0].to_uci()})))
-            second = c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent(json.dumps({"move": legal[1].to_uci()})))
-            wrong = c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent(json.dumps({"move": legal[2].to_uci()})))
+        mate_uci = d3.enumerate_mate_in_one_moves(board_fixture(), 1)
+        mates = [move for move in legal if move.to_uci() in mate_uci]
+        self.assertGreaterEqual(len(mates), 2)
+        wrong_move = next(move for move in legal if move.to_uci() not in mate_uci)
+        scored = [
+            MoveValue(mates[0], 20.0000005),
+            MoveValue(mates[1], 20.0),
+            MoveValue(wrong_move, 10.0),
+        ]
+        with patch.object(c2, "score_moves_cpe", return_value=scored) as oracle:
+            first = c2.evaluate_rule_variant_task(
+                dict_fixture(max_plies=1),
+                FixedAgent(json.dumps({"move": mates[0].to_uci()})),
+            )
+            second = c2.evaluate_rule_variant_task(
+                dict_fixture(max_plies=1),
+                FixedAgent(json.dumps({"move": mates[1].to_uci()})),
+            )
+            wrong = c2.evaluate_rule_variant_task(
+                dict_fixture(max_plies=1),
+                FixedAgent(json.dumps({"move": wrong_move.to_uci()})),
+            )
         self.assertTrue(first.success)
         self.assertTrue(second.success)
+        self.assertTrue(first.steps[0]["is_optimal"])
+        self.assertTrue(second.steps[0]["is_optimal"])
+        self.assertEqual(first.avg_variant_loss, 0.0)
+        self.assertEqual(second.avg_variant_loss, 0.0)
         self.assertEqual((wrong.status, wrong.success), ("ok", False))
-        self.assertEqual(oracle.call_args.args[2], 3)
-        with self.assertRaisesRegex(ValueError, "depth 3"):
-            c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent(), oracle_depth=2)
+        self.assertEqual(wrong.legality_rate, 1.0)
+        self.assertEqual(wrong.avg_variant_loss, 10.0)
+        self.assertEqual(oracle.call_args.kwargs["depth"], 3)
+        with self.assertRaisesRegex(ValueError, "search_depth=3"):
+            c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent(), search_depth=2)
 
     def test_c2_judge_and_model_errors_are_missing(self):
-        with patch.object(c2, "score_moves", side_effect=RuntimeError("judge crashed")):
+        with patch.object(c2, "score_moves_cpe", side_effect=RuntimeError("judge crashed")):
             judge = c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent())
-        with patch.object(c2, "score_moves", return_value=[]):
-            provider = c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent(error=TimeoutError("timeout")))
+        provider = c2.evaluate_rule_variant_task(
+            dict_fixture(), FixedAgent(error=TimeoutError("timeout"))
+        )
         self.assertEqual(judge.error["stage"], "judge")
         self.assertEqual(provider.error["stage"], "model")
-        self.assertIsNone(c2.summarize_rule_variants([judge, provider])["success_rate"])
+        self.assertIsNone(c2.summarize_rule_variants([judge, provider])["mate_rate"])
 
     def test_architecture_format_repair_failure_is_invalid_in_every_family(self):
         for family in ("d3", "h2", "c2", "m2"):
@@ -289,7 +369,6 @@ class RuntimeErrorsTests(unittest.TestCase):
                     result = asdict(h2.evaluate_history_tasks([task_fixture()], agent)[0])
                     raw = result["steps"][0]["raw_output"]
                 elif family == "c2":
-                    stack.enter_context(patch.object(c2, "score_moves", return_value=[]))
                     result = asdict(c2.evaluate_rule_variant_task(dict_fixture(), agent))
                     raw = result["steps"][0]["raw_output"]
                 else:
@@ -308,7 +387,7 @@ class RuntimeErrorsTests(unittest.TestCase):
         with patch.object(m2, "render_board_png", return_value=b"image"):
             results = m2.evaluate_xiangqi_multimodal_tasks([dict_fixture()], agent, verify_with_pikafish=False)
         self.assertTrue(all(r["success"] for r in results))
-        self.assertEqual(len(client.options), 3)
+        self.assertEqual(len(client.options), 2)
         for key in ("temperature", "max_tokens", "json_mode"):
             self.assertEqual(len({options[key] for options in client.options}), 1)
 
@@ -363,7 +442,7 @@ class RuntimeErrorsTests(unittest.TestCase):
 
     def test_error_only_writers_and_checkpoint_preservation(self):
         failure = FixedAgent(error=TimeoutError("offline"))
-        with no_engine(d3), no_engine(h2), patch.object(c2, "score_moves", return_value=[]):
+        with no_engine(d3), no_engine(h2):
             datasets = [
                 (d3.write_mate_in_one_run, d3.evaluate_mate_in_one_tasks([task_fixture()], failure)),
                 (h2.write_history_run, h2.evaluate_history_tasks([task_fixture()], failure)),

@@ -1,0 +1,33 @@
+# Copy the account blocks into a private local cloud config, never store keys.
+qwen:
+  provider:
+    name: qwen
+    model: qwen3.8-max
+    api_key_env: DASHSCOPE_API_KEY
+    timeout: 3600
+    json_mode: false
+    extra_body:
+      enable_thinking: true
+  limits:
+    max_in_flight: 8
+    requests_per_minute: null
+    tokens_per_minute: null
+    reserve_tokens: 32768
+    total_token_budget: null
+deepseek:
+  provider:
+    name: deepseek
+    model: deepseek-v4-flash
+    api_key_env: DEEPSEEK_API_KEY
+    timeout: 3600
+    json_mode: false
+    extra_body:
+      thinking:
+        type: enabled
+  limits:
+    max_in_flight: 8
+    requests_per_minute: null
+    tokens_per_minute: null
+    reserve_tokens: 32768
+    total_token_budget: null
+# DeepSeek text-only accounts must not be assigned image experiments.

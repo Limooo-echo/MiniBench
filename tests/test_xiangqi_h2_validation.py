@@ -2,6 +2,8 @@
 import importlib.util
 import contextlib
 import io
+import hashlib
+import json
 import tempfile
 from unittest.mock import patch
 from pathlib import Path
@@ -10,6 +12,7 @@ import unittest
 spec = importlib.util.spec_from_file_location("build_h2", Path(__file__).resolve().parents[1] / "scripts/build_xiangqi_h2.py")
 build_h2 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(build_h2)
+
 
 
 class H2ValidationTests(unittest.TestCase):
@@ -76,12 +79,12 @@ class H2ValidationTests(unittest.TestCase):
 
     def test_horizon_change_gets_new_identity_and_legacy_mapping(self):
         result = {"reference_mate_moves": 2, "reference_mate_plies": 3, "band": "short", "runs": self.runs()}
-        old = {"id": "xiangqi-history-0105", "fen": self.FEN, "goal": "checkmate", "max_plies": 7, "agent_color": "black"}
+        old = {"id": "xiangqi-history-0105", "fen": self.FEN, "goal": "checkmate", "max_plies": 5, "agent_color": "black"}
         item = {"fen": self.FEN, "source_file": "Dataset/example.pgn", "ply_index": 10, "existing_record": old}
         record = build_h2.make_record(item, result, old["id"])
         self.assertTrue(record["id"].startswith("xiangqi-history-r1-revised-0105-"))
         self.assertEqual(record["replaces_id"], old["id"])
-        old["max_plies"] = 5
+        old["max_plies"] = 7
         unchanged = build_h2.make_record(item, result, old["id"])
         self.assertEqual(unchanged["id"], old["id"])
         self.assertNotIn("replaces_id", unchanged)
@@ -95,16 +98,43 @@ class H2ValidationTests(unittest.TestCase):
         result = {"reference_mate_moves": 2, "reference_mate_plies": 3, "band": "short", "runs": runs}
         record = build_h2.make_record({"fen": self.FEN, "source_file": "Dataset/example.pgn", "ply_index": 10},
                                       result, "xiangqi-history-r1-0001")
-        expected_suffix = build_h2.fingerprint_payload({"fen": self.FEN, "goal": "checkmate", "max_plies": 5, "agent_color": "black"})[:10]
+        expected_suffix = build_h2.fingerprint_payload({"fen": self.FEN, "goal": "checkmate", "max_plies": 7, "agent_color": "black"})[:10]
         self.assertEqual(record["id"], "xiangqi-history-r1-0001-" + expected_suffix)
         self.assertEqual(record["release_id"], "xiangqi-2026-09-19-r1")
         retained = build_h2.make_record({"fen": self.FEN, "source_file": "Dataset/example.pgn", "ply_index": 10},
                                        result, "xiangqi-history-0001")
         self.assertEqual(retained["id"], "xiangqi-history-0001")
-        self.assertEqual(record["max_plies"], 5)
+        self.assertEqual(record["max_plies"], 7)
         self.assertEqual(record["source_id"], "ccpd:Dataset/example.pgn")
         self.assertNotIn("shortest_mate_plies", record["h2_analysis"])
         self.assertEqual(len(record["h2_analysis"]["validation_runs"]), 2)
+
+    def test_release_validation_report_targets_current_h2_ids(self):
+        root = Path(__file__).resolve().parents[1]
+        records = [
+            json.loads(line)
+            for line in (root / "data/xiangqi/history/tasks.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        report = json.loads(
+            (root / "data/xiangqi/history/validation_report.json").read_text(encoding="utf-8")
+        )
+        current_ids = {record["id"] for record in records}
+        submitted = json.loads((root / 'data/xiangqi/submission_manifest.json').read_text())
+        gate = json.loads((root / 'data/xiangqi/independent_validation.json').read_text())
+        self.assertEqual(report['selected_count'], 100)
+        actual_sha = hashlib.sha256((root / 'data/xiangqi/history/tasks.jsonl').read_bytes()).hexdigest()
+        self.assertEqual(report['selected_dataset_sha256'], actual_sha)
+        self.assertEqual(report['parent_dataset_sha256'], submitted['datasets']['h2']['parent_sha256'])
+        self.assertEqual(set(submitted['datasets']['h2']['task_ids']), current_ids)
+        validations = gate['families']['xiangqi-history']['records']
+        self.assertEqual({item['id'] for item in validations}, current_ids)
+        self.assertTrue(all(item['valid'] for item in validations))
+        for record in records:
+            self.assertIsInstance(record.get('replaces_id'), str)
+            runs = record['h2_analysis']['validation_runs']
+            self.assertEqual({run['requested_depth'] for run in runs}, {16, 20})
+            self.assertEqual(build_h2.assess_depth_pair(record['fen'], runs), [])
 
 
 if __name__ == "__main__":

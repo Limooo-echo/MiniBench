@@ -4,7 +4,7 @@ task:
   path: data/xiangqi/mate_in_one/tasks.jsonl
   selection:
     path: data/xiangqi/evaluation_samples/smoke/d3.jsonl
-    sha256: 791d46e36e90a8bdf66dd884ace345763b369e1daed8aae8f43c7be0c66d7876
+    sha256: 6ececbfce6d4655e6adbe2ff9db3b5abce3bfce7dbc5cca5f18c8ad4256db5b8
 agent:
   name: direct
   max_tokens: 1024

@@ -2,9 +2,7 @@ task:
   prompt_version: xiangqi-reasoning-v2
   family: xiangqi-mate-in-one
   path: data/xiangqi/mate_in_one/tasks.jsonl
-  selection:
-    path: data/xiangqi/evaluation_samples/formal/d3.jsonl
-    sha256: ac963bacff8c76986eddfee43327ca7f7408c8f57d7e75cd81bcb0c1a8345f9c
+  limit: 100
 agent:
   name: direct
   max_tokens: 1024
@@ -24,5 +22,5 @@ evaluation:
   pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
 run:
   output_dir: runs
-  run_name: xiangqi_d3_direct_formal_r1
+  run_name: xiangqi_d3_direct_submitted100_r1
   on_existing: error

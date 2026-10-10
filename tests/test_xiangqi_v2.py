@@ -21,10 +21,12 @@ from minibench.datasets.xiangqi.mate_in_one import (
     d3_position_features,
 )
 from minibench.datasets.xiangqi.presentation import build_gallery, inspect_record
+from minibench.datasets.xiangqi.provenance import audit_xiangqi_release
 from minibench.datasets.xiangqi.rule_variants import (
     _extract_uci as _extract_c2_uci,
     build_rule_variant_prompt,
     evaluate_rule_variant_task,
+    summarize_rule_variants,
 )
 from minibench.datasets.xiangqi.schema import (
     FAMILY_PATHS,
@@ -59,12 +61,12 @@ class XiangqiV2DataTests(unittest.TestCase):
             for family, path in FAMILY_PATHS.items()
         }
 
-    def test_all_1000_records_validate_and_fen_round_trips(self):
+    def test_all_submitted_records_validate_and_fen_round_trips(self):
         all_records = [record for records in self.by_family.values() for record in records]
-        self.assertEqual(len(all_records), 1000)
-        self.assertEqual(len({record["id"] for record in all_records}), 1000)
+        self.assertEqual(len(all_records), 400)
+        self.assertEqual(len({record["id"] for record in all_records}), 400)
         for family, records in self.by_family.items():
-            self.assertEqual(len(records), 250)
+            self.assertEqual(len(records), 100)
             for record in records:
                 board, active = fen_to_board(record["fen"])
                 self.assertEqual(
@@ -74,12 +76,28 @@ class XiangqiV2DataTests(unittest.TestCase):
                 self.assertEqual(record["tags"], sorted(set(record["tags"])))
                 self.assertNotIn(None, record["tags"])
 
+    def test_release_audit_recognizes_intentional_c2_pairing_and_h2_sources(self):
+        report = audit_xiangqi_release(Path("data/xiangqi/provenance.json"))
+        self.assertTrue(
+            report["technical_ready"], report["independent_validation_problems"]
+        )
+        self.assertTrue(report["experiment_ready"])
+        self.assertEqual(report["runtime_policy_problems"], [])
+        self.assertFalse(report["release_ready"])
+        self.assertEqual(report["unresolved_external_provenance"], ["source_license"])
+        self.assertEqual(report["expected_d3_m2_overlap_count"], 100)
+        self.assertEqual(report["expected_h2_c2_overlap_count"], 20)
+        self.assertEqual(report["unexpected_cross_family_overlap_count"], 0)
+        c2_audit = report["per_family"]["xiangqi-rule-variants"]
+        self.assertEqual(c2_audit["unique_fen_count"], 50)
+        self.assertFalse(c2_audit["unexpected_duplicate_fens_within_family"])
+
     def test_d3_has_exact_mate_sets_and_reproducible_composite_difficulty(self):
         records = self.by_family["xiangqi-mate-in-one"]
         self.assertEqual(
             {label: sum(record["difficulty"] == label for record in records)
              for label in ("easy", "medium", "hard")},
-            {"easy": 80, "medium": 85, "hard": 85},
+            {"easy": 34, "medium": 33, "hard": 33},
         )
         for record in records:
             board, color = fen_to_board(record["fen"])
@@ -141,6 +159,9 @@ class XiangqiV2DataTests(unittest.TestCase):
     def test_h2_summary_pairs_the_same_task_ids(self):
         base = dict(
             difficulty="long", success=False, goal_achieved=False,
+            extended_mate_success=False, checkmate_ply=None,
+            mate_within_prescribed_steps=False,
+            reference_mate_plies=4, first_move_optimal_rate=0.0,
             steps=[{"actor": "agent", "cp_loss": 100.0}], avg_cp_loss=100.0,
             legality_rate=1.0, optimal_rate=0.0, history_transport="multi_turn_chat",
             tags=[], reasons=["max_steps_reached"], mate_in_plies=4,
@@ -154,29 +175,43 @@ class XiangqiV2DataTests(unittest.TestCase):
         summary = summarize_history(results)
         self.assertEqual(summary["unique_tasks"], 1)
         self.assertEqual(summary["paired_comparison"]["paired_total"], 1)
-        self.assertEqual(summary["paired_comparison"]["mean_score_gap"], 28.0)
+        self.assertEqual(summary["paired_comparison"]["mate_rate_gap"], 0.0)
 
     def test_rulesets_and_scenarios_are_complete(self):
         records = self.by_family["xiangqi-rule-variants"]
         self.assertEqual({record["ruleset"] for record in records}, set(RULESETS))
         scenario_ids = {record["scenario_id"] for record in records}
-        self.assertEqual(len(scenario_ids), 70)
+        self.assertEqual(len(scenario_ids), 50)
+        grouped = {}
+        for record in records:
+            grouped.setdefault(record["scenario_id"], []).append(record)
+        for group in grouped.values():
+            self.assertEqual(len(group), 2)
+            focus = group[0]["design_stratum"]
+            self.assertEqual({record["ruleset"] for record in group}, {"standard", focus})
+            self.assertEqual(len({record["fen"] for record in group}), 1)
+            self.assertEqual(len({record["source_task_id"] for record in group}), 1)
+        self.assertTrue(all(record["oracle"]["mate_in_plies"] >= 3 for record in records))
+        self.assertGreater(
+            sum(record["c2_analysis"]["mate_in_moves"] <= 5 for record in records),
+            len(records) // 2,
+        )
 
-    @patch("minibench.datasets.xiangqi.rule_variants.score_moves", return_value=[])
-    def test_rule_variant_candidates_include_standard_only_moves(self, _score_moves):
+    def test_rule_variant_rejects_a_move_forbidden_only_by_the_rule(self):
         record = task = standard_only_uci = None
         for candidate in self.by_family["xiangqi-rule-variants"]:
             if candidate["ruleset"] == "standard":
                 continue
             runtime = runtime_dict(candidate)
+            side = 1 if candidate["agent_color"] == "red" else -1
             standard = {
-                move.to_uci() for move in VariantBoard(runtime["board"], []).legal_moves(1)
+                move.to_uci() for move in VariantBoard(runtime["board"], []).legal_moves(side)
             }
             variant = {
                 move.to_uci()
                 for move in VariantBoard(runtime["board"], [
                     Rule.from_dict(rule) for rule in runtime["rules"]
-                ]).legal_moves(1)
+                ]).legal_moves(side)
             }
             difference = sorted(standard - variant)
             if difference:
@@ -195,12 +230,33 @@ class XiangqiV2DataTests(unittest.TestCase):
         self.assertEqual(result.steps[0]["uci"], standard_only_uci)
         self.assertIn("variant_violation", result.reasons)
 
+    def test_c2_summary_uses_only_multi_ply_outcomes_and_variant_loss(self):
+        from minibench.datasets.xiangqi.rule_variants import RuleVariantResult
+        common = dict(
+            scenario_id="scenario", difficulty="short", goal_achieved=True,
+            extended_mate_success=True, mate_within_prescribed_steps=True,
+            checkmate_ply=3, reference_mate_plies=3, legality_rate=1.0,
+            steps=[], reasons=["agent_checkmated_opponent"], status="ok",
+        )
+        results = [
+            RuleVariantResult(id="standard", ruleset="standard", success=True,
+                              avg_variant_loss=0.0, **common),
+            RuleVariantResult(id="variant", ruleset="horse-no-leg-block", success=True,
+                              avg_variant_loss=125.0, **common),
+        ]
+        summary = summarize_rule_variants(results)
+        self.assertEqual(summary["mate_rate"], 1.0)
+        self.assertEqual(summary["mate_within_prescribed_rate"], 1.0)
+        self.assertEqual(summary["legality_rate"], 1.0)
+        self.assertEqual(summary["avg_variant_loss"], 62.5)
+        self.assertIn("not Pikafish", summary["variant_loss_unit"])
+
     def test_c2_free_uci_prompt_has_explicit_coordinates_and_no_candidates(self):
         task = runtime_dict(self.by_family["xiangqi-rule-variants"][0])
         prompt = build_rule_variant_prompt(task)
         self.assertEqual(_extract_c2_uci('{"move": "H5H9"}'), "h5h9")
         self.assertIsNone(_extract_c2_uci('{"action": 4}'))
-        self.assertIn("rank 0 (bottom row)", prompt)
+        self.assertIn("rank 0 (bottom/Red side)", prompt)
         self.assertIn("R/r = Chariot", prompt)
         self.assertIn("Exact piece-coordinate list", prompt)
         self.assertNotIn("Candidate moves", prompt)
@@ -226,7 +282,7 @@ class XiangqiV2DataTests(unittest.TestCase):
         expected_sizes = {
             "xiangqi-mate-in-one": 10,
             "xiangqi-history": 10,
-            "xiangqi-rule-variants": 40,
+            "xiangqi-rule-variants": 20,
             "xiangqi-multimodal": 10,
         }
         for family, records in self.by_family.items():
@@ -265,26 +321,52 @@ class XiangqiV2DataTests(unittest.TestCase):
         for record in variants:
             by_scenario.setdefault(record["scenario_id"], set()).add(record["ruleset"])
         self.assertEqual(len(by_scenario), 10)
-        self.assertTrue(all(rulesets == set(RULESETS) for rulesets in by_scenario.values()))
+        self.assertTrue(all(len(rulesets) == 2 for rulesets in by_scenario.values()))
+        self.assertTrue(all("standard" in rulesets for rulesets in by_scenario.values()))
+        self.assertTrue(all(
+            rulesets == {"standard", next(
+                record["design_stratum"]
+                for record in variants
+                if record["scenario_id"] == scenario_id
+            )}
+            for scenario_id, rulesets in by_scenario.items()
+        ))
         self.assertTrue(all(
             len({record["fen"] for record in variants if record["scenario_id"] == scenario_id}) == 1
             for scenario_id in by_scenario
         ))
 
     def test_direct_prompt_v2_configs_are_neutral_and_reproducible(self):
+        submission = json.loads(Path("data/xiangqi/submission_manifest.json").read_text())
+        keys = {"xiangqi-mate-in-one": "d3", "xiangqi-history": "h2",
+                "xiangqi-rule-variants": "c2", "xiangqi-multimodal": "m2"}
         for family, config_path in CONFIG_PATHS.items():
             config = load_experiment_config(config_path)
-            self.assertEqual(config["task"]["prompt_version"], "xiangqi-reasoning-v2")
+            expected_prompt = ("xiangqi-m2-recognition-v1" if family == "xiangqi-multimodal"
+                               else "xiangqi-reasoning-v2")
+            self.assertEqual(config["task"]["prompt_version"], expected_prompt)
             self.assertNotIn("sampling", config["task"])
-            selection = config["task"]["selection"]
-            self.assertEqual(sha256(Path(selection["path"]).read_bytes()).hexdigest(), selection["sha256"])
+            self.assertNotIn("selection", config["task"])
+            self.assertEqual(config["task"]["limit"], 100)
+            evidence = submission["datasets"][keys[family]]
+            self.assertEqual(sha256(Path(evidence["path"]).read_bytes()).hexdigest(), evidence["sha256"])
             if family == "xiangqi-history":
                 self.assertEqual(config["evaluation"]["history_mode"], "paired")
                 self.assertEqual(config["evaluation"]["pikafish_depth"], 16)
             if family == "xiangqi-rule-variants":
-                self.assertIn("oracle_depth", config["evaluation"])
+                self.assertEqual(config["evaluation"]["search_depth"], 3)
+                self.assertEqual(
+                    config["evaluation"]["horizon_policy"],
+                    "reference_mate_plies_plus_4",
+                )
+                self.assertEqual(
+                    config["evaluation"]["loss_unit"],
+                    "rule-aware-centipawn-equivalent-not-pikafish",
+                )
             if family == "xiangqi-multimodal":
+                self.assertNotIn("max_plies", config["evaluation"])
                 self.assertTrue(config["evaluation"]["verify_with_pikafish"])
+                self.assertEqual(config["evaluation"]["input_modes"], ["text", "chinese-piece-image"])
             self.assertEqual(config["agent"]["name"], "direct")
             self.assertEqual(config["provider"]["name"], "qwen")
             self.assertFalse(config["provider"]["extra_body"]["enable_thinking"])
@@ -297,10 +379,8 @@ class XiangqiV2DataTests(unittest.TestCase):
             for family in XIANGQI_FAMILIES:
                 config = load_experiment_config(CONFIG_PATHS[family])
                 config["task"].pop("selection", None)
-                config["task"]["sampling"] = {
-                    "enabled": True, "count": 1, "seed": 42,
-                    "strategy": "paired-stratified" if family == "xiangqi-rule-variants" else "stratified",
-                }
+                config["task"]["sampling"] = {"enabled": True, "count": 1, "seed": 42,
+                    "strategy": "paired-stratified" if family == "xiangqi-rule-variants" else "stratified"}
                 config["agent"]["predictions"] = str(predictions)
                 config["run"].update(output_dir=str(root), run_name=family)
                 original_spec = get_task_family_spec(family)
@@ -334,12 +414,12 @@ class XiangqiV2DataTests(unittest.TestCase):
                 metadata = json.loads(
                     (run_dir / "run_metadata.json").read_text(encoding="utf-8")
                 )
-                self.assertEqual(metadata["selected_record_count"], 1 if family != "xiangqi-rule-variants" else 4)
+                self.assertEqual(metadata["selected_record_count"], 1 if family != "xiangqi-rule-variants" else 2)
 
 
-class XiangqiV2PresentationTests(unittest.TestCase):
+class XiangqiV2PresentationAndMigrationTests(unittest.TestCase):
     def test_inspect_terminal_json_and_png(self):
-        task_id = "xiangqi-history-0001"
+        task_id = load_records(FAMILY_PATHS["xiangqi-history"])[0]["id"]
         terminal = inspect_record(
             "xiangqi-history", task_id, output_format="terminal"
         )
@@ -361,12 +441,10 @@ class XiangqiV2PresentationTests(unittest.TestCase):
             output = build_gallery(Path(directory) / "gallery.html")
             text = output.read_text(encoding="utf-8")
         self.assertIn("data:font/otf;base64", text)
-        self.assertEqual(text.count('"schema_version":2'), 1000)
-        self.assertIn("xiangqi-multimodal-m2-0250", text)
-
-    def test_only_current_family_names_are_supported(self):
-        with self.assertRaisesRegex(ValueError, "unknown Xiangqi task"):
-            inspect_record("D3", "d3-0001", output_format="terminal")
+        self.assertEqual(text.count('"schema_version":2'), 400)
+        for path in FAMILY_PATHS.values():
+            records = load_records(path)
+            self.assertTrue(all(record["id"] in text for record in records))
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,10 +5,9 @@ A provider or judge failure is missing; an answered invalid move is a failure.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 import json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import re
 import statistics
 from time import strftime
 from typing import Any, Callable
@@ -16,11 +15,12 @@ from typing import Any, Callable
 from minibench.core.agent import Agent
 from minibench.core.metrics import start_task_metrics, finish_task_metrics, summarize_metrics
 from minibench.datasets.xiangqi.runtime import (
-    validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, error_detail, reset_agent, mean_or_none, rounded, status_counts, display,
+    validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, error_detail, extract_strict_uci_move, reset_agent, mean_or_none, rounded, status_counts, display,
 )
 from minibench.datasets.xiangqi.dataset import XiangqiTask
 from minibench.datasets.xiangqi.engines.pikafish import (
     PikafishEngine,
+    PikafishError,
     board_to_pikafish_fen,
     resolve_pikafish_executable,
 )
@@ -42,6 +42,8 @@ class MateInOneResult:
     cp_before: float | None
     cp_after: float | None
     cp_loss: float | None
+    agent_action: int
+    optimal_action: int
     agent_uci: str
     optimal_uci: str
     raw_output: str
@@ -63,9 +65,6 @@ MATE_IN_ONE_SYSTEM_PROMPT = """You are the direct agent in a Xiangqi
 (Chinese Chess) mate-in-one benchmark. Solve only the current board and
 generate exactly one legal UCI move yourself. Return one JSON object and no
 explanation, markdown, or candidate list."""
-
-
-UCI_MOVE_PATTERN = re.compile(r"[a-i][0-9][a-i][0-9]", re.IGNORECASE)
 
 
 def _build_mate_in_one_prompt(task: XiangqiTask, vb: VariantBoard) -> str:
@@ -102,27 +101,7 @@ Do not include markdown fences or explanations."""
 
 
 def _extract_mate_in_one_uci(raw_output: str) -> str | None:
-    """Extract a free UCI move; never reinterpret a candidate-list index as a move."""
-    if not raw_output:
-        return None
-    candidates: list[object] = []
-    try:
-        payload = json.loads(raw_output)
-        if isinstance(payload, dict):
-            candidates.append(payload.get("move"))
-            candidates.extend(payload.values())
-        elif isinstance(payload, str):
-            candidates.append(payload)
-    except (json.JSONDecodeError, TypeError):
-        pass
-    candidates.append(raw_output)
-    for value in candidates:
-        if not isinstance(value, str):
-            continue
-        match = UCI_MOVE_PATTERN.search(value)
-        if match:
-            return match.group(0).lower()
-    return None
+    return extract_strict_uci_move(raw_output)
 
 
 def enumerate_mate_in_one_moves(board: list[list[int]], side: int) -> list[str]:
@@ -174,6 +153,29 @@ def _parse_cp_from_info(info_lines) -> float | None:
         if kind == "mate":
             return 10_000.0 if value > 0 else -10_000.0
     return None
+
+
+def _get_pikafish_eval(
+    engine: PikafishEngine, env, side_to_move: str, depth: int = 15
+) -> tuple[str | None, float | None, str]:
+    """Get Pikafish best move and evaluation (cp) for a position.
+
+    Returns (uci_move, cp, fen). uci_move and cp are None on error.
+    """
+    fen = board_to_pikafish_fen(env.state, side_to_move=side_to_move)
+    try:
+        uci_move, info_lines = engine.bestmove_for_fen(fen, depth=depth)
+    except (PikafishError, Exception) as exc:
+        msg = str(exc)
+        if "King can be captured" in msg or "Unsupported position" in msg:
+            print(f"      [SKIP] Illegal position: {fen}")
+        else:
+            print(f"      [ERROR] Pikafish: {msg[:120]}")
+        return None, None, fen
+
+    cp = _parse_cp_from_info(info_lines)
+
+    return uci_move, cp, fen
 
 
 def _ensure_engine_alive(engine: PikafishEngine) -> None:
@@ -281,7 +283,7 @@ def evaluate_mate_in_one_tasks(
                 task_id=task.id or f"xiangqi-mate-in-one-{i + 1:04d}", difficulty=task.difficulty,
                 is_legal=is_legal, is_optimal=is_optimal, goal_achieved=goal_achieved,
                 cp_before=rounded(cp_before), cp_after=rounded(cp_after), cp_loss=rounded(cp_loss),
-                agent_uci=agent_uci or "PARSE_FAIL",
+                agent_action=-1, optimal_action=-1, agent_uci=agent_uci or "PARSE_FAIL",
                 optimal_uci=optimal_uci or "", raw_output=raw_output, tags=list(task.tags),
                 legality_score=float(is_legal),
                 correctness_score=(1.0 if goal_achieved else 0.5 if is_legal else 0.0) if goal_achieved is not None else None,
@@ -312,26 +314,14 @@ def _mate_loss_diagnostics(losses: list[float | None]) -> dict[str, float | int 
 def summarize_mate_in_one(results: list[MateInOneResult]) -> dict[str, Any]:
     def bucket(items):
         valid = [r for r in items if r.status != "error"]
-        diagnostics = _mate_loss_diagnostics([r.cp_loss for r in valid])
         return {
-            **status_counts(items), "score": mean_or_none((r.normalized_score for r in valid), 1),
+            **status_counts(items),
+            "mate_rate": mean_or_none(r.goal_achieved for r in valid),
             "legality_rate": mean_or_none(r.is_legal for r in valid),
-            "oracle_preferred_hit_rate": mean_or_none(r.is_optimal for r in valid if r.optimal_uci),
-            "mate_at_one_rate": mean_or_none(r.goal_achieved for r in valid),
-            "goal_rate": mean_or_none(r.goal_achieved for r in valid),
-            "avg_cp_loss": diagnostics["raw_avg_cp_loss"], **diagnostics,
-            "avg_legality": mean_or_none((r.legality_score for r in valid), 2),
-            "avg_correctness": mean_or_none((r.correctness_score for r in valid), 2),
-            "avg_quality": mean_or_none((r.quality_score for r in valid), 2),
         }
     summary = bucket(results)
     return {
-        **summary, "primary_metric": "mate_at_one_rate", "overall_score": summary["score"],
-        "cp_loss_diagnostics": {
-            "unit": "Pikafish centipawns; mate scores use a 10,000 sentinel",
-            "cap_for_reporting": CP_LOSS_REPORT_CAP,
-            **_mate_loss_diagnostics([r.cp_loss for r in results if r.status != "error"]),
-        },
+        **summary, "primary_metric": "mate_rate_at_one_ply",
         "by_difficulty": {difficulty: bucket([r for r in results if r.difficulty == difficulty])
                           for difficulty in sorted({r.difficulty for r in results})},
         "metrics": summarize_metrics(results),
@@ -351,7 +341,7 @@ def write_mate_in_one_run(
     summary = summarize_mate_in_one(results)
     (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     lines = ["Xiangqi Mate-in-One Evaluation", f"Total: {summary['total']} Evaluated: {summary['evaluated']} Missing: {summary['missing']}",
-             f"Primary Mate@1: {display(summary['mate_at_one_rate'], '.1%')}",
+             f"Mate@1: {display(summary['mate_rate'], '.1%')}",
              f"Legality: {display(summary['legality_rate'], '.1%')}"]
     (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return run_dir

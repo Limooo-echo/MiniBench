@@ -59,7 +59,7 @@ class XiangqiMultimodalTests(unittest.TestCase):
     def test_prompt_requires_free_uci_and_no_candidate_list(self):
         board = VariantBoard(sample_multimodal_task()["board"], [])
         prompt = _build_multimodal_prompt(board, "text", "")
-        self.assertIn('{"move": "<uci_move>"}', prompt)
+        self.assertIn('{"move": "<uci_move>", "pieces":', prompt)
         self.assertIn("rank 0 is the bottom row", prompt)
         self.assertIn("    a b c d e f g h i", prompt)
         self.assertIn("Black pieces: k@d9", prompt)
@@ -105,9 +105,8 @@ class XiangqiMultimodalTests(unittest.TestCase):
             set(summary["by_input_mode"]),
             {"text", "chinese-piece-image", "latin-piece-image"},
         )
-        self.assertEqual(
-            summary["visual_gap"]["chinese-piece-image"]["paired_total"], 1
-        )
+        self.assertEqual(summary["unique_tasks"], 1)
+        self.assertNotIn("visual_gap", summary)
         self.assertIn("metrics", summary)
 
     def test_thin_wrapper_delegates_to_unified_cli(self):

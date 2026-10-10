@@ -20,7 +20,10 @@ _DIAGNOSTICS = (
     "history_protocol_reasons", "hand_transcription_accuracy", "hand_transcription_exact",
     "visible_tiles_transcription_accuracy", "visible_tiles_transcription_exact",
     "transcription_exact", "is_legal", "is_optimal", "legality_rate", "optimal_rate",
-    "cp_loss", "avg_cp_loss", "first_move_optimal", "answer_correct", "action_errors",
+    "cp_loss", "avg_cp_loss", "variant_loss", "avg_variant_loss",
+    "recognition_accuracy", "recognition_exact", "recognition_status",
+    "extended_mate_success", "mate_within_prescribed_steps", "checkmate_ply", "reference_mate_plies",
+    "first_move_optimal", "answer_correct", "action_errors",
     "move_average_score", "move_median_score", "draws", "discards", "win_score",
 )
 

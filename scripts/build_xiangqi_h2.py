@@ -27,6 +27,7 @@ SOURCE_REVISION = "368a47a947773dd8692c026e286dd19b6277b993"
 SOURCE_LICENSE = "CC-BY-4.0"
 TARGETS = {"short": 80, "medium": 80, "long": 90}
 GENERATOR_VERSION = "h2-pikafish-double-depth-v2"
+H2_EXTENSION_PLIES = 4
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -188,7 +189,8 @@ def existing_item(record: dict) -> dict:
 def make_record(item: dict, verification: dict, identifier: str) -> dict:
     board, color = fen_to_board(item["fen"])
     mate = verification["reference_mate_moves"]
-    identity = {"fen": item["fen"], "goal": "checkmate", "max_plies": 2 * mate + 1, "agent_color": color}
+    max_plies = verification["reference_mate_plies"] + H2_EXTENSION_PLIES
+    identity = {"fen": item["fen"], "goal": "checkmate", "max_plies": max_plies, "agent_color": color}
     identity_hash = fingerprint_payload(identity)[:10]
     previous = item.get("existing_record")
     changed_identity = previous is not None and any(previous.get(key) != value for key, value in identity.items())
@@ -200,7 +202,7 @@ def make_record(item: dict, verification: dict, identifier: str) -> dict:
         "license": SOURCE_LICENSE, "file": item["source_file"], "ply_index": item["ply_index"],
         "game_plies": item.get("game_plies"), "game_result": item.get("game_result")}
     record = {"schema_version": 2, "release_id": "xiangqi-2026-09-19-r1", "id": identifier, "family": "xiangqi-history", "fen": item["fen"],
-        "agent_color": color, "goal": "checkmate", "max_plies": 2 * mate + 1,
+        "agent_color": color, "goal": "checkmate", "max_plies": max_plies,
         "difficulty": verification["band"], "piece_count": sum(bool(v) for row in board for v in row),
         "oracle": {"best_move_uci": verification["runs"][-1]["best_move_uci"],
                    "mate_in_plies": verification["reference_mate_plies"], "evaluation_cp": None},
@@ -213,7 +215,10 @@ def make_record(item: dict, verification: dict, identifier: str) -> dict:
             "requested_depths": [run["requested_depth"] for run in verification["runs"]],
             "principal_variation_uci": verification["runs"][-1]["principal_variation_uci"],
             "validation_runs": verification["runs"], "source_reused": False,
-            "interpretation": "Two engine reference lines end in independently verified checkmate; not a shortest-mate proof."}}
+            "interpretation": (
+                "Two engine reference lines end in independently verified checkmate; not a shortest-mate proof. "
+                "The prescribed-horizon metric uses the reference PV length; the primary mate metric permits four additional half-moves as a bounded safety horizon."
+            )}}
     if changed_identity:
         record["replaces_id"] = previous["id"]
     validate_record(record, expected_family="xiangqi-history")
@@ -286,7 +291,7 @@ def main() -> int:
     parser.add_argument("--pool", type=Path, action="append", default=[])
     parser.add_argument("--source-root", type=Path)
     parser.add_argument("--exclude-dataset", type=Path, action="append", default=None,
-                        help="Exclude every FEN from this dataset; defaults to current D3 and C2")
+                        help="Exclude every FEN from this dataset; defaults to current D3")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path)
@@ -304,7 +309,7 @@ def main() -> int:
         parser.error("r1 H2 requires exactly depth-a=16 and depth-b=20")
     frozen_pools = pool_fingerprints(args.pool)
     excluded_paths = args.exclude_dataset if args.exclude_dataset is not None else [
-        ROOT / "data/xiangqi/mate_in_one/tasks.jsonl", ROOT / "data/xiangqi/rule_variants/tasks.jsonl"]
+        ROOT / "data/xiangqi/mate_in_one/tasks.jsonl"]
     excluded_inputs = pool_fingerprints(excluded_paths)
     excluded_fens = {canonical_fen(record["fen"]) for path in excluded_paths for record in read_jsonl(path)}
     calibration = calibrate_cchess()

@@ -1,70 +1,96 @@
-"""Xiangqi temporary-rule variant evaluation.
+"""Multi-ply checkmate evaluation under temporary Xiangqi rules.
 
-C2 measures a single local decision under an explicit temporary Chinese-Xiangqi
-rule card.  The model generates UCI itself; no candidate list is exposed.  A
-depth-three variant-search oracle supplies utility regret.  These utilities are
-not centipawns or a complete measure of Xiangqi strength.
+C2 is a complete bounded game, not a one-action best-move task. The agent and
+the fixed depth-search opponent obey the same rule card. Move loss is measured
+with the same rule-aware search in centipawn-equivalent units; it is explicitly
+not a Pikafish centipawn score.
 """
 from __future__ import annotations
 
 import json
-import re
-import statistics
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from time import strftime
 from typing import Any, Callable
 
 from minibench.core.agent import Agent
-from minibench.core.metrics import start_task_metrics, finish_task_metrics, summarize_metrics
+from minibench.core.metrics import finish_task_metrics, start_task_metrics, summarize_metrics
 from minibench.datasets.xiangqi.runtime import (
-    StrictJSONObjectError, PROTOCOL_VERSION, error_detail, reset_agent, mean_or_none, rounded, status_counts, display,
+    PROTOCOL_VERSION,
+    StrictJSONObjectError,
+    display,
+    error_detail,
+    extract_strict_uci_move,
+    mean_or_none,
+    reset_agent,
+    rounded,
+    status_counts,
 )
 from minibench.datasets.xiangqi.text_encoding import BOARD_ENCODING, board_state_text
 from minibench.datasets.xiangqi.variants.board import Move, VariantBoard
+from minibench.datasets.xiangqi.variants.mate_search import (
+    LOSS_UNIT,
+    MATE_SCORE_CPE,
+    score_moves_cpe,
+)
 from minibench.datasets.xiangqi.variants.rules import Rule
-from minibench.datasets.xiangqi.variants.search import score_moves
 
-SYSTEM_PROMPT = """You are choosing one move in a Chinese Xiangqi rule-variant benchmark.
-Apply the stated rule card and generate one legal UCI coordinate move yourself.
-Before emitting your JSON, silently verify that the origin square contains one of your pieces, the destination is not occupied by your own piece, the move obeys that piece's movement and path rules, and your own general is not left in check or facing the opposing general. Apply the rule card before this check.
+
+SYSTEM_PROMPT = """You are playing a multi-move Chinese Xiangqi checkmate task under a temporary rule card.
+Both you and the fixed opponent must obey the rule card for the whole game.
+Your objective is to checkmate, not merely to choose a locally attractive move.
+Before every answer, silently verify the origin piece, destination occupancy,
+piece geometry, path or screen constraints, the temporary rule, self-check, and
+facing generals. Generate one legal UCI coordinate move yourself.
 Return exactly one JSON object with schema {"move": "<uci_move>"}.
-Do not include markdown fences, candidate lists, or explanations."""
+Do not include markdown, candidate lists, analysis, or explanations."""
 
-UCI_MOVE_PATTERN = re.compile(r"\b([a-i][0-9][a-i][0-9])\b", re.IGNORECASE)
+OFFICIAL_SEARCH_DEPTH = 3
+VALUE_TOLERANCE_CPE = 1e-6
 
-VALUE_LOSS_CAP = 10_000.0
 
-def _rules_text(rules: list[dict]) -> str:
+def _rules_text(rules: list[dict[str, Any]]) -> str:
     if not rules:
-        return "  (none - standard rules apply)"
-    return "\n".join(f"  - {Rule.from_dict(r).describe()}" for r in rules)
+        return "  (none - standard Xiangqi rules apply)"
+    return "\n".join(f"  - {Rule.from_dict(rule).describe()}" for rule in rules)
 
+
+def _objective_hint(task: dict[str, Any]) -> str:
+    reference = task.get("oracle", {}).get("mate_in_plies")
+    if not isinstance(reference, int) or reference < 1:
+        reference = int(task["max_plies"])
+    extension = max(0, int(task["max_plies"]) - reference)
+    return (
+        f"Primary target: checkmate within {reference} half-moves total, matching "
+        "the independently replayed reference mating line. If that horizon is "
+        f"missed, continue through the bounded limit of {task['max_plies']} "
+        f"half-moves (+{extension}). Stalemate and capturing the general do not "
+        "count as checkmate."
+    )
 
 
 def build_rule_variant_prompt(
-    task: dict,
-    history: list[dict] | None = None,
+    task: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
     *,
     board: VariantBoard | None = None,
-    caution: str = "",
 ) -> str:
-    """Build a free-move C2 prompt with an unambiguous coordinate rule card."""
-    rules_lines = _rules_text(task.get("rules", []))
-    current = board.board if board else task["board"]
-    history_text = "\n".join(f"{item['actor']}: {item['uci']}" for item in (history or []))
+    """Build a full-state free-move prompt for one C2 turn."""
+    current = board.board if board is not None else task["board"]
+    history_text = "\n".join(
+        f"{item['actor']}: {item['uci']}" for item in (history or [])
+    )
+    color = str(task.get("agent_color", "red")).title()
+    opponent = "Black" if color == "Red" else "Red"
     return f"""{SYSTEM_PROMPT}
 
-Objective: choose the move that is best for Red under the rule card.
-The evaluator uses a fixed depth-three minimax search (three half-moves), not an
-unlimited-depth optimum. All maximum-utility moves within 1e-6 are accepted.
-{BOARD_ENCODING}
-Coordinate convention: UCI `a0a1` means move from file a, rank 0 (bottom row)
-to file a, rank 1. Board row 0 is rank 9; board row 9 is rank 0.
+You control {color}; the opponent controls {opponent}.
+{_objective_hint(task)}
 
-Rule card: these rules replace the corresponding standard Xiangqi rules.
-{rules_lines}
-{caution}
+Rule card:
+{_rules_text(task.get('rules', []))}
+
+{BOARD_ENCODING}
 
 Current board:
 {board_state_text(current)}
@@ -72,35 +98,17 @@ Current board:
 Move history:
 {history_text or '(initial position)'}
 
-No legal-move list is provided. Generate one legal UCI move yourself.
-Return exactly:
-{{"move": "<uci_move>"}}
-"""
+No legal-move list is provided. Return exactly:
+{{"move": "<uci_move>"}}"""
 
 
 def _extract_uci(raw: str) -> str | None:
-    if not raw:
-        return None
-    values: list[str] = []
-    try:
-        payload = json.loads(raw)
-        if isinstance(payload, dict):
-            move = payload.get("move")
-            if isinstance(move, str):
-                values.append(move)
-            values.extend(value for value in payload.values() if isinstance(value, str))
-    except (json.JSONDecodeError, TypeError):
-        pass
-    values.append(raw)
-    for value in values:
-        match = UCI_MOVE_PATTERN.search(value)
-        if match:
-            return match.group(1).lower()
-    return None
+    return extract_strict_uci_move(raw)
 
 
 def _move_by_uci(moves: list[Move], uci: str | None) -> Move | None:
     return next((move for move in moves if move.to_uci() == uci), None)
+
 
 @dataclass
 class RuleVariantResult:
@@ -109,170 +117,360 @@ class RuleVariantResult:
     ruleset: str
     difficulty: str
     success: bool | None
+    goal_achieved: bool | None
+    extended_mate_success: bool | None
+    mate_within_prescribed_steps: bool | None
+    checkmate_ply: int | None
+    reference_mate_plies: int | None
     legality_rate: float | None
-    first_move_optimal: bool | None
-    optimal_uci: str | None
-    answer_correct: bool | None
-    optimal_rate: float | None
-    avg_value_loss: float | None
-    value_quality_score: float | None
-    score: float | None
-    steps: list[dict] = field(default_factory=list)
+    avg_variant_loss: float | None
+    steps: list[dict[str, Any]] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     status: str = "ok"
-    goal_achieved: bool | None = None
     error: dict[str, Any] | None = None
+    diagnostics: list[dict[str, Any]] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     termination_reason: str = ""
     protocol_version: str = PROTOCOL_VERSION
 
 
 def evaluate_rule_variant_task(
-    task: dict, agent: Agent, *, oracle_depth: int = 3,
+    task: dict[str, Any],
+    agent: Agent,
+    *,
+    search_depth: int = 3,
 ) -> RuleVariantResult:
-    """The C2 protocol accepts every legal maximum-utility depth-three move."""
-    if isinstance(oracle_depth, bool) or oracle_depth != 3:
-        raise ValueError("C2 reasoning protocol requires search depth 3")
-    agent_side = 1  # Current C2 records always ask Red to move.
+    """Play one bounded C2 game against a deterministic rule-aware opponent."""
+    if search_depth != OFFICIAL_SEARCH_DEPTH:
+        raise ValueError(
+            f"C2 release evaluation requires search_depth={OFFICIAL_SEARCH_DEPTH}"
+        )
     start = start_task_metrics(agent)
-    steps, reasons = [], []
-    status, error, raw, best_uci = "error", None, "", None
-    success = legal = first_optimal = value_loss = quality = score = None
+    steps: list[dict[str, Any]] = []
+    reasons: list[str] = []
+    diagnostics: list[dict[str, Any]] = []
+    status, error = "ok", None
+    mate_success: bool | None = False
+    checkmate_ply: int | None = None
     stage = "agent_reset"
     try:
         reset_agent(agent)
-        stage = "judge"
-        current = VariantBoard(task["board"], [Rule.from_dict(r) for r in task.get("rules", [])])
-        legal_moves = current.legal_moves(agent_side)
-        scored = score_moves(current, agent_side, 3, agent_side)
-        best_value = (max if agent_side > 0 else min)((value for _, value in scored), default=None)
-        best_moves = sorted(move.to_uci() for move, value in scored
-                            if best_value is not None and abs(value - best_value) <= 1e-6)
-        best_uci = best_moves[0] if best_moves else None
-        stage = "model"
-        raw = agent.generate(build_rule_variant_prompt(task, board=current), task)
-        stage = "judge"
-        generated_uci = _extract_uci(raw)
-        move = _move_by_uci(legal_moves, generated_uci)
-        legal = move is not None
-        if legal:
-            if best_value is None:
-                raise ValueError("oracle returned no values for a position with legal moves")
-            value = next(value for candidate, value in scored if candidate.to_uci() == generated_uci)
-            value_loss = max(0.0, agent_side * (best_value - value))
-            first_optimal = abs(value - best_value) <= 1e-6
-            reasons.append("optimal_move" if first_optimal else "legal_suboptimal_move")
-            status = "ok"
-        else:
-            standard_move = _move_by_uci(VariantBoard(current.board, []).legal_moves(agent_side), generated_uci)
-            value_loss = VALUE_LOSS_CAP
-            first_optimal = False
-            status = "invalid"
-            reasons.append("variant_violation" if standard_move else "invalid_or_illegal_uci")
-        success = first_optimal
-        quality = max(0.0, 1.0 - value_loss / VALUE_LOSS_CAP)
-        score = 0.7 * quality + 0.2 * first_optimal + 0.1 * legal
-        steps.append({
-            "step_idx": 0, "actor": "agent", "raw_output": raw, "uci": generated_uci or "PARSE_FAIL",
-            "is_legal": legal, "is_optimal": first_optimal, "optimal_uci": best_uci,
-            "optimal_moves_uci": best_moves, "value_loss": value_loss,
-        })
+        stage = "configuration"
+        agent_side = 1 if task.get("agent_color") == "red" else -1
+        side = 1 if task.get("side_to_move") == "ally" else -1
+        if side != agent_side:
+            raise ValueError("C2 requires the agent to move first")
+        board = VariantBoard(
+            task["board"],
+            [Rule.from_dict(rule) for rule in task.get("rules", [])],
+        )
+        for step_index in range(int(task["max_plies"])):
+            stage = "judge"
+            legal_moves = board.legal_moves(side)
+            if not legal_moves:
+                mate_success = side != agent_side and board._is_in_check(side)
+                checkmate_ply = step_index if mate_success else None
+                reasons.append(
+                    "agent_checkmated_opponent"
+                    if mate_success
+                    else "agent_was_checkmated"
+                    if board._is_in_check(side)
+                    else "stalemate"
+                )
+                break
+
+            analysis = score_moves_cpe(
+                board,
+                side,
+                depth=search_depth,
+                perspective_side=agent_side,
+            )
+            if not analysis:
+                raise RuntimeError(
+                    "rule-aware search returned no move for a non-terminal position"
+                )
+            values = {item.move.to_uci(): item.value for item in analysis}
+            optimal_uci = analysis[0].move.to_uci() if analysis else None
+            optimal_value = analysis[0].value if analysis else None
+            is_agent = side == agent_side
+
+            if is_agent:
+                stage = "model"
+                raw = agent.generate(build_rule_variant_prompt(task, steps, board=board), task)
+                stage = "judge"
+                generated_uci = _extract_uci(raw)
+                move = _move_by_uci(legal_moves, generated_uci)
+                chosen_value = values.get(generated_uci or "")
+                loss = (
+                    max(0.0, float(optimal_value) - float(chosen_value))
+                    if optimal_value is not None and chosen_value is not None
+                    else MATE_SCORE_CPE
+                    if move is not None
+                    else None
+                )
+                step = {
+                    "step_idx": step_index,
+                    "actor": "agent",
+                    "raw_output": raw,
+                    "uci": generated_uci or "PARSE_FAIL",
+                    "is_legal": move is not None,
+                    "optimal_uci": optimal_uci,
+                    "is_optimal": bool(
+                        optimal_value is not None
+                        and chosen_value is not None
+                        and abs(float(optimal_value) - float(chosen_value))
+                        <= VALUE_TOLERANCE_CPE
+                    ),
+                    "best_value_cpe": rounded(optimal_value),
+                    "chosen_value_cpe": rounded(chosen_value),
+                    "variant_loss": rounded(loss),
+                }
+                steps.append(step)
+                if move is None:
+                    status = "invalid"
+                    mate_success = False
+                    standard_move = _move_by_uci(
+                        VariantBoard(board.board, []).legal_moves(side), generated_uci
+                    )
+                    reasons.append(
+                        "variant_violation" if standard_move else "invalid_or_illegal_uci"
+                    )
+                    break
+            else:
+                stage = "opponent_search"
+                if not analysis:
+                    raise RuntimeError("rule-aware opponent search returned no move")
+                move = analysis[0].move
+                raw = ""
+                step = {
+                    "step_idx": step_index,
+                    "actor": "depth-opponent",
+                    "raw_output": raw,
+                    "uci": move.to_uci(),
+                    "is_legal": True,
+                    "optimal_uci": move.to_uci(),
+                    "is_optimal": True,
+                    "best_value_cpe": rounded(analysis[0].value),
+                    "chosen_value_cpe": rounded(analysis[0].value),
+                    "variant_loss": None,
+                }
+                steps.append(step)
+
+            stage = "judge"
+            board.apply(move)
+            next_side = -side
+            terminal = False
+            if board.find_general(next_side) is None:
+                terminal = True
+                mate_success = False
+                reasons.append("general_captured_without_checkmate")
+            elif not board.legal_moves(next_side):
+                terminal = True
+                checked = board._is_in_check(next_side)
+                mate_success = next_side != agent_side and checked
+                checkmate_ply = step_index + 1 if mate_success else None
+                reasons.append(
+                    "agent_checkmated_opponent"
+                    if mate_success
+                    else "agent_was_checkmated"
+                    if checked
+                    else "stalemate"
+                )
+            if terminal:
+                break
+            side = next_side
+        if not reasons:
+            reasons.append("max_steps_reached")
     except Exception as exc:
         malformed = stage == "model" and isinstance(exc, StrictJSONObjectError)
         status = "invalid" if malformed else "error"
-        success = first_optimal = legal = False if malformed else None
-        quality = score = 0.0 if malformed else None
-        value_loss = VALUE_LOSS_CAP if malformed else None
+        mate_success = False if malformed else None
         if malformed:
-            raw = exc.raw_output or ""
             stage = "format"
+            steps.append(
+                {
+                    "step_idx": len(steps),
+                    "actor": "agent",
+                    "raw_output": exc.raw_output or "",
+                    "uci": "PARSE_FAIL",
+                    "is_legal": False,
+                    "is_optimal": False,
+                    "variant_loss": None,
+                }
+            )
         error = error_detail(stage, exc)
         reasons.append(stage + "_error")
-        if raw or malformed:
-            steps.append({"step_idx": 0, "actor": "agent", "raw_output": raw, "is_legal": legal,
-                          "is_optimal": first_optimal, "uci": "PARSE_FAIL", "value_loss": value_loss})
+
+    agent_steps = [step for step in steps if step.get("actor") == "agent"]
+    legal_values = [step["is_legal"] for step in agent_steps]
+    losses = [
+        step["variant_loss"]
+        for step in agent_steps
+        if step.get("variant_loss") is not None
+    ]
+    legality = mean_or_none(legal_values) if status != "error" else None
+    avg_loss = mean_or_none(losses, 1)
+    reference = task.get("oracle", {}).get("mate_in_plies")
+    if not isinstance(reference, int) or reference < 1:
+        reference = int(task["max_plies"])
+    prescribed = (
+        None
+        if mate_success is None
+        else bool(
+            mate_success
+            and checkmate_ply is not None
+            and checkmate_ply <= reference
+        )
+    )
+    if mate_success and not prescribed:
+        reasons.append("checkmate_after_reference_horizon")
     return RuleVariantResult(
-        id=task["id"], scenario_id=task["scenario_id"], ruleset=task["ruleset"],
-        difficulty=task["difficulty"], success=success, legality_rate=float(legal) if legal is not None else None,
-        first_move_optimal=first_optimal, optimal_uci=best_uci, answer_correct=success,
-        optimal_rate=float(first_optimal) if first_optimal is not None else None,
-        avg_value_loss=rounded(value_loss, 3), value_quality_score=rounded(quality, 3), score=rounded(score, 3),
-        steps=steps, reasons=reasons, status=status, goal_achieved=success, error=error,
-        metrics=finish_task_metrics(agent, start), termination_reason=reasons[-1],
+        id=task["id"],
+        scenario_id=task.get("scenario_id", task["id"]),
+        ruleset=task["ruleset"],
+        difficulty=task["difficulty"],
+        success=mate_success,
+        goal_achieved=mate_success,
+        extended_mate_success=mate_success,
+        mate_within_prescribed_steps=prescribed,
+        checkmate_ply=checkmate_ply,
+        reference_mate_plies=reference,
+        legality_rate=rounded(legality, 3),
+        avg_variant_loss=avg_loss,
+        steps=steps,
+        reasons=reasons,
+        status=status,
+        error=error,
+        diagnostics=diagnostics,
+        metrics=finish_task_metrics(agent, start),
+        termination_reason=reasons[-1],
     )
 
 
 def evaluate_rule_variant_tasks(
-    tasks: list[dict], agent: Agent, *, oracle_depth: int = 3,
+    tasks: list[dict[str, Any]],
+    agent: Agent,
+    *,
+    search_depth: int = 3,
     on_result: Callable[[RuleVariantResult], None] | None = None,
 ) -> list[RuleVariantResult]:
-    results = []
+    results: list[RuleVariantResult] = []
     for task in tasks:
-        result = evaluate_rule_variant_task(task, agent, oracle_depth=oracle_depth)
+        result = evaluate_rule_variant_task(task, agent, search_depth=search_depth)
         results.append(result)
         if on_result is not None:
             on_result(result)
     return results
 
 
-def summarize_rule_variants(results: list[RuleVariantResult]) -> dict[str, Any]:
-    valid = [r for r in results if r.status != "error"]
-    regrets = [step["value_loss"] for r in valid for step in r.steps
-               if step.get("actor") == "agent" and step.get("value_loss") is not None]
-    return {
-        **status_counts(results), "unique_scenarios": len({r.scenario_id for r in results}),
-        "primary_metric": "success_rate",
-        "utility_regret_unit": "fixed depth-three variant-search utility (not centipawns or global optimum)",
-        "difficulty_policy": "dataset labels are descriptive only",
-        "paired_rule_effects": _paired_rule_effects(valid),
-        "avg_score": mean_or_none((r.score for r in valid), 2),
-        "success_rate": mean_or_none(r.success for r in valid),
-        "answer_correct_rate": mean_or_none(r.answer_correct for r in valid),
-        "optimal_rate": mean_or_none(r.optimal_rate for r in valid),
-        "legality_rate": mean_or_none(r.legality_rate for r in valid),
-        "mean_utility_regret": mean_or_none(regrets, 3),
-        "median_utility_regret": round(statistics.median(regrets), 3) if regrets else None,
-        "utility_regret_cap": VALUE_LOSS_CAP,
-        "avg_value_loss": mean_or_none((r.avg_value_loss for r in valid), 3),
-        "avg_value_quality_score": mean_or_none((r.value_quality_score for r in valid), 3),
-        "metrics": summarize_metrics(results),
-    }
-
-
-def _paired_rule_effects(results: list[RuleVariantResult]) -> dict[str, Any]:
-    grouped = {}
+def _paired_effects(results: list[RuleVariantResult]) -> dict[str, Any]:
+    grouped: dict[str, dict[str, RuleVariantResult]] = {}
     for result in results:
         if result.status != "error":
             grouped.setdefault(result.scenario_id, {})[result.ruleset] = result
-    effects = {}
-    for ruleset in sorted({r.ruleset for r in results} - {"standard"}):
-        pairs = [values for values in grouped.values() if "standard" in values and ruleset in values]
+    output: dict[str, Any] = {}
+    for ruleset in sorted({result.ruleset for result in results} - {"standard"}):
+        pairs = [
+            pair for pair in grouped.values() if "standard" in pair and ruleset in pair
+        ]
         if pairs:
-            effects[ruleset] = {
+            output[ruleset] = {
                 "paired_total": len(pairs),
-                "rule_minus_standard_success": mean_or_none(float(p[ruleset].success) - float(p["standard"].success) for p in pairs),
-                "rule_minus_standard_score": mean_or_none((p[ruleset].score - p["standard"].score for p in pairs), 3),
-                "rule_minus_standard_utility_regret": mean_or_none((p[ruleset].avg_value_loss - p["standard"].avg_value_loss for p in pairs), 3),
+                "rule_minus_standard_mate_rate": mean_or_none(
+                    float(pair[ruleset].success) - float(pair["standard"].success)
+                    for pair in pairs
+                    if pair[ruleset].success is not None
+                    and pair["standard"].success is not None
+                ),
+                "rule_minus_standard_variant_loss": mean_or_none(
+                    (
+                        pair[ruleset].avg_variant_loss
+                        - pair["standard"].avg_variant_loss
+                        for pair in pairs
+                        if pair[ruleset].avg_variant_loss is not None
+                        and pair["standard"].avg_variant_loss is not None
+                    ),
+                    1,
+                ),
             }
-    return effects
+    return output
+
+
+def summarize_rule_variants(results: list[RuleVariantResult]) -> dict[str, Any]:
+    valid = [result for result in results if result.status != "error"]
+
+    def group(rows: list[RuleVariantResult]) -> dict[str, Any]:
+        return {
+            "mate_rate": mean_or_none(result.success for result in rows),
+            "mate_within_prescribed_rate": mean_or_none(
+                result.mate_within_prescribed_steps for result in rows
+            ),
+            "legality_rate": mean_or_none(result.legality_rate for result in rows),
+            "avg_variant_loss": mean_or_none(
+                (result.avg_variant_loss for result in rows), 1
+            ),
+        }
+
+    summary = {
+        **status_counts(results),
+        "unique_scenarios": len({result.scenario_id for result in results}),
+        "primary_metric": "checkmate_rate_within_bounded_run",
+        "secondary_metric": "checkmate_rate_within_prescribed_reference_horizon",
+        "opponent_policy": "fixed deterministic rule-aware depth search",
+        "variant_loss_unit": LOSS_UNIT,
+        **group(valid),
+        "paired_rule_effects": _paired_effects(valid),
+        "metrics": summarize_metrics(results),
+    }
+    summary["by_ruleset"] = {
+        ruleset: group([result for result in valid if result.ruleset == ruleset])
+        for ruleset in sorted({result.ruleset for result in results})
+    }
+    summary["by_difficulty"] = {
+        difficulty: group(
+            [result for result in valid if result.difficulty == difficulty]
+        )
+        for difficulty in sorted({result.difficulty for result in results})
+    }
+    return summary
 
 
 def write_rule_variants_run(
-    results: list[RuleVariantResult], output_dir: str | Path = "runs", run_name: str | None = None,
-    *, write_predictions: bool = True,
+    results: list[RuleVariantResult],
+    output_dir: str | Path = "runs",
+    run_name: str | None = None,
+    *,
+    write_predictions: bool = True,
 ) -> Path:
-    run_dir = Path(output_dir) / (run_name or f"xiangqi-rule-variants-{strftime('%Y%m%d-%H%M%S')}")
+    run_dir = Path(output_dir) / (
+        run_name or f"xiangqi-rule-variants-{strftime('%Y%m%d-%H%M%S')}"
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
     if write_predictions:
         with (run_dir / "predictions.jsonl").open("w", encoding="utf-8") as handle:
             for result in results:
                 handle.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
     summary = summarize_rule_variants(results)
-    summary["by_ruleset"] = {ruleset: summarize_rule_variants([r for r in results if r.ruleset == ruleset])
-                              for ruleset in sorted({r.ruleset for r in results})}
-    (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    lines = ["Xiangqi Rule Variants Evaluation", f"Total: {summary['total']} Missing: {summary['missing']}"]
-    for group, values in summary["by_ruleset"].items():
-        lines.append(f"{group}: success={display(values['success_rate'], '.1%')} utility_regret={display(values['mean_utility_regret'])}")
+    (run_dir / "results.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    lines = [
+        "Xiangqi Rule-Variant Multi-Ply Checkmate Evaluation",
+        f"Total: {summary['total']} Missing: {summary['missing']}",
+        f"Mate within bounded run: {display(summary['mate_rate'], '.1%')}",
+        "Mate within prescribed horizon: "
+        f"{display(summary['mate_within_prescribed_rate'], '.1%')}",
+        f"Legality: {display(summary['legality_rate'], '.1%')}",
+        f"Average variant loss: {display(summary['avg_variant_loss'])}",
+        f"Loss unit: {LOSS_UNIT}",
+    ]
+    for ruleset, values in summary["by_ruleset"].items():
+        lines.append(
+            f"{ruleset}: mate={display(values['mate_rate'], '.1%')} "
+            f"within_prescribed={display(values['mate_within_prescribed_rate'], '.1%')} "
+            f"legal={display(values['legality_rate'], '.1%')} "
+            f"variant_loss={display(values['avg_variant_loss'])}"
+        )
     (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return run_dir

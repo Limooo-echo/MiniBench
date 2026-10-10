@@ -28,7 +28,8 @@ def main():
     parser.add_argument("--replace",action="store_true")
     args=parser.parse_args()
     datasets={key:load_records(ROOT/f"data/xiangqi/{folder}/tasks.jsonl") for key,(folder,_) in TASKS.items()}
-    if any(len(rows)!=250 for rows in datasets.values()): raise ValueError("complete 250-record families required")
+    if len({len(rows) for rows in datasets.values()}) != 1 or len(datasets["d3"]) not in (100, 250):
+        raise ValueError("complete 100-record submitted families or 250-record parent pools required")
     if any(row.get("release_id") != RELEASE_ID for rows in datasets.values() for row in rows):
         raise ValueError("all families must pass the new-release generators first")
     provenance=json.loads((ROOT/"data/xiangqi/provenance.json").read_text(encoding="utf-8"))
@@ -55,10 +56,17 @@ def main():
                 config["evaluation"]["pikafish_nnue_sha256"]=engine["nnue_sha256"]
             config["task"].pop("sampling", None)
             config["task"]["selection"]={k:sample["tasks"][key][k] for k in ("path","sha256")}
-            config["task"]["prompt_version"]=PROTOCOL_VERSION
+            config["task"]["prompt_version"]="xiangqi-m2-recognition-v1" if key=="m2" else PROTOCOL_VERSION
             config["task"].pop("task_ids",None)
             config["task"].pop("limit",None)
-            config["run"]["run_name"]=f"xiangqi_{key}_direct_{size}_r1"
+            if size == "formal":
+                # Canonical submitted corpora are already stratified 100-row
+                # selections; full runs do not draw another sample.
+                config["task"].pop("selection", None)
+                config["task"]["limit"] = 100
+            if key == "m2":
+                config["evaluation"]["input_modes"] = ["text", "chinese-piece-image"]
+            config["run"]["run_name"]=f"xiangqi_{key}_direct_{'submitted100' if size == 'formal' else size}_r1"
             config["run"]["on_existing"]="error"
             destination=config_path if size=="formal" else ROOT/f"config/experiments/xiangqi_smoke/{key}.yaml"
             write(destination,yaml.safe_dump(config,sort_keys=False,allow_unicode=True),True)
@@ -67,15 +75,15 @@ def main():
     scoring_path=ROOT/"config/scoring/manifest.example.yaml"
     scoring=yaml.safe_load(scoring_path.read_text(encoding="utf-8"))
     for exp in scoring["experiments"]:
-        dataset_path=(scoring_path.parent/exp["dataset"]["path"]).resolve()
-        exp["dataset"]["sha256"]=sha(dataset_path)
         match=next((key for key,(_,exp_id) in TASKS.items() if exp_id==exp["id"]),None)
         if match:
+            dataset_path=(scoring_path.parent/exp["dataset"]["path"]).resolve()
+            exp["dataset"]["sha256"]=sha(dataset_path)
             folder,_=TASKS[match]
             config=yaml.safe_load((ROOT/f"config/experiments/xiangqi_{folder}.yaml").read_text(encoding="utf-8"))
             roster=manifest["samples"]["formal"]["tasks"][match]
             exp["selection"]={"path":"../../"+roster["path"],"sha256":roster["sha256"]}
-            exp["protocol"]={"version":PROTOCOL_VERSION,"release_id":RELEASE_ID,"evaluation":config["evaluation"]}
+            exp["protocol"]={"version":config["task"]["prompt_version"],"release_id":RELEASE_ID,"evaluation":config["evaluation"]}
     write(scoring_path,yaml.safe_dump(scoring,sort_keys=False,allow_unicode=True),True)
     print(json.dumps({size:{k:v["record_count"] for k,v in data["tasks"].items()} for size,data in manifest["samples"].items()}))
     return 0

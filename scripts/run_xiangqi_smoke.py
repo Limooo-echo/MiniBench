@@ -107,7 +107,9 @@ def prepare_suite(suite_dir: Path, tasks: list[str], *, model: str | None = None
         if key == "h2":
             evaluation["history_mode"] = "paired"
         elif key == "c2":
-            evaluation["oracle_depth"] = 3
+            evaluation.update(search_depth=3,
+                horizon_policy="reference_mate_plies_plus_4",
+                loss_unit="rule-aware-centipawn-equivalent-not-pikafish")
         elif key == "m2":
             evaluation.update(verify_with_pikafish=True, step_dir=str(suite_dir / "m2-input-images"))
         config = validate_experiment_config(config)

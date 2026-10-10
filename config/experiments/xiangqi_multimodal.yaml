@@ -1,10 +1,8 @@
 task:
-  prompt_version: xiangqi-reasoning-v2
+  prompt_version: xiangqi-m2-recognition-v1
   family: xiangqi-multimodal
   path: data/xiangqi/multimodal/tasks.jsonl
-  selection:
-    path: data/xiangqi/evaluation_samples/formal/m2.jsonl
-    sha256: 9470d5998ed93f530a26c8373671ec79e945efcc807401be02b2c52081ce5b89
+  limit: 100
 agent:
   name: direct
   max_tokens: 512
@@ -21,7 +19,6 @@ evaluation:
   input_modes:
   - text
   - chinese-piece-image
-  - latin-piece-image
   verify_with_pikafish: true
   pikafish_depth: 8
   pikafish_timeout: 60.0
@@ -29,5 +26,5 @@ evaluation:
   pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
 run:
   output_dir: runs
-  run_name: xiangqi_m2_direct_formal_r1
+  run_name: xiangqi_m2_direct_submitted100_r1
   on_existing: error

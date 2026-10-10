@@ -1,59 +1,75 @@
 """Shared Xiangqi evaluation protocol (missing is never an incorrect answer)."""
 from __future__ import annotations
 
-from typing import Any, Iterable
-from minibench.core.runtime import StrictJSONObjectError
-from math import isfinite
+import json
+import re
 import statistics
+from math import isfinite
+from typing import Any, Iterable
+
+from minibench.core.runtime import StrictJSONObjectError
 
 PROTOCOL_VERSION = "xiangqi-reasoning-v2"
+UCI_MOVE_PATTERN = re.compile(r"[a-i][0-9][a-i][0-9]", re.IGNORECASE)
 
-_ENGINE_FIELDS = {
-    "pikafish_path", "pikafish_depth", "pikafish_timeout",
-    "pikafish_binary_sha256", "pikafish_nnue_sha256",
-}
+_ENGINE_FIELDS = {"pikafish_path", "pikafish_depth", "pikafish_timeout",
+                  "pikafish_binary_sha256", "pikafish_nnue_sha256"}
 _EVALUATION_FIELDS = {
     "xiangqi-mate-in-one": _ENGINE_FIELDS,
-    "xiangqi-rule-variants": {"oracle_depth"},
     "xiangqi-history": _ENGINE_FIELDS | {"history_mode"},
+    "xiangqi-rule-variants": {"search_depth", "horizon_policy", "loss_unit"},
     "xiangqi-multimodal": _ENGINE_FIELDS | {"input_modes", "verify_with_pikafish", "step_dir"},
 }
 
 
 def validate_evaluation_config(family: str, config: dict[str, Any]) -> None:
-    """Reject ignored options before any engine or model is started.
-
-    Move horizons belong to the frozen task records, not evaluator overrides.
-    """
+    """Reject ignored options before any paid call. Horizons belong to records."""
     if not isinstance(config, dict):
         raise ValueError("Xiangqi evaluation must be a mapping")
     unsupported = sorted(set(config) - _EVALUATION_FIELDS[family])
     if unsupported:
         raise ValueError(f"{family}: unsupported evaluation fields: {', '.join(unsupported)}")
-    depth = config.get("oracle_depth", 3)
-    if isinstance(depth, bool) or not isinstance(depth, int) or depth != 3:
-        raise ValueError("C2 reasoning protocol requires oracle_depth=3")
+    if family == "xiangqi-rule-variants":
+        depth = config.get("search_depth", 3)
+        if isinstance(depth, bool) or not isinstance(depth, int) or depth != 3:
+            raise ValueError("C2 requires search_depth=3")
+        if config.get("horizon_policy", "reference_mate_plies_plus_4") != "reference_mate_plies_plus_4":
+            raise ValueError("C2 horizon must be reference_mate_plies_plus_4")
+        if config.get("loss_unit", "rule-aware-centipawn-equivalent-not-pikafish") != "rule-aware-centipawn-equivalent-not-pikafish":
+            raise ValueError("C2 loss is CPE, not Pikafish CP")
     if "pikafish_depth" in config:
         depth = config["pikafish_depth"]
         if isinstance(depth, bool) or not isinstance(depth, int) or depth < 1:
             raise ValueError("pikafish_depth must be a positive integer")
     if "pikafish_timeout" in config:
-        timeout = config["pikafish_timeout"]
-        if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
-                or not isfinite(timeout) or timeout <= 0):
-            raise ValueError("pikafish_timeout must be a positive finite number")
-    if "history_mode" in config and (not isinstance(config["history_mode"], str)
-                                    or config["history_mode"] not in {"paired", "full-state", "move-history-only"}):
-        raise ValueError("history_mode must be paired, full-state, or move-history-only")
+        value = config["pikafish_timeout"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value) or value <= 0:
+            raise ValueError("pikafish_timeout must be positive and finite")
+    if "history_mode" in config and config["history_mode"] not in {"paired", "full-state", "move-history-only"}:
+        raise ValueError("invalid history_mode")
     if "input_modes" in config:
         from minibench.datasets.xiangqi.schema import MULTIMODAL_INPUT_MODES
         modes = config["input_modes"]
-        if (not isinstance(modes, (list, tuple)) or not modes
-                or any(not isinstance(mode, str) or mode not in MULTIMODAL_INPUT_MODES for mode in modes)
-                or len(set(modes)) != len(modes)):
+        if not isinstance(modes, (list, tuple)) or not modes or any(not isinstance(m, str) or m not in MULTIMODAL_INPUT_MODES for m in modes) or len(set(modes)) != len(modes):
             raise ValueError("input_modes must be a nonempty list of distinct current Xiangqi modes")
     if "verify_with_pikafish" in config and not isinstance(config["verify_with_pikafish"], bool):
         raise ValueError("verify_with_pikafish must be boolean")
+
+
+def extract_strict_uci_move(raw_output: str) -> str | None:
+    """Accept only the documented single-field JSON move response."""
+    if not isinstance(raw_output, str) or not raw_output.strip():
+        return None
+    try:
+        payload = json.loads(raw_output)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict) or set(payload) != {"move"}:
+        return None
+    move = payload["move"]
+    if not isinstance(move, str) or UCI_MOVE_PATTERN.fullmatch(move.strip()) is None:
+        return None
+    return move.strip().lower()
 
 
 def error_detail(stage: str, error: Exception | str) -> dict[str, Any]:

@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import json
-import re
-import statistics
 from pathlib import Path
 from time import strftime
 from typing import Any, Callable, Sequence
@@ -19,7 +17,7 @@ from typing import Any, Callable, Sequence
 from minibench.core.agent import Agent, ChatMessage
 from minibench.core.metrics import start_task_metrics, finish_task_metrics, summarize_metrics
 from minibench.datasets.xiangqi.runtime import (
-    validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, error_detail, reset_agent, mean_or_none, rounded, status_counts, display,
+    validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, error_detail, extract_strict_uci_move, reset_agent, mean_or_none, rounded, status_counts, display,
 )
 from minibench.datasets.xiangqi.dataset import XiangqiTask
 from minibench.datasets.xiangqi.engines.pikafish import (
@@ -52,6 +50,11 @@ class HistoryResult:
     reasons: list
     # Descriptive corpus metadata, not a primary difficulty stratum.
     mate_in_plies: int | None = None
+    extended_mate_success: bool | None = None
+    mate_within_prescribed_steps: bool | None = None
+    checkmate_ply: int | None = None
+    reference_mate_plies: int | None = None
+    first_move_optimal_rate: float | None = None
     status: str = "ok"
     error: dict[str, Any] | None = None
     diagnostics: list[dict[str, Any]] = field(default_factory=list)
@@ -60,8 +63,20 @@ class HistoryResult:
     protocol_version: str = PROTOCOL_VERSION
 
 
-HISTORY_CP_LOSS_CAP = 500.0
-MATE_SCALE_LOSS_THRESHOLD = 5_000.0
+MATE_SCORE_CP = 100_000
+
+
+def analysis_value_cp(analysis, *, side_to_move, perspective_side):
+    """Mate sentinel preserves old CP-loss convention; it is not literal CP."""
+    if analysis.score_kind == "cp":
+        value = analysis.score
+    elif analysis.score_kind == "mate":
+        sign = 1 if analysis.score > 0 else -1 if analysis.score < 0 else 0
+        value = sign * max(1_000, MATE_SCORE_CP - abs(analysis.score) * 1_000)
+    else:
+        raise ValueError(f"Unknown score kind: {analysis.score_kind}")
+    return value if side_to_move == perspective_side else -value
+
 
 HISTORY_SYSTEM_PROMPT = """You are solving a Chinese Xiangqi checkmate benchmark against a fixed opponent.
 Your objective is to checkmate, not merely to choose a locally attractive move.
@@ -72,49 +87,12 @@ Generate one legal UCI coordinate move yourself.
 Return exactly one JSON object with schema {"move": "<uci_move>"}.
 Do not include markdown fences, candidate lists, analysis, or explanations."""
 
-UCI_MOVE_PATTERN = re.compile(r"\b([a-i][0-9][a-i][0-9])\b", re.IGNORECASE)
-
 def _side_name(side: int) -> str:
     return "ally" if side > 0 else "enemy"
 
 
 def _extract_history_uci(raw_output: str) -> str | None:
-    """Extract a generated Xiangqi UCI move without accepting a candidate index."""
-    if not raw_output:
-        return None
-    candidates: list[str] = []
-    try:
-        payload = json.loads(raw_output)
-        if isinstance(payload, dict):
-            value = payload.get("move")
-            if isinstance(value, str):
-                candidates.append(value)
-            candidates.extend(value for value in payload.values() if isinstance(value, str))
-    except (json.JSONDecodeError, TypeError):
-        pass
-    candidates.append(raw_output)
-    for candidate in candidates:
-        match = UCI_MOVE_PATTERN.search(candidate)
-        if match:
-            return match.group(1).lower()
-    return None
-
-
-def _parse_cp(info_lines: Sequence[str]) -> float | None:
-    for line in reversed(info_lines):
-        parts = line.split()
-        if "score" not in parts:
-            continue
-        try:
-            index = parts.index("score")
-            kind, value = parts[index + 1], float(parts[index + 2])
-        except (ValueError, IndexError):
-            continue
-        if kind == "cp":
-            return value
-        if kind == "mate":
-            return 10_000.0 if value > 0 else -10_000.0
-    return None
+    return extract_strict_uci_move(raw_output)
 
 
 def _ensure_engine(engine: PikafishEngine) -> None:
@@ -132,20 +110,36 @@ def _pikafish_analysis(
     board: VariantBoard,
     side: int,
     *,
+    perspective_side: int,
     depth: int,
 ) -> tuple[str | None, float | None]:
     if engine is None:
         raise RuntimeError("Pikafish engine unavailable")
     _ensure_engine(engine)
     fen = board_to_pikafish_fen(board.board, side_to_move=_side_name(side))
-    uci, info_lines = engine.bestmove_for_fen(fen, depth=depth)
-    return (None if uci in {"", "0000", "(none)"} else uci), _parse_cp(info_lines)
+    analysis = engine.analyze_fen(fen, depth=depth)
+    value = analysis_value_cp(
+        analysis,
+        side_to_move=_side_name(side),
+        perspective_side=_side_name(perspective_side),
+    )
+    uci = analysis.bestmove
+    return (None if uci in {"", "0000", "(none)"} else uci), float(value)
 
 
 def _task_objective_hint(task: XiangqiTask) -> str:
     """State the fixed-opponent objective without claiming a proved forced mate."""
-    return (f"Checkmate the fixed opponent within {task.max_steps} half-moves total "
-            "(both sides combined). Stalemate does not complete this task.")
+    reference_plies = (task.oracle or {}).get("mate_in_plies")
+    if not isinstance(reference_plies, int) or reference_plies < 1:
+        reference_plies = task.max_steps
+    extension = max(0, task.max_steps - reference_plies)
+    return (
+        f"Primary target: checkmate the fixed opponent within {reference_plies} "
+        "half-moves total (both sides combined), matching the verified reference "
+        "line length. If that horizon is missed, continue trying to checkmate through "
+        f"the extended limit of {task.max_steps} half-moves (+{extension}). "
+        "Stalemate does not complete this task or either scoring target."
+    )
 
 
 def _history_turn_message(
@@ -279,7 +273,8 @@ def evaluate_history_tasks(
             start = start_task_metrics(agent)
             steps, reasons = [], []
             diagnostics = [startup_error] if startup_error else []
-            status, error, success = "ok", None, False
+            status, error, mate_success = "ok", None, False
+            checkmate_ply = None
             history_transport = "not_applicable"
             stage = "agent_reset"
             try:
@@ -288,7 +283,7 @@ def evaluate_history_tasks(
                 if history_mode == "move-history-only" and not callable(getattr(agent, "generate_messages", None)):
                     raise ValueError("H2 move-history-only requires generate_messages() with complete history")
                 stage = "judge"
-                agent_side = 1 if task.agent_color == "red" else -1
+                agent_side = 1 if (task.agent_color or ("red" if task.agent_side == "ally" else "black")) == "red" else -1
                 side = 1 if task.side_to_move == "ally" else -1
                 board = VariantBoard(task.board, [])
                 initial_board = board_state_text(board.board)
@@ -298,13 +293,18 @@ def evaluate_history_tasks(
                     stage = "judge"
                     legal_moves = board.legal_moves(side)
                     if not legal_moves:
-                        success = side != agent_side and board.find_general(side) is not None and board._is_in_check(side)
-                        reasons.append("agent_checkmated_opponent" if success else "stalemate" if not board._is_in_check(side) else "agent_was_checkmated")
+                        mate_success = side != agent_side and board.find_general(side) is not None and board._is_in_check(side)
+                        checkmate_ply = step_index if mate_success else None
+                        reasons.append("agent_checkmated_opponent" if mate_success else "stalemate" if not board._is_in_check(side) else "agent_was_checkmated")
                         break
                     is_agent = side == agent_side
                     analysis_error = None
                     try:
-                        optimal_uci, cp_before = _pikafish_analysis(engine, board, side, depth=pikafish_depth)
+                        optimal_uci, cp_before = _pikafish_analysis(
+                            engine, board, side,
+                            perspective_side=agent_side,
+                            depth=pikafish_depth,
+                        )
                     except Exception as exc:
                         optimal_uci, cp_before = None, None
                         analysis_error = exc
@@ -355,14 +355,18 @@ def evaluate_history_tasks(
                     elif not board.legal_moves(next_side):
                         terminal = True
                         checked = board._is_in_check(next_side)
-                        success = next_side != agent_side and checked
-                        reasons.append("agent_checkmated_opponent" if success else "agent_was_checkmated" if checked else "stalemate")
+                        mate_success = next_side != agent_side and checked
+                        checkmate_ply = step_index + 1 if mate_success else None
+                        reasons.append("agent_checkmated_opponent" if mate_success else "agent_was_checkmated" if checked else "stalemate")
                         if checked:
-                            cp_after = 10_000.0
+                            cp_after = float(MATE_SCORE_CP if next_side != agent_side else -MATE_SCORE_CP)
                     else:
                         try:
-                            _, next_cp = _pikafish_analysis(engine, board, next_side, depth=pikafish_depth)
-                            cp_after = -next_cp if next_cp is not None else None
+                            _, cp_after = _pikafish_analysis(
+                                engine, board, next_side,
+                                perspective_side=agent_side,
+                                depth=pikafish_depth,
+                            )
                         except Exception as exc:
                             diagnostics.append(error_detail("diagnostic_engine_after", exc))
                     step["cp_after"] = rounded(cp_after)
@@ -380,7 +384,7 @@ def evaluate_history_tasks(
                     reasons.append("max_steps_reached")
             except Exception as exc:
                 malformed = stage == "model" and isinstance(exc, StrictJSONObjectError)
-                status, success = ("invalid", False) if malformed else ("error", None)
+                status, mate_success = ("invalid", False) if malformed else ("error", None)
                 if malformed:
                     stage = "format"
                     steps.append({"step_idx": len(steps), "actor": "agent", "raw_output": exc.raw_output or "",
@@ -392,16 +396,24 @@ def evaluate_history_tasks(
             losses = [step["cp_loss"] for step in agent_steps if step.get("cp_loss") is not None]
             avg_cp = mean_or_none(losses, 1)
             legality = mean_or_none(step["is_legal"] for step in agent_steps) if status != "error" else None
-            optimal = mean_or_none(step["is_optimal"] for step in agent_steps if step.get("optimal_uci")) if status != "error" else None
-            capped = mean_or_none(min(loss, HISTORY_CP_LOSS_CAP) for loss in losses)
-            quality = 1.0 - capped / HISTORY_CP_LOSS_CAP if capped is not None else None
-            score = 100 * (0.7 * quality + 0.2 * optimal + 0.1 * legality) if all(value is not None for value in (quality, optimal, legality)) and status != "error" else None
+            reference_mate_plies = (task.oracle or {}).get("mate_in_plies")
+            if not isinstance(reference_mate_plies, int) or reference_mate_plies < 1:
+                reference_mate_plies = task.max_steps
+            strict_success = (None if mate_success is None else bool(
+                mate_success and checkmate_ply is not None and checkmate_ply <= reference_mate_plies
+            ))
+            if mate_success and not strict_success:
+                reasons.append("checkmate_after_reference_horizon")
             result = HistoryResult(
                 task_id=task.id, difficulty=task.difficulty, history_mode=history_mode,
-                success=success, goal_achieved=success, steps=steps, avg_cp_loss=avg_cp,
-                legality_rate=rounded(legality, 3), optimal_rate=rounded(optimal, 3),
-                cp_quality_score=rounded(quality, 3), history_transport=history_transport,
-                normalized_score=rounded(score), tags=list(task.tags), reasons=reasons,
+                success=mate_success, goal_achieved=mate_success,
+                extended_mate_success=mate_success, checkmate_ply=checkmate_ply,
+                mate_within_prescribed_steps=strict_success,
+                reference_mate_plies=reference_mate_plies, steps=steps, avg_cp_loss=avg_cp,
+                legality_rate=rounded(legality, 3), optimal_rate=None,
+                first_move_optimal_rate=None,
+                cp_quality_score=None, history_transport=history_transport,
+                normalized_score=None, tags=list(task.tags), reasons=reasons,
                 mate_in_plies=(task.oracle or {}).get("mate_in_plies"), status=status, error=error,
                 diagnostics=diagnostics, metrics=finish_task_metrics(agent, start), termination_reason=reasons[-1],
             )
@@ -414,51 +426,45 @@ def evaluate_history_tasks(
     return results
 
 
-def _history_loss_diagnostics(results: list[HistoryResult]) -> dict[str, Any]:
-    losses = [float(step["cp_loss"]) for result in results for step in result.steps
-              if result.status != "error" and step.get("actor") == "agent" and step.get("cp_loss") is not None]
-    non_mate = [loss for loss in losses if loss < MATE_SCALE_LOSS_THRESHOLD]
-    return {
-        "raw_mean_cp_loss": mean_or_none(losses, 1),
-        "median_cp_loss": round(statistics.median(losses), 1) if losses else None,
-        "mean_capped_cp_loss": mean_or_none((min(loss, HISTORY_CP_LOSS_CAP) for loss in losses), 1),
-        "mean_non_mate_cp_loss": mean_or_none(non_mate, 1),
-        "mate_scale_loss_event_rate": mean_or_none((loss >= MATE_SCALE_LOSS_THRESHOLD for loss in losses), 3),
-        "agent_move_count": len(losses),
-    }
-
-
 def _paired_history_comparison(results: list[HistoryResult]) -> dict[str, Any]:
     grouped = {}
     for result in results:
         if result.status != "error":
             grouped.setdefault(result.task_id, {})[result.history_mode] = result
     pairs = [modes for modes in grouped.values() if set(modes) == {"full-state", "move-history-only"}]
-    score_gaps = [p["full-state"].normalized_score - p["move-history-only"].normalized_score for p in pairs
-                  if p["full-state"].normalized_score is not None and p["move-history-only"].normalized_score is not None]
-    quality_gaps = [p["full-state"].cp_quality_score - p["move-history-only"].cp_quality_score for p in pairs
-                    if p["full-state"].cp_quality_score is not None and p["move-history-only"].cp_quality_score is not None]
+    cp_gaps = [p["full-state"].avg_cp_loss - p["move-history-only"].avg_cp_loss for p in pairs
+               if p["full-state"].avg_cp_loss is not None and p["move-history-only"].avg_cp_loss is not None]
+    legality_gaps = [p["full-state"].legality_rate - p["move-history-only"].legality_rate for p in pairs
+                     if p["full-state"].legality_rate is not None and p["move-history-only"].legality_rate is not None]
     return {
         "paired_total": len(pairs), "comparison": "full-state minus move-history-only",
-        "success_rate_gap": mean_or_none(float(p["full-state"].success) - float(p["move-history-only"].success) for p in pairs),
-        "mean_score_gap": mean_or_none(score_gaps, 1),
-        "mean_capped_cp_quality_gap": mean_or_none(quality_gaps, 3),
-        "full_state_better_count": sum(gap > 0 for gap in score_gaps),
-        "tie_count": sum(gap == 0 for gap in score_gaps), "history_better_count": sum(gap < 0 for gap in score_gaps),
+        "mate_rate_gap": mean_or_none(
+            float(p["full-state"].success) - float(p["move-history-only"].success)
+            for p in pairs if p["full-state"].success is not None
+            and p["move-history-only"].success is not None
+        ),
+        "mate_within_prescribed_rate_gap": mean_or_none(
+            float(p["full-state"].mate_within_prescribed_steps)
+            - float(p["move-history-only"].mate_within_prescribed_steps)
+            for p in pairs if p["full-state"].mate_within_prescribed_steps is not None
+            and p["move-history-only"].mate_within_prescribed_steps is not None
+        ),
+        "legality_rate_gap": mean_or_none(legality_gaps, 3),
+        "avg_cp_loss_gap": mean_or_none(cp_gaps, 1),
     }
 
 
 def summarize_history(results: list[HistoryResult]) -> dict[str, Any]:
     def bucket(items):
         valid = [r for r in items if r.status != "error"]
-        quality = mean_or_none((r.cp_quality_score for r in valid), 3)
         return {
-            **status_counts(items), "avg_score": mean_or_none((r.normalized_score for r in valid), 1),
-            "success_rate": mean_or_none(r.success for r in valid),
+            **status_counts(items),
+            "mate_rate": mean_or_none(r.success for r in valid),
+            "mate_within_prescribed_rate": mean_or_none(
+                r.mate_within_prescribed_steps for r in valid
+            ),
             "avg_cp_loss": mean_or_none((r.avg_cp_loss for r in valid), 1),
-            "avg_legality": mean_or_none((r.legality_rate for r in valid), 3),
-            "avg_optimal": mean_or_none((r.optimal_rate for r in valid), 3),
-            "avg_capped_cp_quality_score": quality, "avg_cp_quality_score": quality,
+            "legality_rate": mean_or_none((r.legality_rate for r in valid), 3),
         }
     summary = bucket(results)
     by_diff = {difficulty: bucket([r for r in results if r.difficulty == difficulty]) for difficulty in sorted({r.difficulty for r in results})}
@@ -467,13 +473,14 @@ def summarize_history(results: list[HistoryResult]) -> dict[str, Any]:
         if r.mate_in_plies is not None:
             horizons[str(r.mate_in_plies)] = horizons.get(str(r.mate_in_plies), 0) + 1
     return {
-        **summary, "unique_tasks": len({r.task_id for r in results}), "primary_metric": "strict_checkmate_success_rate",
+        **summary, "unique_tasks": len({r.task_id for r in results}),
+        "primary_metric": "checkmate_rate_within_bounded_run",
+        "secondary_metric": "checkmate_rate_within_prescribed_reference_horizon",
         "opponent_policy": "fixed Pikafish opponent; reference distance is not a proved shortest mate",
-        "cp_loss_diagnostics": {"unit": "Pikafish centipawns; mate scores use a 10,000 sentinel",
-                                "cap_for_reporting": HISTORY_CP_LOSS_CAP, **_history_loss_diagnostics(results)},
+        "cp_loss_unit": "Pikafish centipawns from the agent perspective; mate scores use a distance-aware 100,000 scale",
         "paired_comparison": _paired_history_comparison(results),
         "by_mode": {mode: bucket([r for r in results if r.history_mode == mode]) for mode in sorted({r.history_mode for r in results})},
-        "mate_horizon_metadata": horizons, "by_difficulty": by_diff,
+        "mate_horizon_metadata": horizons, "by_difficulty": by_diff, "by_legacy_difficulty_metadata": by_diff,
         "metrics": summarize_metrics(results),
     }
 
@@ -488,8 +495,16 @@ def write_history_run(results, output_dir="runs", run_name=None, *, write_predic
     summary = summarize_history(results)
     (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     lines = ["Xiangqi History Evaluation", f"Total: {summary['total']} Missing: {summary['missing']}",
-             f"Strict checkmate success: {display(summary['success_rate'], '.1%')}"]
+             f"Checkmate within bounded run: {display(summary['mate_rate'], '.1%')}",
+             f"Checkmate within prescribed horizon: {display(summary['mate_within_prescribed_rate'], '.1%')}",
+             f"Legality: {display(summary['legality_rate'], '.1%')}",
+             f"Average CP loss: {display(summary['avg_cp_loss'])}"]
     for mode, values in summary["by_mode"].items():
-        lines.append(f"{mode}: success={display(values['success_rate'], '.1%')} missing={values['missing']}")
+        lines.append(
+            f"{mode}: mate={display(values['mate_rate'], '.1%')} "
+            f"within_prescribed={display(values['mate_within_prescribed_rate'], '.1%')} "
+            f"legal={display(values['legality_rate'], '.1%')} "
+            f"cp_loss={display(values['avg_cp_loss'])} missing={values['missing']}"
+        )
     (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return run_dir

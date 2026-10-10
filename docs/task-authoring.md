@@ -60,15 +60,25 @@ Formal Xiangqi records use schema version 2 and persist only FEN, never a second
 10×9 matrix. Use one of the four registered family names and an ID with the
 same prefix.
 
-```json
-{"schema_version":2,"id":"xiangqi-history-0001","family":"xiangqi-history","fen":"5k3/9/9/2R6/9/6C2/1c7/9/3K5/9 w - - 0 1","agent_color":"red","goal":"checkmate","max_plies":20,"difficulty":"long","piece_count":5,"oracle":{"best_move_uci":"d1e1","mate_in_plies":4,"evaluation_cp":null},"tags":[]}
+Use a complete validated current record instead of copying an abbreviated JSON
+example that omits the reference certificate or has an inconsistent horizon:
+
+```bash
+head -n 1 data/xiangqi/history/tasks.jsonl
+python -c "from minibench.datasets.xiangqi.schema import load_records; print(len(load_records('data/xiangqi/history/tasks.jsonl', expected_family='xiangqi-history')))"
 ```
 
 `fen` active color must equal `agent_color`; both generals must exist; tags must
 be sorted unique non-empty strings. Rule-variant records additionally require
-`scenario_id`, `ruleset`, and the normalized structured `rules` list. See
-[`xiangqi-data-card.md`](xiangqi-data-card.md) for the complete contract and
-human-readable examples.
+`scenario_id`, `ruleset`, and the normalized structured `rules` list. Current H2
+requires its reference analysis; C2 requires multi-ply references and paired
+source mapping. Neither may use a one-step best-move record as a mate certificate.
+The complete record contract is implemented in
+[`schema.py`](../src/minibench/datasets/xiangqi/schema.py); submitted IDs and
+selection hashes are recorded in
+[`submission_manifest.json`](../data/xiangqi/submission_manifest.json).
+Certification scope and experiment limitations are described in
+[`cloud-run.md`](cloud-run.md).
 
 ## One-Stroke Tasks
 

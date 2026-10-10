@@ -2,9 +2,7 @@ task:
   prompt_version: xiangqi-reasoning-v2
   family: xiangqi-rule-variants
   path: data/xiangqi/rule_variants/tasks.jsonl
-  selection:
-    path: data/xiangqi/evaluation_samples/formal/c2.jsonl
-    sha256: ae1b0510cd33e246dffb26645b2abc5ff99563271d7dc5212f5ac2313096d0b1
+  limit: 100
 agent:
   name: direct
   max_tokens: 512
@@ -17,8 +15,10 @@ provider:
   extra_body:
     enable_thinking: false
 evaluation:
-  oracle_depth: 3
+  search_depth: 3
+  horizon_policy: reference_mate_plies_plus_4
+  loss_unit: rule-aware-centipawn-equivalent-not-pikafish
 run:
   output_dir: runs
-  run_name: xiangqi_c2_direct_formal_r1
+  run_name: xiangqi_c2_direct_submitted100_r1
   on_existing: error

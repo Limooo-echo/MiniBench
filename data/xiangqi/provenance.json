@@ -1,6 +1,65 @@
 {
+  "contamination_policy": "CCPD is public. Exact training-data contamination cannot be established locally; disclose this limitation and the provider policy for every model.",
+  "corpus_name": "MiniBench Xiangqi submitted stratified 100 per task, 2026-10-10",
+  "engine": {
+    "Hash_MB": 128,
+    "Threads": 1,
+    "asset": "Pikafish.2026-09-06.7z",
+    "binary_name": "Pikafish-Windows-x86-64-universal.exe",
+    "binary_sha256": "0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3",
+    "clear_hash_per_analysis": true,
+    "d3_m2_diagnostic_depth": 8,
+    "h2_opponent_depth": 16,
+    "h2_validation_depths": [
+      16,
+      20
+    ],
+    "local_validation_environment": "WSL Python invoking official Windows universal binary",
+    "nnue_name": "pikafish.nnue",
+    "nnue_sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e",
+    "release_tag": "Pikafish-2026-09-06"
+  },
+  "generation_command": {
+    "c2": "python scripts/build_xiangqi_c2.py --history data/xiangqi/history/tasks.jsonl --output data/xiangqi/rule_variants/tasks.jsonl",
+    "c2_source_policy": "50 certified standard/focus pairs, all three focus rules; exclude active-rule mate-in-one and uncertified sources.",
+    "d3": "python scripts/annotate_xiangqi_d3.py --in-place",
+    "freeze_selection": "python scripts/freeze_xiangqi_evaluation.py",
+    "h2": "python scripts/build_xiangqi_h2.py (see history/validation_report.json for inputs and engine hashes)",
+    "independent_validation": "python scripts/validate_xiangqi_data.py --workers 4 --output data/xiangqi/independent_validation.json",
+    "m2": "python scripts/build_xiangqi_m2_from_d3.py --d3 data/xiangqi/mate_in_one/tasks.jsonl --output data/xiangqi/multimodal/tasks.jsonl",
+    "submitted_selection": "python scripts/select_xiangqi_release.py --parent-pool <immutable-250-row-parent-pool> --replace --seed 42"
+  },
+  "generator_seed": {
+    "c2": "deterministic ordering over the fixed H2 release",
+    "d3": "deterministic quantiles",
+    "h2": 20260919,
+    "m2": "inherits D3"
+  },
+  "intentional_overlap": {
+    "C2": "50 standard/focus pairs from H2 parent sources; sources not selected into H2 are retained as minimal source evidence, not benchmark tasks.",
+    "D3_M2": "All 100 submitted FENs shared to isolate modality."
+  },
+  "interpretation": {
+    "c2": "bounded multi-ply strict checkmate against a fixed depth-3 rule-aware opponent; stored lines are reference mates, not shortest-mate or all-defence proofs",
+    "h2": "strict mate against the fixed opponent; two reference lines are not an all-defence or shortest-mate proof",
+    "h2_horizon": "2 * reference_mate_moves + 3 half-moves (reference line plus four half-moves)",
+    "history_visual_gaps": "Task gaps are not direct memory evidence; M2 separately scores explicit initial-board transcription."
+  },
+  "model_service_snapshot": "Evaluation configuration records model name, thinking flag and provider settings per run; no API key is persisted.",
+  "previous_release": {
+    "archive": "legacy/xiangqi-corpus-rebuild-2026-08-31",
+    "git_commit": "eab452b069b40a1cfaec39fe2b3895d7503484f2",
+    "migration_policy": "Legacy ID mapping targets only the immutable legacy archive; no old answers are attached to replaced boards.",
+    "revision": "xiangqi-corpus-rebuild-2026-08-31"
+  },
+  "protocol_version": "xiangqi-reasoning-v2",
+  "release_id": "xiangqi-2026-09-19-r1",
   "schema_version": 2,
-  "corpus_name": "MiniBench Xiangqi reasoning repair 2026-09-19 r1",
+  "source_license": {
+    "ccpd": "CC-BY-4.0",
+    "minibench_dataset_and_code": "UNRESOLVED: repository has no top-level licence file",
+    "pikafish": "GPL-3.0"
+  },
   "source_repository": {
     "ccpd": "https://github.com/Yvonne761/Chinese-Chess-Practical-Dataset",
     "minibench": "https://github.com/Limooo-echo/MiniBench",
@@ -13,69 +72,15 @@
     "pikafish_nnue_sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e",
     "pikafish_tag": "Pikafish-2026-09-06"
   },
-  "source_license": {
-    "ccpd": "CC-BY-4.0",
-    "pikafish": "GPL-3.0",
-    "minibench_dataset_and_code": "UNRESOLVED: repository has no top-level licence file"
-  },
-  "generation_command": {
-    "d3": "python scripts/annotate_xiangqi_d3.py --in-place",
-    "h2": "python scripts/build_xiangqi_h2.py (see history/validation_report.json for inputs and engine hashes)",
-    "c2": "python scripts/build_xiangqi_c2.py --candidates data/xiangqi/rule_variants/candidates.json --output data/xiangqi/rule_variants/tasks.jsonl",
-    "m2": "python scripts/build_xiangqi_m2_from_d3.py --d3 data/xiangqi/mate_in_one/tasks.jsonl --output data/xiangqi/multimodal/tasks.jsonl",
-    "c2_candidates": "python scripts/extract_ccpd_positions.py --source \"$CCPD_ROOT\" --output tmp/c2-positions.jsonl --tail-plies 1000 --max-games 2000; python scripts/generate_xiangqi_c2_candidates.py --positions tmp/c2-positions.jsonl --source \"$CCPD_ROOT\" --output tmp/c2-candidates.json --report tmp/c2-generation.json --seed 20260831 --workers 6 --max-pieces 18",
-    "independent_validation": "python scripts/validate_xiangqi_data.py --workers 4 --output data/xiangqi/independent_validation.json",
-    "freeze_selection": "python scripts/freeze_xiangqi_evaluation.py"
-  },
-  "generator_seed": {
-    "d3": "deterministic quantiles",
-    "h2": 20260919,
-    "c2": 20260831,
-    "m2": "inherits D3"
-  },
-  "model_service_snapshot": "Evaluation configuration records model name, thinking flag and provider settings per run; no API key is persisted.",
-  "contamination_policy": "CCPD is public. Exact training-data contamination cannot be established locally; disclose this limitation and the provider policy for every model.",
-  "intentional_overlap": {
-    "D3_M2": "All 250 FENs are intentionally shared to isolate modality.",
-    "C2": "Each of 60 paired scenarios intentionally repeats one FEN across four rule cards."
-  },
-  "release_id": "xiangqi-2026-09-19-r1",
-  "protocol_version": "xiangqi-reasoning-v2",
-  "previous_release": {
-    "revision": "xiangqi-corpus-rebuild-2026-08-31",
-    "git_commit": "eab452b069b40a1cfaec39fe2b3895d7503484f2",
-    "archive": "legacy/xiangqi-corpus-rebuild-2026-08-31",
-    "migration_policy": "Legacy ID mapping targets only the immutable legacy archive; no old answers are attached to replaced boards."
-  },
-  "engine": {
-    "release_tag": "Pikafish-2026-09-06",
-    "asset": "Pikafish.2026-09-06.7z",
-    "binary_name": "Pikafish-Windows-x86-64-universal.exe",
-    "binary_sha256": "0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3",
-    "nnue_name": "pikafish.nnue",
-    "nnue_sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e",
-    "Threads": 1,
-    "Hash_MB": 128,
-    "clear_hash_per_analysis": true,
-    "h2_opponent_depth": 16,
-    "d3_m2_diagnostic_depth": 8,
-    "h2_validation_depths": [
-      16,
-      20
-    ],
-    "local_validation_environment": "WSL Python invoking official Windows universal binary"
+  "submission": {
+    "manifest": "submission_manifest.json",
+    "sha256": "b412092aeb72ef9eb7be8d678e0d7504d40e21495564a3496f467d1604251d69"
   },
   "validation": {
-    "standard": "cchess==1.25.5 after hand-specified calibration",
-    "variants": "independent reference rules and exhaustive depth-3 root utility comparison",
-    "report": "independent_validation.json",
     "publish_on_disagreement": false,
-    "repair_manifest": "repair_manifest.json"
-  },
-  "interpretation": {
-    "c2": "fixed three-ply tactical utility, not global optimality",
-    "h2": "strict mate against the fixed opponent; two reference lines are not an all-defence or shortest-mate proof",
-    "h2_horizon": "2 * reference_mate_moves + 1 half-moves",
-    "history_visual_gaps": "task performance changes, not separate memory or recognition accuracy"
+    "repair_manifest": "repair_manifest.json",
+    "report": "independent_validation.json",
+    "standard": "cchess==1.25.5 after hand-specified calibration",
+    "variants": "Independent legal/terminal replay plus exact depth-3 opponent choices on a winning witness for every submitted C2 row."
   }
 }

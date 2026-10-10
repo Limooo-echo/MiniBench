@@ -5,12 +5,19 @@ import random
 import unittest
 
 from minibench.datasets.xiangqi import reference
-from minibench.datasets.xiangqi.schema import board_to_fen, fen_to_board, validate_record
+from minibench.datasets.xiangqi.schema import (
+    FAMILY_PATHS, board_to_fen, fen_to_board, load_records, validate_record,
+)
 from minibench.datasets.xiangqi.validation import (
     calibrate_cchess, compare_standard_legal_moves, validate_position, validate_pv,
 )
 from minibench.datasets.xiangqi.variants.board import Move, VariantBoard
-from minibench.datasets.xiangqi.variants.rules import Rule
+from minibench.datasets.xiangqi.variants.mate_search import (
+    CHECK_BONUS_CPE,
+    MATE_SCORE_CPE,
+    score_moves_cpe,
+)
+from minibench.datasets.xiangqi.variants.rules import PIECE_VALUE, Rule
 from minibench.datasets.xiangqi.variants.search import (
     MATE_SCORE, best_moves, evaluate, minimax, score_moves,
 )
@@ -36,6 +43,74 @@ def rules(name):
         "chariot-no-center": [Rule("zone_limit", "chariot", {"zone": "not_center_cols"})],
         "soldier-free-retreat": [Rule("move_mod", "soldier", {"mod": "free_retreat"})],
     }[name]
+
+
+def independent_cpe_values(board, side, depth, perspective, ruleset):
+    """Small unpruned oracle for the release C2 loss search."""
+    active = ruleset
+
+    def general(state, target_side):
+        return next(
+            (
+                (r, c)
+                for r, row in enumerate(state)
+                for c, pid in enumerate(row)
+                if pid == target_side
+            ),
+            None,
+        )
+
+    def moves(state, turn):
+        return [
+            move
+            for move in reference.legal_moves(state, turn, active)
+            if abs(state[move.tr][move.tc]) != 1
+        ]
+
+    def heuristic(state):
+        red_value = sum(
+            PIECE_VALUE.get(abs(pid), 0.0)
+            * 100.0
+            * (1 if pid > 0 else -1)
+            for row in state
+            for pid in row
+            if pid and abs(pid) != 1
+        )
+        check_value = CHECK_BONUS_CPE * (
+            int(reference.in_check(state, -1, active))
+            - int(reference.in_check(state, 1, active))
+        )
+        return perspective * (red_value + check_value)
+
+    def visit(state, remaining, turn, ply):
+        if general(state, perspective) is None:
+            return -MATE_SCORE_CPE + ply
+        if general(state, -perspective) is None:
+            return MATE_SCORE_CPE - ply
+        options = moves(state, turn)
+        if not options:
+            if reference.in_check(state, turn, active):
+                winner = -turn
+                return (
+                    MATE_SCORE_CPE - ply
+                    if winner == perspective
+                    else -MATE_SCORE_CPE + ply
+                )
+            return 0.0
+        if remaining == 0:
+            return heuristic(state)
+        values = [
+            visit(reference.apply_move(state, move), remaining - 1, -turn, ply + 1)
+            for move in options
+        ]
+        return max(values) if turn == perspective else min(values)
+
+    return {
+        move.to_uci(): visit(
+            reference.apply_move(board, move), depth - 1, -side, 1
+        )
+        for move in moves(board, side)
+    }
 
 
 class XiangqiRulesValidationTests(unittest.TestCase):
@@ -100,19 +175,36 @@ class XiangqiRulesValidationTests(unittest.TestCase):
             "schema_version": 2, "family": "xiangqi-rule-variants",
             "id": "xiangqi-rule-variants-unit", "agent_color": "red",
             "fen": board_to_fen(position(("b8", 6), ("c8", 8))),
-            "goal": "best-move-under-rule", "max_plies": 1, "difficulty": "unit",
+            "goal": "checkmate", "max_plies": 7, "difficulty": "short",
             "piece_count": 4, "tags": [], "scenario_id": "xiangqi-rule-scenario-unit",
-            "oracle": {"best_move_uci": "b8d9", "mate_in_plies": None, "evaluation_cp": None},
+            "oracle": {"best_move_uci": "b8d9", "mate_in_plies": 3, "evaluation_cp": None},
             "ruleset": "horse-no-leg-block",
             "rules": [{"kind": "move-modification", "piece": "horse", "effect": "ignore-leg-block"}],
+            "source_task_id": "xiangqi-history-unit",
+            "design_stratum": "horse-no-leg-block",
+            "c2_analysis": {"version": "c2-multistep-rule-mate-v3",
+                "source_task_id": "xiangqi-history-unit", "search_depth": 3,
+                "focus_ruleset": "horse-no-leg-block",
+                "pair_rulesets": ["standard", "horse-no-leg-block"],
+                "mate_in_moves": 2, "reference_mate_plies": 3,
+                "principal_variation_uci": ["b8d9", "d9e9", "c8e8"],
+                "rule_sensitive_along_reference": True,
+                "loss_unit": "rule-aware centipawn-equivalent value (soldier=100); not Pikafish centipawns",
+                "max_plies_extension": 4,
+                "verification": {}},
         }
         self.assertEqual(validate_position(fen_to_board(record["fen"])[0]), [])
         with self.assertRaisesRegex(ValueError, "active rules leave side not to move in check"):
             validate_record(record)
-        record.update(fen=board_to_fen(position(("e7", -8))), piece_count=3,
-                      ruleset="standard", rules=[])
-        record["oracle"]["best_move_uci"] = "e0f0"
-        self.assertIs(validate_record(record), record)
+        mover_in_check = next(
+            item for item in load_records(FAMILY_PATHS["xiangqi-rule-variants"])
+            if reference.in_check(
+                fen_to_board(item["fen"])[0],
+                1 if item["agent_color"] == "red" else -1,
+                item["ruleset"],
+            )
+        )
+        self.assertIs(validate_record(mover_in_check), mover_in_check)
 
     def test_initial_move_count_and_facing_general_filter(self):
         board, _ = fen_to_board(INITIAL_FEN)
@@ -181,6 +273,57 @@ class XiangqiRulesValidationTests(unittest.TestCase):
                 expected = reference.score_moves(board, 1, 3, 1, name)
                 self.assertEqual({m.to_uci(): v for m, v in actual},
                                  {m.to_uci(): v for m, v in expected})
+
+    def test_c2_loss_search_matches_independent_oracle_for_both_sides(self):
+        board = position(("b3", 6), ("b4", 8), ("a5", 12), ("i4", -12))
+        self.assertEqual(validate_position(board), [])
+        for name in (
+            "standard",
+            "horse-no-leg-block",
+            "chariot-no-center",
+            "soldier-free-retreat",
+        ):
+            for side, perspective in ((1, 1), (-1, 1), (-1, -1)):
+                with self.subTest(ruleset=name, side=side, perspective=perspective):
+                    actual = {
+                        item.move.to_uci(): item.value
+                        for item in score_moves_cpe(
+                            VariantBoard(board, rules(name)),
+                            side,
+                            depth=3,
+                            perspective_side=perspective,
+                        )
+                    }
+                    expected = independent_cpe_values(
+                        board, side, 3, perspective, name
+                    )
+                    self.assertEqual(actual, expected)
+
+    def test_c2_loss_search_does_not_reward_stalemate_as_checkmate(self):
+        fen = "3ak4/9/5a3/9/9/9/9/4pA3/5K3/9 b - - 0 1"
+        state, _ = fen_to_board(fen)
+        turn = -1
+        for uci in ("e9e8", "f2e1", "e2e1", "f1f0"):
+            legal = {move.to_uci(): move for move in reference.legal_moves(state, turn)}
+            state = reference.apply_move(state, legal[uci])
+            turn = -turn
+        self.assertEqual(turn, -1)
+        values = {
+            item.move.to_uci(): item.value
+            for item in score_moves_cpe(
+                VariantBoard(state, []), -1, depth=1, perspective_side=-1
+            )
+        }
+        self.assertEqual(values["e8e7"], 0.0)
+        after = reference.apply_move(
+            state,
+            next(
+                move
+                for move in reference.legal_moves(state, -1)
+                if move.to_uci() == "e8e7"
+            ),
+        )
+        self.assertEqual(reference.terminal_status(after, 1), "stalemate")
 
     def test_pv_distinguishes_complete_checkmate_stalemate_and_truncation(self):
         mate = validate_pv(MATE_FEN, ["b8d8"], require_cchess=False)

@@ -30,7 +30,6 @@ from minibench.datasets.xiangqi.validation import (
 )
 from minibench.datasets.xiangqi.variants.board import VariantBoard
 from minibench.datasets.xiangqi.variants.rules import Rule
-from minibench.datasets.xiangqi.variants.search import score_moves
 
 RELEASE_ID = "xiangqi-2026-09-19-r1"
 GATE_VERSION = "xiangqi-release-gate-v1"
@@ -120,7 +119,7 @@ def _h2_details(record, reasons):
         reasons.append("reference_distance_band_mismatch")
     if analysis.get("reference_mate_plies") != plies or record["oracle"].get("mate_in_plies") != plies:
         reasons.append("reference_mate_plies_mismatch")
-    if record.get("max_plies") != plies + 2:
+    if record.get("max_plies") != plies + 4:
         reasons.append("h2_horizon_mismatch")
     if analysis.get("source_reused") is not False:
         reasons.append("source_reuse_must_be_false")
@@ -188,41 +187,120 @@ def _c2_details(record, board, side, reasons, skip_search):
         reasons.append("active_rule_legal_moves_disagree")
     if reference.in_check(board, -side, active):
         reasons.append("active_rules_check_nonmoving_general")
+    for move in production_board.legal_moves(side):
+        trial = production_board.copy()
+        trial.apply(move)
+        if (trial.find_general(-side) is not None and trial._is_in_check(-side)
+                and not trial.legal_moves(-side)):
+            reasons.append("c2_active_rule_has_mate_in_one")
+            break
     analysis = record.get("c2_analysis", {})
-    if analysis.get("oracle_depth") != 3 or record.get("max_plies") != 1:
-        reasons.append("c2_requires_depth_three_one_action")
-    if record.get("agent_color") != "red":
-        reasons.append("c2_release_requires_red_to_move")
-    if analysis.get("legal_move_count") != len(independent):
-        reasons.append("c2_legal_move_count_mismatch")
-    if record["oracle"].get("best_move_uci") not in independent:
-        reasons.append("c2_oracle_is_illegal")
-    details = {"legal_move_count": len(independent), "search_verified": False}
+    pv = analysis.get("principal_variation_uci", [])
+    reference_plies = record.get("oracle", {}).get("mate_in_plies")
+    if analysis.get("search_depth") != 3:
+        reasons.append("c2_requires_registered_depth_three_policy")
+    if (not isinstance(reference_plies, int) or reference_plies < 3
+            or record.get("max_plies") != reference_plies + 4):
+        reasons.append("c2_invalid_multi_ply_horizon")
+    if not pv or record["oracle"].get("best_move_uci") != pv[0]:
+        reasons.append("c2_oracle_reference_line_mismatch")
+
+    from minibench.datasets.xiangqi.variants.mate_search import replay_strict_mate_line
+    production_proof = replay_strict_mate_line(
+        production_board.copy(), side, pv, attacker_side=side
+    )
+    production_state = production_board.copy()
+    state = [row[:] for row in board]
+    turn = side
+    independent_reason = None
+    legal_counts = []
+    production_legal_counts = []
+    for index, uci in enumerate(pv):
+        production_moves = {
+            move.to_uci(): move for move in production_state.legal_moves(turn)
+        }
+        independent_moves = {
+            move.to_uci(): move for move in reference.legal_moves(state, turn, active)
+        }
+        production_legal_counts.append(len(production_moves))
+        legal_counts.append(len(independent_moves))
+        if set(production_moves) != set(independent_moves):
+            reasons.append(f"c2_active_rule_legal_moves_disagree_at_ply:{index}")
+        production_move = production_moves.get(uci)
+        independent_move = independent_moves.get(uci)
+        if production_move is None or independent_move is None:
+            independent_reason = f"illegal_ply_{index}:{uci}"
+            break
+        production_state.apply(production_move)
+        state = reference.apply_move(state, independent_move)
+        if production_state.board != state:
+            reasons.append(f"c2_active_rule_board_disagrees_at_ply:{index}")
+        turn = -turn
+    independent_terminal = (
+        reference.terminal_status(state, turn, active)
+        if independent_reason is None else "ongoing"
+    )
+    if (not production_proof["valid"]
+            or production_proof["terminal"] != "checkmate"
+            or production_proof["plies"] != reference_plies):
+        reasons.append("c2_production_reference_line_not_strict_mate")
+    if independent_reason is not None or independent_terminal != "checkmate" or turn != -side:
+        reasons.append("c2_independent_reference_line_not_strict_mate")
+
+    focus = analysis.get("focus_ruleset")
+    recomputed_sensitive = False
+    sensitivity_replay_valid = focus in FOCI
+    if sensitivity_replay_valid:
+        standard_state = VariantBoard(board, [])
+        focus_rules = internal_rules({"ruleset": focus})
+        focus_state = VariantBoard(
+            board, [Rule.from_dict(rule) for rule in focus_rules]
+        )
+        sensitivity_turn = side
+        for index, uci in enumerate(pv):
+            standard_moves = {
+                move.to_uci(): move
+                for move in standard_state.legal_moves(sensitivity_turn)
+            }
+            focus_moves = {
+                move.to_uci(): move
+                for move in focus_state.legal_moves(sensitivity_turn)
+            }
+            recomputed_sensitive = (
+                recomputed_sensitive or set(standard_moves) != set(focus_moves)
+            )
+            if uci not in standard_moves or uci not in focus_moves:
+                reasons.append(f"c2_standard_focus_pair_replay_failed_at_ply:{index}")
+                sensitivity_replay_valid = False
+                break
+            standard_state.apply(standard_moves[uci])
+            focus_state.apply(focus_moves[uci])
+            sensitivity_turn = -sensitivity_turn
+    if (
+        sensitivity_replay_valid
+        and analysis.get("rule_sensitive_along_reference")
+        != recomputed_sensitive
+    ):
+        reasons.append("c2_rule_sensitive_label_mismatch")
+    stored = analysis.get("verification", {})
+    for key in ("production", "independent"):
+        proof = stored.get(key, {}) if isinstance(stored, dict) else {}
+        if (proof.get("valid") is not True or proof.get("terminal") != "checkmate"
+                or proof.get("plies") != reference_plies):
+            reasons.append(f"c2_stored_{key}_proof_invalid")
+    details = {
+        "initial_legal_move_count": len(independent),
+        "reference_mate_plies": reference_plies,
+        "reference_line": pv,
+        "production_legal_counts_along_reference": production_legal_counts,
+        "legal_counts_along_reference": legal_counts,
+        "production_replay": production_proof,
+        "independent_terminal": independent_terminal,
+        "recomputed_rule_sensitive_along_reference": recomputed_sensitive,
+        "claim_limit": "Validated complete mating line; not a shortest-mate or all-defences proof.",
+    }
     if skip_search:
-        details["skipped"] = "depth-three production/reference root utility comparison"
-        return details
-    scored = reference.score_moves(board, side, 3, side, active)
-    production = score_moves(production_board, side, 3, side)
-    scores = {move.to_uci(): value for move, value in scored}
-    prod_scores = {move.to_uci(): value for move, value in production}
-    if scores.keys() != prod_scores.keys() or any(not _same_number(value, prod_scores.get(move)) for move, value in scores.items()):
-        reasons.append("all_root_utilities_disagree")
-    best_set = reference.best_moves(scored)
-    if len(scored) < 2 or len(best_set) != 1:
-        reasons.append("c2_requires_unique_best_and_alternative")
-    if scored:
-        best_move, best_value = scored[0]
-        if record["oracle"].get("best_move_uci") != best_move.to_uci():
-            reasons.append("c2_oracle_best_move_mismatch")
-        if not _same_number(analysis.get("best_value"), best_value):
-            reasons.append("c2_best_value_mismatch")
-    margin = side * (scored[0][1] - scored[1][1]) if len(scored) > 1 else 0.0
-    if margin < 0.5 - TOLERANCE:
-        reasons.append("c2_unique_margin_below_half")
-    if not _same_number(analysis.get("unique_best_margin"), margin):
-        reasons.append("c2_margin_metadata_mismatch")
-    details.update(search_verified=not reasons, all_root_utilities=scores,
-                   best_moves=sorted(best_set), unique_best_margin=margin)
+        details["skipped"] = "none; C2 full-line replay is mandatory and inexpensive"
     return details
 
 
@@ -259,8 +337,8 @@ def _audit_payload(payload):
 
 def audit_collection(family: str, records: Sequence[dict]) -> list[str]:
     reasons = []
-    if len(records) != 250:
-        reasons.append(f"expected_250_records_got_{len(records)}")
+    if len(records) not in (100, 250):
+        reasons.append(f"expected_100_submitted_or_250_parent_records_got_{len(records)}")
     ids = [record.get("id") for record in records]
     if len(ids) != len(set(ids)):
         reasons.append("duplicate_task_ids")
@@ -268,7 +346,10 @@ def audit_collection(family: str, records: Sequence[dict]) -> list[str]:
     if family != "xiangqi-rule-variants" and len(fens) != len(set(fens)):
         reasons.append("duplicate_fens_within_family")
     counts = Counter(record.get("difficulty") for record in records)
-    expected = {"short": 80, "medium": 80, "long": 90} if family == "xiangqi-history" else {"easy": 80, "medium": 85, "hard": 85}
+    if len(records) == 100:
+        expected = {"short": 34, "medium": 33, "long": 33} if family == "xiangqi-history" else {"easy": 34, "medium": 33, "hard": 33}
+    else:
+        expected = {"short": 80, "medium": 80, "long": 90} if family == "xiangqi-history" else {"easy": 80, "medium": 85, "hard": 85}
     if family != "xiangqi-rule-variants" and dict(counts) != expected:
         reasons.append(f"difficulty_counts_mismatch:{dict(counts)}")
     if family == "xiangqi-history":
@@ -279,53 +360,63 @@ def audit_collection(family: str, records: Sequence[dict]) -> list[str]:
         groups = defaultdict(list)
         for record in records:
             groups[record.get("scenario_id")].append(record)
-        pairs, controls, strata = 0, 0, Counter()
+        pairs, strata = 0, Counter()
         fen_scenarios = defaultdict(set)
+        source_scenarios = defaultdict(set)
+        within_five = 0
+        sensitive = Counter()
         for scenario, group in groups.items():
             for record in group:
                 fen_scenarios[record.get("fen")].add(scenario)
-            if len(group) == 1:
-                controls += 1
-                control = group[0]
-                if control.get("ruleset") != "standard" or control.get("design_stratum") != "standard-control":
-                    reasons.append(f"{scenario}:invalid_standard_control")
-                analysis = control.get("c2_analysis", {})
-                if (analysis.get("focus_ruleset") != "standard" or analysis.get("focus_changes_best_move") is not False
-                        or analysis.get("standard_best_uci") != control.get("oracle", {}).get("best_move_uci")):
-                    reasons.append(f"{scenario}:invalid_control_metadata")
-                continue
+                source_scenarios[record.get("source_task_id")].add(scenario)
+                if record.get("c2_analysis", {}).get("mate_in_moves", 99) <= 5:
+                    within_five += 1
             pairs += 1
             by_rule = {record.get("ruleset"): record for record in group}
-            if len(group) != 4 or set(by_rule) != set(RULESETS) or len({record.get("fen") for record in group}) != 1:
-                reasons.append(f"{scenario}:incomplete_or_mismatched_four_rule_pair")
-                continue
             labels = {record.get("design_stratum") for record in group}
             if len(labels) != 1 or not labels <= set(FOCI):
                 reasons.append(f"{scenario}:invalid_design_stratum")
                 continue
             focus = next(iter(labels))
+            if (len(group) != 2 or set(by_rule) != {"standard", focus}
+                    or len({record.get("fen") for record in group}) != 1
+                    or len({record.get("source_task_id") for record in group}) != 1
+                    or len({tuple(record.get("c2_analysis", {}).get("principal_variation_uci", [])) for record in group}) != 1
+                    or len({record.get("c2_analysis", {}).get("rule_sensitive_along_reference") for record in group}) != 1):
+                reasons.append(f"{scenario}:incomplete_or_mismatched_standard_focus_pair")
+                continue
             strata[focus] += 1
-            standard_best = by_rule["standard"]["oracle"]["best_move_uci"]
-            if by_rule[focus]["oracle"]["best_move_uci"] == standard_best:
-                reasons.append(f"{scenario}:focus_does_not_change_best_move")
+            if by_rule[focus].get("c2_analysis", {}).get("rule_sensitive_along_reference"):
+                sensitive[focus] += 1
             for record in group:
                 analysis = record.get("c2_analysis", {})
-                if (analysis.get("standard_best_uci") != standard_best
-                        or analysis.get("focus_ruleset") != focus
-                        or analysis.get("focus_changes_best_move") is not True):
-                    reasons.append(f"{record.get('id')}:counterfactual_metadata_mismatch")
-        if pairs != 60 or controls != 10:
-            reasons.append(f"c2_requires_60_four_rule_pairs_and_10_controls_got_{pairs}_{controls}")
-        if dict(strata) != {focus: 20 for focus in FOCI}:
-            reasons.append(f"c2_requires_20_scenarios_per_focus:{dict(strata)}")
+                if (analysis.get("focus_ruleset") != focus
+                        or analysis.get("pair_rulesets") != ["standard", focus]
+                        or analysis.get("source_task_id") != record.get("source_task_id")):
+                    reasons.append(f"{record.get('id')}:paired_metadata_mismatch")
+        target_pairs = 50 if len(records) == 100 else 125
+        if pairs != target_pairs:
+            reasons.append(f"c2_requires_{target_pairs}_standard_focus_pairs_got_{pairs}")
+        expected_strata = ({"horse-no-leg-block": 17, "chariot-no-center": 17,
+                            "soldier-free-retreat": 16} if len(records) == 100 else
+                           {"horse-no-leg-block": 42, "chariot-no-center": 42,
+                            "soldier-free-retreat": 41})
+        if dict(strata) != expected_strata:
+            reasons.append(f"c2_focus_counts_mismatch:{dict(strata)}")
+        if within_five <= len(records) // 2:
+            reasons.append(f"c2_requires_majority_within_five_moves:{within_five}")
+        if any(sensitive[focus] < (4 if len(records) == 100 else 8) for focus in FOCI):
+            reasons.append(f"c2_insufficient_rule_sensitive_reference_lines:{dict(sensitive)}")
         if any(len(scenarios) != 1 for scenarios in fen_scenarios.values()):
             reasons.append("c2_same_fen_reused_across_scenarios")
+        if any(len(scenarios) != 1 for scenarios in source_scenarios.values()):
+            reasons.append("c2_h2_source_reused_across_scenarios")
     return reasons
 
 
 def audit_sampling(family: str, records: Sequence[dict]) -> dict[str, Any]:
     reasons, probes = [], []
-    sizes = (1, 10, 60) if family == "xiangqi-rule-variants" else (1, 30, 250)
+    sizes = (1, 10, len(records)//2) if family == "xiangqi-rule-variants" else (1, 30, len(records))
     for count in sizes:
         try:
             first = sample_records(records, count=count, seed=42)
@@ -333,7 +424,7 @@ def audit_sampling(family: str, records: Sequence[dict]) -> dict[str, Any]:
             ids = [item["id"] for item in first]
             if ids != [item["id"] for item in repeated] or len(ids) != len(set(ids)):
                 reasons.append(f"sample_{count}:not_reproducible_or_duplicate_ids")
-            expected_size = count * 4 if family == "xiangqi-rule-variants" else count
+            expected_size = count * 2 if family == "xiangqi-rule-variants" else count
             if len(ids) != expected_size or not set(ids) <= {item["id"] for item in records}:
                 reasons.append(f"sample_{count}:wrong_membership_or_size")
             if family == "xiangqi-rule-variants":
@@ -341,8 +432,11 @@ def audit_sampling(family: str, records: Sequence[dict]) -> dict[str, Any]:
                 for record in first:
                     grouped[record["scenario_id"]].append(record)
                 if len(grouped) != count or any(
-                    len(group) != 4 or {item["ruleset"] for item in group} != set(RULESETS)
-                    or len({item["fen"] for item in group}) != 1 for group in grouped.values()
+                    len(group) != 2
+                    or {item["ruleset"] for item in group}
+                       != {"standard", group[0]["design_stratum"]}
+                    or len({item["fen"] for item in group}) != 1
+                    for group in grouped.values()
                 ):
                     reasons.append(f"sample_{count}:incomplete_paired_scenarios")
             probes.append({"count": count, "selected_records": len(ids), "ids_sha256": hashlib.sha256(json.dumps(ids).encode()).hexdigest()})
@@ -383,93 +477,66 @@ def _parse_source_pgn(path: Path):
 
 def audit_c2_sources(records: Sequence[dict], data_root: Path) -> dict[str, Any]:
     report = {"valid": False, "reasons": [], "inputs": {}, "records": [], "source_count": 0}
-    groups = defaultdict(list)
-    source_root = (data_root / "sources/ccpd").resolve()
+    history_path = data_root / FAMILY_DIRS["xiangqi-history"] / "tasks.jsonl"
+    try:
+        raw = history_path.read_bytes()
+        report["inputs"]["history/tasks.jsonl"] = {
+            "path": str(history_path.resolve()),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+        history = {
+            row["id"]: row
+            for row in (json.loads(line) for line in raw.decode("utf-8").splitlines() if line.strip())
+        }
+        evidence_path = data_root / "sources/c2_h2_origins.jsonl"
+        if evidence_path.is_file():
+            evidence_raw = evidence_path.read_bytes()
+            report["inputs"]["sources/c2_h2_origins.jsonl"] = {
+                "path": str(evidence_path.resolve()), "sha256": hashlib.sha256(evidence_raw).hexdigest()}
+            seen = set()
+            for line in evidence_raw.decode("utf-8").splitlines():
+                if not line.strip():
+                    continue
+                source = json.loads(line)
+                validate_record(source, expected_family="xiangqi-history")
+                if source["id"] in seen or (source["id"] in history and history[source["id"]] != source):
+                    raise ValueError("duplicate or inconsistent C2 source evidence")
+                seen.add(source["id"])
+                history[source["id"]] = source
+    except Exception as exc:
+        report["reasons"].append(f"history_source_read_error:{type(exc).__name__}:{exc}")
+        return report
+
+    scenarios_by_source = defaultdict(set)
     for record in records:
         result = {"id": record.get("id"), "valid": False, "reasons": []}
         report["records"].append(result)
         reasons = result["reasons"]
-        try:
-            source = record["source"]
-            filename = source["source_file"]
-            if (not isinstance(filename, str) or not filename or "\\" in filename
-                    or PurePosixPath(filename).is_absolute() or ".." in PurePosixPath(filename).parts):
-                raise ValueError("source_file must be a safe source-relative POSIX path")
-            path = (source_root / filename).resolve()
-            if source_root not in path.parents:
-                raise ValueError("source path escapes archived CCPD directory")
-            ply = source["ply_index"]
-            if not isinstance(ply, int) or isinstance(ply, bool) or ply < 0:
-                raise ValueError("invalid source ply index")
-            for key, expected in (("repository", CCPD_REPOSITORY), ("revision", CCPD_REVISION), ("license", "CC-BY-4.0")):
-                if source.get(key) != expected:
-                    reasons.append(f"source_{key}_mismatch")
-            if source.get("replayed_plies_verified") != ply:
-                reasons.append("source_verified_prefix_length_mismatch")
-            if record.get("source_id") != "ccpd:" + filename:
-                reasons.append("source_id_mismatch")
-            groups[filename].append((record, result, ply, path))
-        except Exception as exc:
-            reasons.append(f"source_metadata_error:{type(exc).__name__}:{exc}")
-    for filename, entries in groups.items():
-        path = entries[0][3]
-        try:
-            raw = path.read_bytes()
-            digest = hashlib.sha256(raw).hexdigest()
-            report["inputs"][filename] = {"path": str(path), "sha256": digest}
-            positions, _ = _parse_source_pgn(path)
-            if not positions:
-                raise ValueError("PGN contains no parsed positions")
-            max_ply = min(max(entry[2] for entry in entries), len(positions) - 1)
-            cumulative, prefix_reasons = [], []
-            previous_child = previous_side = None
-            for index, position in enumerate(positions[:max_ply + 1]):
-                board, color = fen_to_board(position["fen"])
-                side = 1 if color == "red" else -1
-                # FEN reparsing reassigns the two same-kind piece IDs in scan
-                # order, so compare piece types/sides through canonical FEN.
-                if previous_child is not None and (board_to_fen(board) != board_to_fen(previous_child) or side != -previous_side):
-                    cumulative.append(f"ply_{index}:parsed_transition_disagrees_with_independent_move")
-                cumulative.extend(f"ply_{index}:{why}" for why in validate_position(board, side))
-                compared = compare_standard_legal_moves(board, side)
-                if not compared["valid"] or not compared["independent_verified"]:
-                    cumulative.extend(f"ply_{index}:{why}" for why in compared["reasons"])
-                    if not compared["independent_verified"]:
-                        cumulative.append(f"ply_{index}:independent_verification_missing")
-                prefix_reasons.append(list(cumulative))
-                previous_child = previous_side = None
-                if index < max_ply:
-                    move = position.get("played_move_uci")
-                    independent = {item.to_uci(): item for item in reference.legal_moves(board, side)}
-                    if move not in independent or move not in compared["move_sets"]["cchess"]:
-                        cumulative.append(f"ply_{index}:source_move_illegal")
-                    else:
-                        previous_child = reference.apply_move(board, independent[move])
-                        previous_side = side
-            for record, result, ply, _ in entries:
-                reasons = result["reasons"]
-                source = record["source"]
-                if source.get("file_sha256") != digest:
-                    reasons.append("source_file_hash_mismatch")
-                if ply >= len(positions):
-                    reasons.append("source_ply_out_of_range")
-                    continue
-                reasons.extend(prefix_reasons[ply])
-                target = positions[ply]
-                if record.get("fen") != target["fen"] or source.get("fen") != target["fen"]:
-                    reasons.append("source_replayed_fen_mismatch")
-                if source.get("side_to_move") != target["side_to_move"]:
-                    reasons.append("source_side_to_move_mismatch")
-                if source.get("played_move_uci") != target.get("played_move_uci"):
-                    reasons.append("source_played_move_metadata_mismatch")
-                result.update(source_file=filename, verified_prefix_plies=ply)
-        except Exception as exc:
-            for _, result, _, _ in entries:
-                result["reasons"].append(f"source_replay_error:{type(exc).__name__}:{exc}")
-    for result in report["records"]:
-        result["valid"] = not result["reasons"]
-        report["reasons"].extend(f"{result['id']}:{why}" for why in result["reasons"])
-    report["source_count"] = len(report["inputs"])
+        source_task_id = record.get("source_task_id")
+        source = history.get(source_task_id)
+        if source is None:
+            reasons.append("unknown_h2_source_task_id")
+        else:
+            scenarios_by_source[source_task_id].add(record.get("scenario_id"))
+            expected_pv = source.get("h2_analysis", {}).get("principal_variation_uci")
+            analysis = record.get("c2_analysis", {})
+            for key in ("fen", "agent_color", "difficulty", "piece_count", "source", "source_id"):
+                if record.get(key) != source.get(key):
+                    reasons.append(f"h2_{key}_mapping_mismatch")
+            if analysis.get("principal_variation_uci") != expected_pv:
+                reasons.append("h2_principal_variation_mapping_mismatch")
+            if record.get("oracle", {}).get("best_move_uci") != source.get("oracle", {}).get("best_move_uci"):
+                reasons.append("h2_bestmove_mapping_mismatch")
+            if record.get("oracle", {}).get("mate_in_plies") != source.get("oracle", {}).get("mate_in_plies"):
+                reasons.append("h2_reference_distance_mapping_mismatch")
+        result["valid"] = not reasons
+        report["reasons"].extend(f"{record.get('id')}:{why}" for why in reasons)
+    if any(len(scenarios) != 1 for scenarios in scenarios_by_source.values()):
+        report["reasons"].append("h2_source_reused_across_c2_scenarios")
+    report["source_count"] = len(scenarios_by_source)
+    expected_source_count = len({r.get("scenario_id") for r in records})
+    if report["source_count"] != expected_source_count:
+        report["reasons"].append(f"expected_{expected_source_count}_unique_h2_sources_got_{report['source_count']}")
     report["valid"] = not report["reasons"]
     return report
 
@@ -537,7 +604,7 @@ def audit_frozen_samples(data_root: Path, datasets: dict[str, Sequence[dict]], i
                     selected[key] = rows
                     ids = [row["id"] for row in rows]
                     task.update(record_count=len(rows), task_ids=ids, sha256=digest)
-                    required_count = c2count * 4 if key == "c2" else count
+                    required_count = c2count * 2 if key == "c2" else count
                     if len(rows) != required_count or len(ids) != len(set(ids)):
                         task_reasons.append("wrong_count_or_duplicate_ids")
                     if meta.get("path") != "data/xiangqi/evaluation_samples/" + file_key:
@@ -558,7 +625,9 @@ def audit_frozen_samples(data_root: Path, datasets: dict[str, Sequence[dict]], i
                         for row in rows:
                             groups[row.get("scenario_id")].append(row)
                         if len(groups) != c2count or any(
-                            len(group) != 4 or {row.get("ruleset") for row in group} != set(RULESETS)
+                            len(group) != 2
+                            or {row.get("ruleset") for row in group}
+                               != {"standard", group[0].get("design_stratum")}
                             or len({row.get("fen") for row in group}) != 1
                             or len({row.get("design_stratum") for row in group}) != 1
                             for group in groups.values()
@@ -592,6 +661,8 @@ def audit_release(
     needed = list(families)
     if "xiangqi-multimodal" in needed and "xiangqi-mate-in-one" not in needed:
         needed.append("xiangqi-mate-in-one")
+    if "xiangqi-rule-variants" in needed and "xiangqi-history" not in needed:
+        needed.append("xiangqi-history")
     rows, inputs, errors = {}, {}, {}
     for family in needed:
         path = data_root / FAMILY_DIRS[family] / "tasks.jsonl"
@@ -613,13 +684,18 @@ def audit_release(
             errors[family].append(f"input_read_failed:{exc}")
     result: dict[str, Any] = {"gate_version": GATE_VERSION, "validation_version": VALIDATION_VERSION,
         "release_id": RELEASE_ID, "valid": False, "full": not skip_search and set(families) == set(XIANGQI_FAMILIES),
-        "release_ready": False, "skip_search": skip_search, "families_requested": list(families),
+        "static_data_ready": False, "runtime_policy_certified": None,
+        "experiment_ready": False, "release_ready": False,
+        "skip_search": skip_search, "families_requested": list(families),
         "inputs": inputs, "independent_calibration": calibrate_cchess(), "families": {}, "reasons": [],
         "validator_hashes": {str(path.relative_to(ROOT)): _hash(path) for path in (
             Path(__file__).resolve(), ROOT / "scripts/extract_ccpd_positions.py", ROOT / "src/minibench/datasets/xiangqi/reference.py",
             ROOT / "src/minibench/datasets/xiangqi/validation.py", ROOT / "src/minibench/datasets/xiangqi/schema.py",
-            ROOT / "src/minibench/datasets/xiangqi/variants/board.py", ROOT / "src/minibench/datasets/xiangqi/variants/search.py")},
-        "limitations": ["PV checks validate the two supplied lines, not all possible defences or shortest mate distance.",
+            ROOT / "src/minibench/datasets/xiangqi/variants/board.py", ROOT / "src/minibench/datasets/xiangqi/variants/search.py",
+            ROOT / "src/minibench/datasets/xiangqi/variants/mate_search.py",
+            ROOT / "src/minibench/datasets/xiangqi/variants/certification.py",
+            ROOT / "src/minibench/datasets/xiangqi/rule_variants.py")},
+        "limitations": ["PV checks validate the supplied lines, not all possible defences or shortest mate distance.",
                         "Structural position constraints do not independently prove game-history reachability."]}
     if not result["independent_calibration"]["valid"]:
         result["reasons"].append("cchess_calibration_failed")
@@ -663,8 +739,12 @@ def audit_release(
                 all_ids.append(str(record.get("id")))
         if len(all_ids) != len(set(all_ids)):
             result["reasons"].append("duplicate_task_ids_across_families")
+        allowed_overlaps = (
+            {"xiangqi-mate-in-one", "xiangqi-multimodal"},
+            {"xiangqi-history", "xiangqi-rule-variants"},
+        )
         unexpected = [fen for fen, owners in by_fen.items()
-                      if len(owners) > 1 and owners != {"xiangqi-mate-in-one", "xiangqi-multimodal"}]
+                      if len(owners) > 1 and owners not in allowed_overlaps]
         if unexpected:
             result["reasons"].append(f"unexpected_cross_family_fen_overlaps:{len(unexpected)}")
             result["unexpected_cross_family_fens"] = unexpected
@@ -689,8 +769,51 @@ def audit_release(
         except OSError:
             result["reasons"].append(f"{family}:input_disappeared_during_audit")
     result["valid"] = not result["reasons"] and all(item["valid"] for item in result["families"].values())
-    result["release_ready"] = result["valid"] and result["full"]
+    result["static_data_ready"] = result["valid"] and result["full"]
+    if "xiangqi-rule-variants" in families:
+        certificate = audit_runtime_certificates(data_root, [r for _, r in rows["xiangqi-rule-variants"]], workers=workers)
+        result["c2_runtime_certificates"] = certificate
+        result["runtime_policy_certified"] = certificate["valid"]
+        if not certificate["valid"]:
+            result["limitations"].append("C2 runtime-policy certification failed or is absent: " + "; ".join(certificate["reasons"]))
+    result["experiment_ready"] = (
+        result["static_data_ready"]
+        and result["runtime_policy_certified"] is not False
+    )
+    result["release_ready"] = result["experiment_ready"]
     return result
+
+
+def _certificate_payload(payload):
+    from minibench.datasets.xiangqi.variants.certification import verify_winning_line
+    record, line = payload
+    return record["id"], verify_winning_line(record, line)
+
+
+def audit_runtime_certificates(data_root, records, *, workers=4):
+    from minibench.datasets.xiangqi.variants.certification import certificate_header_valid
+    path = data_root / "rule_variants/runtime_certificates.json"
+    report = {"valid": False, "reasons": [], "record_count": len(records), "records": {}}
+    try:
+        bundle = json.loads(path.read_text(encoding="utf-8"))
+        report["sha256"] = _hash(path)
+        digest = _hash(data_root / "rule_variants/tasks.jsonl")
+        if not certificate_header_valid(bundle, records, digest):
+            report["reasons"].append("certificate_header_or_inputs_mismatch")
+            return report
+        payloads = [(r, bundle["tasks"][r["id"]]["moves_uci"]) for r in records]
+        if workers == 1:
+            checked = map(_certificate_payload, payloads)
+            report["records"] = dict(checked)
+        else:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                report["records"] = dict(pool.map(_certificate_payload, payloads))
+        if not all(v["valid"] for v in report["records"].values()):
+            report["reasons"].append("one_or_more_runtime_witnesses_failed")
+        report["valid"] = not report["reasons"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        report["reasons"].append(f"certificate_unavailable_or_invalid:{type(exc).__name__}")
+    return report
 
 
 def _family_arg(value: str) -> str:
@@ -711,7 +834,10 @@ def main() -> int:
     report = audit_release(args.data_root, families=args.families, skip_search=args.skip_search, workers=args.workers)
     if args.output:
         atomic_write_json(args.output, report)
-    print(json.dumps({"valid": report["valid"], "full": report["full"], "release_ready": report["release_ready"],
+    print(json.dumps({"valid": report["valid"], "full": report["full"],
+        "static_data_ready": report["static_data_ready"],
+        "runtime_policy_certified": report["runtime_policy_certified"],
+        "experiment_ready": report["experiment_ready"], "release_ready": report["release_ready"],
         "reasons": report["reasons"],
         "frozen_samples": {key: report.get("frozen_samples", {}).get(key) for key in ("status", "valid", "complete", "reasons")},
         "families": {family: {key: values[key] for key in (

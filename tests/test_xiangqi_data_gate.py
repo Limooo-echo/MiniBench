@@ -11,7 +11,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from minibench.datasets.xiangqi.schema import RULESETS, fen_to_board, sample_records
+from minibench.datasets.xiangqi.schema import (
+    FAMILY_PATHS, RULESETS, fen_to_board, load_records, sample_records,
+)
 from minibench.datasets.xiangqi.validation import validate_pv
 from minibench.datasets.xiangqi.variants.board import VariantBoard
 from minibench.datasets.xiangqi.variants.search import score_moves
@@ -47,26 +49,17 @@ def h2_fixture():
              "pv_validation": dict(proof)} for depth in (16, 20)]
     return {"schema_version": 2, "release_id": RELEASE_ID, "family": "xiangqi-history",
         "id": "xiangqi-history-fixture", "fen": fen, "agent_color": "black", "goal": "checkmate",
-        "max_plies": 5, "difficulty": "short", "piece_count": sum(bool(v) for row in board for v in row),
+        "max_plies": 7, "difficulty": "short", "piece_count": sum(bool(v) for row in board for v in row),
         "tags": [], "source": {"file": "fixture.pgn"}, "source_id": "ccpd:fixture.pgn",
         "oracle": {"best_move_uci": pv[0], "mate_in_plies": 3, "evaluation_cp": None},
-        "h2_analysis": {"mate_in_moves": 2, "reference_mate_plies": 3, "requested_depths": [16, 20],
+        "h2_analysis": {"version": "h2-pikafish-double-depth-v2",
+            "mate_in_moves": 2, "reference_mate_plies": 3, "requested_depths": [16, 20],
             "verification_depths": [16, 20], "principal_variation_uci": list(pv), "validation_runs": runs,
-            "source_reused": False}}
+            "source_reused": False, "interpretation": "fixture reference lines"}}
 
 
 def c2_fixture():
-    fen = "3k5/9/9/9/9/Rr7/9/9/9/4K4 w - - 0 1"
-    board, _ = fen_to_board(fen)
-    scored = score_moves(VariantBoard(board, []), 1, 3, 1)
-    return {"schema_version": 2, "release_id": RELEASE_ID, "family": "xiangqi-rule-variants",
-        "id": "xiangqi-rule-variants-fixture", "fen": fen, "agent_color": "red", "goal": "best-move-under-rule",
-        "max_plies": 1, "difficulty": "control", "piece_count": 4, "tags": [], "ruleset": "standard", "rules": [],
-        "scenario_id": "xiangqi-rule-scenario-fixture", "design_stratum": "standard-control",
-        "oracle": {"best_move_uci": scored[0][0].to_uci(), "mate_in_plies": None, "evaluation_cp": None},
-        "c2_analysis": {"oracle_depth": 3, "legal_move_count": len(scored), "best_value": scored[0][1],
-            "unique_best_margin": scored[0][1]-scored[1][1], "standard_best_uci": scored[0][0].to_uci(),
-            "focus_ruleset": "standard", "focus_changes_best_move": False}}
+    return deepcopy(load_records(FAMILY_PATHS["xiangqi-rule-variants"])[0])
 
 
 
@@ -85,10 +78,11 @@ def freeze_fixture(root):
         data[ALIASES["h2"]].append(h2)
     foci = [name for name in RULESETS if name != "standard"]
     for number in range(12):
-        for rule in RULESETS:
+        focus = foci[number % 3]
+        for rule in ("standard", focus):
             data[ALIASES["c2"]].append({"id": f"c2-{number:02}-{rule}", "family": ALIASES["c2"],
                 "scenario_id": f"scenario-{number:02}", "ruleset": rule, "fen": f"position-{number}",
-                "design_stratum": foci[number % 3]})
+                "design_stratum": focus})
     inputs = {}
     for family, rows in data.items():
         path = root / FAMILY_DIRS[family] / "tasks.jsonl"
@@ -124,7 +118,7 @@ class FrozenXiangqiSampleTests(unittest.TestCase):
             self.assertTrue(report["complete"])
             self.assertEqual(len(report["inputs"]), 9)
             self.assertEqual(report["samples"]["smoke"]["tasks"]["c2"]["scenario_count"], 3)
-            self.assertEqual(report["samples"]["formal"]["tasks"]["c2"]["record_count"], 40)
+            self.assertEqual(report["samples"]["formal"]["tasks"]["c2"]["record_count"], 20)
 
     def test_sample_content_and_manifest_tampering_fail(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -172,6 +166,9 @@ class FrozenXiangqiSampleTests(unittest.TestCase):
                 report = audit_release(root)
             self.assertTrue(report["valid"], report)
             self.assertFalse(report["full"])
+            self.assertFalse(report["static_data_ready"])
+            self.assertFalse(report["runtime_policy_certified"])
+            self.assertFalse(report["experiment_ready"])
             self.assertFalse(report["release_ready"])
             self.assertEqual(report["frozen_samples"]["status"], "not_frozen")
 
@@ -179,67 +176,75 @@ class FrozenXiangqiSampleTests(unittest.TestCase):
 
 
 def c2_source_fixture(root):
-    filename = "Dataset/fixture.pgn"
-    path = root / "sources/ccpd" / filename
+    records = load_records(FAMILY_PATHS["xiangqi-rule-variants"])
+    scenario = records[0]["scenario_id"]
+    pair = [deepcopy(record) for record in records if record["scenario_id"] == scenario]
+    source_id = pair[0]["source_task_id"]
+    source = next(
+        deepcopy(record)
+        for record in (load_records(FAMILY_PATHS["xiangqi-history"])
+                       + load_records(Path("data/xiangqi/sources/c2_h2_origins.jsonl")))
+        if record["id"] == source_id
+    )
+    path = root / "history/tasks.jsonl"
     path.parent.mkdir(parents=True)
-    initial = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1"
-    text = f'[FEN "{initial}"]\n[Result "*"]\n1. 炮二平五 馬８進７\n2. 馬二進三 車９平８\n3. 車一平二 *\n'
-    path.write_bytes(text.encode("big5"))
-    positions, _ = _parse_source_pgn(path)
-    source = {**positions[4], "source_file": filename, "file_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-              "replayed_plies_verified": 4, "repository": CCPD_REPOSITORY, "revision": CCPD_REVISION, "license": "CC-BY-4.0"}
-    return {"id": "c2-source-fixture", "fen": positions[4]["fen"], "source": source, "source_id": "ccpd:" + filename}, positions
+    path.write_text(json.dumps(source) + "\n", encoding="utf-8")
+    return pair, source
 
 
-@unittest.skipUnless(HAS_CCHESS, "install cchess for PGN notation decoding")
 class XiangqiSourceGateTests(unittest.TestCase):
-    def test_archive_hash_and_independent_prefix_replay(self):
+    def test_c2_rows_map_exactly_to_one_audited_h2_source(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            record, positions = c2_source_fixture(root)
-            other = deepcopy(record)
-            other["id"] += "-paired"
-            with patch("scripts.validate_xiangqi_data._parse_source_pgn", wraps=_parse_source_pgn) as parser:
-                report = audit_c2_sources([record, other], root)
+            pair, _ = c2_source_fixture(root)
+            report = audit_c2_sources(pair, root)
+            # Source mapping is independent of the collection-size gate.
             self.assertTrue(report["valid"], report)
-            self.assertEqual(parser.call_count, 1)
             self.assertEqual(report["source_count"], 1)
-            record["source"]["file_sha256"] = "0" * 64
-            record["source"]["revision"] = "wrong-revision"
-            report = audit_c2_sources([record], root)
-            self.assertFalse(report["valid"])
-            self.assertIn("source_file_hash_mismatch", report["records"][0]["reasons"])
-            self.assertIn("source_revision_mismatch", report["records"][0]["reasons"])
+            self.assertTrue(all(item["valid"] for item in report["records"]))
+            self.assertEqual(report["reasons"], [])
 
-    def test_source_parser_is_not_trusted_as_legality_or_transition_oracle(self):
+    def test_source_evidence_sidecar_is_verified_and_duplicates_fail(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            record, positions = c2_source_fixture(root)
-            corrupted = deepcopy(positions)
-            corrupted[0]["played_move_uci"] = "a0a9"
-            with patch("scripts.validate_xiangqi_data._parse_source_pgn", return_value=(corrupted, "*")):
-                report = audit_c2_sources([record], root)
-            self.assertFalse(report["valid"])
-            self.assertIn("ply_0:source_move_illegal", report["records"][0]["reasons"])
-            corrupted = deepcopy(positions)
-            corrupted[1]["fen"] = positions[0]["fen"].replace(" w ", " b ")
-            with patch("scripts.validate_xiangqi_data._parse_source_pgn", return_value=(corrupted, "*")):
-                report = audit_c2_sources([record], root)
-            self.assertFalse(report["valid"])
-            self.assertIn("ply_1:parsed_transition_disagrees_with_independent_move", report["records"][0]["reasons"])
+            pair, source = c2_source_fixture(root)
+            (root / 'history/tasks.jsonl').write_text('', encoding='utf-8')
+            evidence = root / 'sources/c2_h2_origins.jsonl'
+            evidence.parent.mkdir(parents=True)
+            row = json.dumps(source) + '\n'
+            evidence.write_text(row, encoding='utf-8')
+            report = audit_c2_sources(pair, root)
+            self.assertTrue(report['valid'], report)
+            self.assertIn('sources/c2_h2_origins.jsonl', report['inputs'])
+            evidence.write_text(row + row, encoding='utf-8')
+            report = audit_c2_sources(pair, root)
+            self.assertFalse(report['valid'])
+            self.assertTrue(any('duplicate or inconsistent C2 source evidence' in r for r in report['reasons']))
 
-    def test_missing_or_escaping_source_cannot_be_certified(self):
+    def test_changed_position_or_reference_line_breaks_h2_mapping(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            record, _ = c2_source_fixture(root)
-            record["source"]["source_file"] = "../outside.pgn"
-            report = audit_c2_sources([record], root)
+            pair, _ = c2_source_fixture(root)
+            pair[0]["fen"] = pair[0]["fen"] + " "
+            pair[1]["c2_analysis"]["principal_variation_uci"][0] = "a0a0"
+            report = audit_c2_sources(pair, root)
             self.assertFalse(report["valid"])
-            self.assertEqual(report["inputs"], {})
-            record["source"]["source_file"] = "missing.pgn"
-            report = audit_c2_sources([record], root)
+            reasons = [why for item in report["records"] for why in item["reasons"]]
+            self.assertIn("h2_fen_mapping_mismatch", reasons)
+            self.assertIn("h2_principal_variation_mapping_mismatch", reasons)
+
+    def test_unknown_or_missing_h2_source_cannot_be_certified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pair, _ = c2_source_fixture(root)
+            pair[0]["source_task_id"] = "xiangqi-history-missing"
+            report = audit_c2_sources(pair, root)
             self.assertFalse(report["valid"])
-            self.assertTrue(any("FileNotFoundError" in why for why in report["reasons"]))
+            self.assertIn("unknown_h2_source_task_id", report["records"][0]["reasons"])
+            (root / "history/tasks.jsonl").unlink()
+            report = audit_c2_sources(pair, root)
+            self.assertFalse(report["valid"])
+            self.assertTrue(any("history_source_read_error" in why for why in report["reasons"]))
 
 
 
@@ -265,17 +270,30 @@ class XiangqiDataGateTests(unittest.TestCase):
         self.assertIn("depth_20:pv_not_checkmate:ongoing", bad["reasons"])
         self.assertIn("depth_20:reference_length_mismatch", bad["reasons"])
 
-    def test_c2_gate_recomputes_depth_three_utilities(self):
+    def test_c2_gate_replays_the_complete_rule_aware_mating_line(self):
         record = c2_fixture()
         good = audit_record(record, record["family"])
         self.assertTrue(good["valid"], good)
-        self.assertTrue(good["details"]["search_verified"])
-        record["c2_analysis"]["best_value"] += 1
+        self.assertEqual(good["details"]["production_replay"]["terminal"], "checkmate")
+        self.assertEqual(
+            good["details"]["production_legal_counts_along_reference"],
+            good["details"]["legal_counts_along_reference"],
+        )
+        record["c2_analysis"]["principal_variation_uci"][-1] = "a0a0"
         bad = audit_record(record, record["family"])
-        self.assertIn("c2_best_value_mismatch", bad["reasons"])
+        self.assertFalse(bad["valid"])
+        self.assertTrue(any("replay" in reason or "schema" in reason for reason in bad["reasons"]))
         light = audit_record(record, record["family"], skip_search=True)
-        self.assertFalse(light["details"]["search_verified"])
-        self.assertIn("skipped", light["details"])
+        self.assertFalse(light["valid"])
+
+    def test_c2_gate_recomputes_rule_sensitivity_instead_of_trusting_label(self):
+        record = c2_fixture()
+        record["c2_analysis"]["rule_sensitive_along_reference"] = not record[
+            "c2_analysis"
+        ]["rule_sensitive_along_reference"]
+        bad = audit_record(record, record["family"])
+        self.assertFalse(bad["valid"])
+        self.assertIn("c2_rule_sensitive_label_mismatch", bad["reasons"])
 
     def test_m2_mapping_rejects_changes_to_position_or_answer(self):
         source = d3_fixture()
@@ -291,11 +309,15 @@ class XiangqiDataGateTests(unittest.TestCase):
         other = deepcopy(source)
         other["id"] += "-2"
         self.assertIn("h2_source_games_must_be_unique", audit_collection(source["family"], [source, other]))
-        scenario = c2_fixture()
-        other = deepcopy(scenario)
-        other["id"] += "-2"
-        other["scenario_id"] += "-2"
-        self.assertIn("c2_same_fen_reused_across_scenarios", audit_collection(scenario["family"], [scenario, other]))
+        all_c2 = load_records(FAMILY_PATHS["xiangqi-rule-variants"])
+        first_id = all_c2[0]["scenario_id"]
+        pair = [deepcopy(item) for item in all_c2 if item["scenario_id"] == first_id]
+        duplicate = deepcopy(pair)
+        for item in duplicate:
+            item["id"] += "-duplicate"
+            item["scenario_id"] += "-duplicate"
+        reasons = audit_collection(pair[0]["family"], pair + duplicate)
+        self.assertIn("c2_same_fen_reused_across_scenarios", reasons)
 
     def test_partial_gate_records_hashes_and_cannot_certify_release(self):
         record = c2_fixture()
@@ -306,6 +328,9 @@ class XiangqiDataGateTests(unittest.TestCase):
             path.write_text(json.dumps(record) + "\n", encoding="utf-8")
             report = audit_release(root, families=(record["family"],), skip_search=True)
             self.assertFalse(report["full"])
+            self.assertFalse(report["static_data_ready"])
+            self.assertFalse(report["runtime_policy_certified"])
+            self.assertFalse(report["experiment_ready"])
             self.assertFalse(report["release_ready"])
             self.assertEqual(len(report["inputs"][record["family"]]["sha256"]), 64)
             self.assertEqual(report["families"][record["family"]]["record_count"], 1)

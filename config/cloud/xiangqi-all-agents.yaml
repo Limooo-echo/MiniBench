@@ -1,0 +1,42 @@
+# Entire submitted 100-row stratified corpora; no new draw per agent or run.
+# Run the direct pilot before scaling up; C2 requires a current certificate.
+version: 1
+workers: 8
+omit_max_tokens: true
+engine_binding: runtime
+agents: [passthrough, direct, cot, self-consistency, best-of-n, tot, plan-then-solve, critic-refine, least-to-most]
+accounts:
+  qwen:
+    provider:
+      name: generic
+      model: qwen
+      base_url: https://models.sjtu.edu.cn/api/v1
+      api_key_env: MINIBENCH_SJTU_API_KEY
+      timeout: 3600
+      json_mode: false
+      max_retries: 0
+      extra_body:
+        enable_thinking: true
+        chat_template_kwargs:
+          enable_thinking: true
+    limits:
+      max_in_flight: 8
+      requests_per_minute: null
+      tokens_per_minute: null
+      reserve_tokens: 32768
+      total_token_budget: null
+experiments:
+  - id: d3
+    config: config/experiments/xiangqi_mate_in_one.yaml
+    account: qwen
+  - id: h2
+    config: config/experiments/xiangqi_history.yaml
+    account: qwen
+  - id: c2
+    config: config/experiments/xiangqi_rule_variants.yaml
+    account: qwen
+  - id: m2
+    config: config/experiments/xiangqi_multimodal.yaml
+    account: qwen
+    evaluation_overrides:
+      input_modes: [text, chinese-piece-image]

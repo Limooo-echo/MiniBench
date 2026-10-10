@@ -486,7 +486,7 @@ def _write_xiangqi_run_metadata(
     family: str,
     selected_tasks_path: Path,
 ) -> None:
-    from minibench.datasets.xiangqi.multimodal import XIANGQI_RENDERER_VERSION
+    from minibench.datasets.xiangqi.multimodal import M2_PROTOCOL_VERSION, XIANGQI_RENDERER_VERSION
     from minibench.datasets.xiangqi.schema import SCHEMA_VERSION
 
     data_bytes = data_path.read_bytes()
@@ -504,7 +504,8 @@ def _write_xiangqi_run_metadata(
     ).encode("utf-8")
     metadata = {
         "family": family,
-        "protocol": {"version": "xiangqi-reasoning-v2", "evaluation": _plain_config(config.get("evaluation") or {})},
+        "protocol": {"version": M2_PROTOCOL_VERSION if family == "xiangqi-multimodal" else "xiangqi-reasoning-v2",
+                     "evaluation": _plain_config(config.get("evaluation") or {})},
         "schema_version": SCHEMA_VERSION,
         "renderer_version": XIANGQI_RENDERER_VERSION,
         "data_file": data_path.as_posix(),
@@ -753,7 +754,7 @@ def _evaluate(
             tasks,
             agent,
             on_result=on_result,
-            oracle_depth=int(evaluation_config.get("oracle_depth", 3)),
+            search_depth=int(evaluation_config.get("search_depth", 3)),
         )
     if family == "xiangqi-history":
         return spec.evaluate_tasks(
@@ -770,7 +771,7 @@ def _evaluate(
     if family == "xiangqi-multimodal":
         modes = evaluation_config.get(
             "input_modes",
-            ("text", "chinese-piece-image", "latin-piece-image"),
+            ("text", "chinese-piece-image"),
         )
         return spec.evaluate_tasks(
             tasks,

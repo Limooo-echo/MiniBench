@@ -6,6 +6,19 @@ MiniBench 是一个用统一 YAML、统一 agent/provider 接口和统一结果�
 
 > 先记住两条：文本任务默认使用 DeepSeek V4；带图片的任务必须使用支持视觉输入的模型，仓库默认使用 Qwen。不要用 DeepSeek 跑 `image`、`chinese-piece-image` 或 `latin-piece-image`。
 
+## FINAL 云服务器入口
+
+本版融合了 `mahjong-checkpoint-20261010` 的非象棋任务与本地新版象棋；原评分系统保留。
+云端支持不同题目 8/16 路并发、单局顺序交互、账号独立限额、逐调用保存、自动跳过已完成题与柱状对比图。
+先安装环境/固定 Pikafish、临时设置 key，再运行固定 direct 小样本：
+
+```bash
+bash scripts/cloud_run.sh config/cloud/xiangqi-pilot.yaml runs/cloud-pilot-8 --workers 8
+```
+
+完整安装、暂停续跑、全 Agent 配置、用量边界与文件职责见 [云端运行说明](docs/cloud-run.md)。
+四个象棋数据库均为固定分层抽出的 100 题；所有 Agent 使用同一名单。C2 的 100 题已逐题认证能在运行上限内击败登记的固定 depth-3 对手，这不等于对所有防守的最短强制杀证明。顶级 LICENSE 尚待团队确定。
+
 ## 离线四维评分
 
 已有实验结果可以离线汇总为直接解题、规则变化、历史信息、图像输入四个分数，不会重新调用模型。
@@ -246,33 +259,38 @@ minibench run-config config/experiments/zebra_history.yaml
 
 ### 4.2 象棋 schema v2
 
-当前数据为 `xiangqi-2026-09-19-r1`，运行协议为 `xiangqi-reasoning-v2`。
-四类各 250 条数据已重新审核；修复内容、旧题替换原因和验收证据见
-[象棋修复报告](docs/xiangqi-repair-report.md)。
+当前提交题库为 `xiangqi-submitted-stratified100-v1`，schema 保持 v2。
+四类各 100 条；seed=42，D3/M2 的 easy/medium/hard 为 34/33/33，H2 的 short/medium/long 为 34/33/33，C2 为 50 个标准/变体配对场景，覆盖全部三种变体。
+题号、父题池及当前文件哈希见 `data/xiangqi/submission_manifest.json`；
+记录约束见 `src/minibench/datasets/xiangqi/schema.py`，配置与方法边界见
+[云服务器运行说明](docs/cloud-run.md)。
 
 象棋现在只维护这四类任务及其出题、验证、可视化链路；只接收 schema v2 的
 FEN 数据。旧吃将题、残局生存、通用对局、Gym action-index 接口和迁移工具已移除。
-`data/xiangqi/legacy/`、旧题库文件和历史 `runs/` 保留作存档，不会自动转成当前实验。
+旧题库、中间候选池和历史实验结果不包含在 FINAL 源码包中；父题池另行备份，不作为当前实验输入。
 
 | 配置 | 公开 family | 内容 |
 | --- | --- | --- |
 | `xiangqi_mate_in_one.yaml` | `xiangqi-mate-in-one` | 严格一步将死，接受全部合法答案 |
-| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 同局面四规则卡，固定三层效用，自由生成 UCI |
+| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 标准/焦点变体配对，多回合将杀，固定规则感知 depth-3 对手；CPE loss |
 | `xiangqi_history.yaml` | `xiangqi-history` | 按参考将杀距离分层，配对 `full-state` / `move-history-only`，固定 Pikafish 应战 |
-| `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 同一 D3 局面的文字、中文棋子图、拉丁棋子图比较 |
+| `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 同一 D3 局面的文字/中文棋子图比较；一步将杀、合法率、独立棋盘识别准确率 |
 
-D3/M2 用精确棋规判定将死，Pikafish 只提供诊断；H2 需要固定的对手引擎。
-本版使用的引擎与 NNUE 指纹在 `data/xiangqi/provenance.json`，配置会校验它们。
-本地已验收的 Windows universal 引擎可原生运行；通过 WSL 启动它需要启用
-Windows 程序互通。新克隆需按 provenance 取得同一发行资产，不要直接用不同
-版本引擎替代。以下为 WSL/Bash 示例：
+D3/M2 用精确棋规判定将死，Pikafish 提供独立诊断；H2 使用固定的 Pikafish 对手。
+C2 使用规则感知的 depth-3 对手，其 CPE loss 不能与 H2 的 CP loss 混为同一单位。
+参考引擎与 NNUE 指纹在 `data/xiangqi/provenance.json`。云端入口采用
+`engine_binding: runtime`，冻结服务器实际编译的引擎与 NNUE 指纹；续跑前重新核验，
+不会把 Linux 编译结果冒充历史 Windows 引擎。新服务器按以下流程安装与准备：
 
 ```bash
-export PIKAFISH_PATH="$PWD/tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe"
+bash scripts/cloud_bootstrap.sh
+bash scripts/cloud_pikafish.sh
+export PIKAFISH_PATH="$PWD/vendor/Pikafish/src/pikafish"
+source .venv/bin/activate
 mkdir -p output/xiangqi-checks
 python scripts/validate_xiangqi_data.py --workers 6 --output output/xiangqi-checks/independent-validation.json
 python scripts/audit_xiangqi_release.py --technical --validation-report output/xiangqi-checks/independent-validation.json --output output/xiangqi-checks/release-audit.json
-python scripts/run_xiangqi_smoke.py --prepare-only --pikafish-path "$PIKAFISH_PATH"
+python -B -m minibench.cloud prepare --config config/cloud/xiangqi-pilot.yaml --output runs/cloud-pilot-8
 ```
 
 以上命令不调用语言模型。`--strict` 还检查外部来源声明，原仓库未声明顶级许可证的状态
@@ -280,19 +298,15 @@ python scripts/run_xiangqi_smoke.py --prepare-only --pikafish-path "$PIKAFISH_PA
 源码变动后须重新验证；原 `data/xiangqi/independent_validation.json` 是历史证据，
 不要把它的旧源码指纹当成当前代码已通过验收。
 
-如果 WSL 启动 `.exe` 报 `Exec format error`，可使用已安装项目依赖的 Windows
-Python，在 PowerShell 中做真实引擎离线验收（输出目录必须是新的）：
+云端 pilot 冻结 D3/H2/M2 各 6 条、C2 三个配对场景（6 条）；仅 direct，
+H2/M2 各两组，共 36 个条件。全 Agent 云端配置使用提交题库的全部 100 条，
+九 Agent 共 5,400 个条件，各 Agent 和各组使用同一名单，不再重新抽题。
+`evaluation_samples/formal` 中的 30/20 条名单仅保留作辅助探针，不是全 Agent 云端输入。
+8 路 pilot 后再用相同小样本的新目录测试 16 路；同时调整 workers 和账号 max_in_flight。
+完整运行、限流、原生思考及断点恢复见 [云服务器运行说明](docs/cloud-run.md)。
 
-```powershell
-$env:PYTHONPATH = "src"
-$env:PIKAFISH_PATH = (Resolve-Path "tmp/resources/pikafish/Pikafish-Windows-x86-64-universal.exe").Path
-python scripts/accept_xiangqi_protocol.py --output-dir output/acceptance/xiangqi-new-check --pikafish-path $env:PIKAFISH_PATH
-```
-
-小样本名单已冻结：D3/H2/M2 各 6 个局面，C2 三个配对场景（12 条规则条件）。
-正式配置固定为 D3/H2/M2 各 30 个局面，C2 十个场景；不会每次重新抽题。
-同一模型的各架构使用相同名单，并保留各自登记的默认架构配置。
-需要运行真实模型时，配置凭据后去掉 `--prepare-only`，或运行对应 YAML：
+以下原生 YAML 是关闭思考的 direct 基线（保留参考引擎指纹），不等于云端全 Agent 思考配置。
+如运行它们，须先提供匹配的参考引擎和对应服务商的临时凭据：
 
 ```bash
 minibench run-config config/experiments/xiangqi_mate_in_one.yaml
@@ -306,11 +320,12 @@ minibench run-config config/experiments/xiangqi_multimodal.yaml
 并明确移除 selection，记录自己的名单，避免混入正式对照。
 同名结果禁止覆盖，下一次实验应使用新的 run_name 或输出目录。
 
-当前配置只填写实际生效的参数：C2 为 `oracle_depth: 3`；H2 为历史模式和固定
-Pikafish；D3/M2 的引擎参数仅用于诊断；M2 另有三种 `input_modes` 与可选图片输出。
+当前配置只填写实际生效的参数：C2 为固定 `search_depth: 3` 的多回合规则感知对手；H2 为历史模式和固定
+Pikafish；D3/M2 的引擎参数用于诊断；M2 默认仅文字棋盘与中文棋子图片两种输入。
+拉丁图片仍是可选接口，但不在本轮配置或默认全 Agent 实验中。
 回合上限来自题目本身，不能用 `evaluation.max_plies` 或 CLI 覆盖。
-`search_depth`、`opponent_depth`、`optimal_depth`、旧图片模式名等会直接报错。
-正式和 smoke YAML 均直接引用冻结名单，不再附带未启用的抽样参数。
+旧 `oracle_depth`、`opponent_depth`、`optimal_depth`、旧图片模式名等会直接报错。
+正式 YAML 运行固定提交题库的全部 100 条；smoke YAML 引用冻结的小样本名单。
 
 代码职责也收拢到一条链路：`schema.py` / `dataset.py` 加载当前数据；
 `mate_in_one.py`、`rule_variants.py`、`history.py`、`multimodal.py` 各管一类评测；
@@ -319,7 +334,7 @@ Pikafish；D3/M2 的引擎参数仅用于诊断；M2 另有三种 `input_modes` 
 `visualization/xiangqi_vis.py` 的单题与轨迹 PNG/GIF 复用 M2 绘图，图表使用当前
 难度名，并将缺失诊断标为 missing，不当成零分。
 出题入口保留在 `scripts/annotate_xiangqi_d3.py`、`build_xiangqi_c2.py`、
-`build_xiangqi_h2.py` 和 `build_xiangqi_m2_from_d3.py`，完整命令见数据卡。
+`build_xiangqi_h2.py` 和 `build_xiangqi_m2_from_d3.py`；各入口的 `--help` 提供参数说明。
 
 网页版流程复用已准备的配置和名单：
 
@@ -330,13 +345,14 @@ python scripts/xiangqi_web_test.py --suite-dir runs/xiangqi-smoke-<时间戳> --
 人工检查数据也不需要调用模型：
 
 ```bash
-minibench inspect-xiangqi --task xiangqi-history --id xiangqi-history-0001 --format terminal
+minibench inspect-xiangqi --task xiangqi-history --id xiangqi-history-r1-revised-0001-6544758334 --format terminal
 minibench inspect-xiangqi --task xiangqi-multimodal --id xiangqi-multimodal-m2-0001 --format png --output output/xiangqi-example.png
 minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 ```
 
-字段、效用函数、固定引擎、完整重建命令和方法边界见
-[数据卡](docs/xiangqi-data-card.md)。
+字段、效用函数与题库来源分别见 `schema.py`、`variants/`、
+`data/xiangqi/provenance.json`；认证范围、评测单位和方法边界见
+[云服务器运行说明](docs/cloud-run.md)。
 
 ### 4.3 一笔画
 

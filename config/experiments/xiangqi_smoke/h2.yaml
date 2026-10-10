@@ -4,7 +4,7 @@ task:
   path: data/xiangqi/history/tasks.jsonl
   selection:
     path: data/xiangqi/evaluation_samples/smoke/h2.jsonl
-    sha256: 98a023e8a664f9659f154194bfd09729f82914160977423b12d803d2d286e6e4
+    sha256: 327489d9f06d8b2d5cffe525997d5e1a86758786ea42ce0f4de1b0e28808030c
 agent:
   name: direct
   max_tokens: 512

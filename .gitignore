@@ -9,6 +9,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+run/
 runs/
 vis_outputs/
 outputs/
@@ -23,6 +24,10 @@ coverage.xml
 .ci-artifacts/
 ci-artifacts/
 output/xiangqi-gallery.html
+output/
+artifacts/
+config/cloud/local*.yaml
+vendor/
 .ipynb_checkpoints/
 *.log
 *.tmp

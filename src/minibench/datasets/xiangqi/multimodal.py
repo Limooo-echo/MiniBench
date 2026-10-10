@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 from io import BytesIO
 import json
 from pathlib import Path
-import re
 from time import strftime
 from typing import Any, Callable, Sequence
 
@@ -17,14 +18,14 @@ from minibench.assets.fonts import matplotlib_font
 from minibench.core.agent import Agent
 from minibench.datasets.xiangqi.mate_in_one import enumerate_mate_in_one_moves
 from minibench.datasets.xiangqi.runtime import (
-    validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, EvaluationFailure, error_detail, reset_agent, mean_or_none, rounded, status_counts, display,
+    validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, EvaluationFailure, error_detail, extract_strict_uci_move, reset_agent, mean_or_none, rounded, status_counts, display,
 )
 from minibench.core.metrics import (
     finish_task_metrics,
     start_task_metrics,
     summarize_metrics,
 )
-from minibench.core.multimodal import ImageAttachment, summarize_paired_modes
+from minibench.core.multimodal import ImageAttachment
 from minibench.datasets.xiangqi.engines.pikafish import (
     PikafishAnalysis,
     PikafishEngine,
@@ -39,6 +40,7 @@ from minibench.datasets.xiangqi.text_encoding import (
 from minibench.datasets.xiangqi.variants.board import Move, VariantBoard
 
 
+PIECE_NAME = {1: "K", 2: "A", 4: "B", 6: "N", 8: "R", 10: "C", 12: "P"}
 PIECE_CN = {
     1: "帅", -1: "将", 2: "仕", -2: "士", 4: "相", -4: "象",
     6: "马", -6: "馬", 8: "车", -8: "車", 10: "炮", -10: "砲",
@@ -58,9 +60,9 @@ XIANGQI_MULTIMODAL_INPUT_MODES = (
     "chinese-piece-image",
     "latin-piece-image",
 )
+XIANGQI_MULTIMODAL_DEFAULT_MODES = ("text", "chinese-piece-image")
+M2_PROTOCOL_VERSION = "xiangqi-m2-recognition-v1"
 XIANGQI_RENDERER_VERSION = 2
-M2_CP_LOSS_REPORT_CAP = 500.0
-UCI_MOVE_PATTERN = re.compile(r"\b([a-i][0-9][a-i][0-9])\b", re.IGNORECASE)
 COORDINATE_CONVENTION = "UCI a0a1 uses file a-i and rank 0-9; rank 0 is the bottom row."
 
 
@@ -76,6 +78,33 @@ def board_to_compact(board: Sequence[Sequence[int]]) -> str:
         "".join(piece_symbol(value) for value in row)
         for row in board
     )
+
+
+def render_board_manifest(
+    board: Sequence[Sequence[int]], mode: str
+) -> list[dict[str, Any]]:
+    """Return the exact piece/square labels that the PNG renderer will draw."""
+    if mode not in {"chinese-piece-image", "latin-piece-image"}:
+        raise ValueError(
+            "Xiangqi image mode must be chinese-piece-image or latin-piece-image"
+        )
+    if len(board) != 10 or any(len(row) != 9 for row in board):
+        raise ValueError("Xiangqi board must be 10x9")
+    manifest = []
+    for row_index, row in enumerate(board):
+        for column_index, piece in enumerate(row):
+            if not piece:
+                continue
+            base = _piece_base(int(piece))
+            manifest.append({
+                "row": row_index,
+                "column": column_index,
+                "square": f"{FILES[column_index]}{9 - row_index}",
+                "piece_id": int(piece),
+                "side": "red" if piece > 0 else "black",
+                "label": PIECE_AB[base] if mode == "latin-piece-image" else PIECE_CN[base],
+            })
+    return manifest
 
 
 def render_board_png(board: Sequence[Sequence[int]], mode: str) -> bytes:
@@ -104,28 +133,27 @@ def render_board_png(board: Sequence[Sequence[int]], mode: str) -> bytes:
         axis.text(column, 9.7, FILES[column], ha="center", va="center", fontsize=12,
                   fontproperties=bold_font)
 
-    for row_index, row in enumerate(board):
-        for column_index, piece in enumerate(row):
-            if not piece:
-                continue
-            red = piece > 0
-            if mode == "latin-piece-image":
-                face, text_color = ("#D32F2F" if red else "#1E1E1E"), "white"
-                text = PIECE_AB[_piece_base(piece)]
-                edge_color = "#666666"
-            else:
-                face, text_color = "#FFF8E7", ("#D32F2F" if red else "#1E1E1E")
-                text, edge_color = PIECE_CN[_piece_base(piece)], text_color
-            axis.add_patch(
-                patches.Circle(
-                    (column_index, row_index), 0.46, facecolor=face,
-                    edgecolor=edge_color, linewidth=2.2, zorder=3,
-                )
+    for item in render_board_manifest(board, mode):
+        row_index = item["row"]
+        column_index = item["column"]
+        red = item["side"] == "red"
+        if mode == "latin-piece-image":
+            face, text_color = ("#D32F2F" if red else "#1E1E1E"), "white"
+            text = item["label"]
+            edge_color = "#666666"
+        else:
+            face, text_color = "#FFF8E7", ("#D32F2F" if red else "#1E1E1E")
+            text, edge_color = item["label"], text_color
+        axis.add_patch(
+            patches.Circle(
+                (column_index, row_index), 0.46, facecolor=face,
+                edgecolor=edge_color, linewidth=2.2, zorder=3,
             )
-            axis.text(
-                column_index, row_index, text, color=text_color, ha="center",
-                va="center", fontsize=18, zorder=4, fontproperties=bold_font,
-            )
+        )
+        axis.text(
+            column_index, row_index, text, color=text_color, ha="center",
+            va="center", fontsize=18, zorder=4, fontproperties=bold_font,
+        )
     legend = (
         "RED = red side, BLACK = black side\nK=general A=advisor B=elephant "
         "N=horse R=rook C=cannon P=pawn"
@@ -135,13 +163,23 @@ def render_board_png(board: Sequence[Sequence[int]], mode: str) -> bytes:
     axis.text(4.0, 10.25, legend, ha="center", va="center", fontsize=9.5,
               fontproperties=regular_font)
     buffer = BytesIO()
-    figure.savefig(buffer, format="png", dpi=200)
+    figure.savefig(buffer, format="png", dpi=200, metadata={
+        "minibench_renderer_version": str(XIANGQI_RENDERER_VERSION),
+        "minibench_mode": mode,
+        "minibench_piece_manifest": json.dumps(render_board_manifest(board, mode), ensure_ascii=False),
+    })
     plt.close(figure)
     return buffer.getvalue()
 
 
+def render_board(board: Sequence[Sequence[int]], mode: str) -> str:
+    """Legacy compatibility API returning a base64-encoded PNG."""
+
+    return base64.b64encode(render_board_png(board, mode)).decode("ascii")
+
+
 def evaluate_xiangqi_multimodal_tasks(
-    tasks: Sequence[dict[str, Any]], agent: Agent, *, modes: Sequence[str] = XIANGQI_MULTIMODAL_INPUT_MODES,
+    tasks: Sequence[dict[str, Any]], agent: Agent, *, modes: Sequence[str] = XIANGQI_MULTIMODAL_DEFAULT_MODES,
     pikafish_path: str | Path | None = None, pikafish_depth: int = 8,
     pikafish_timeout: float = 60.0, verify_with_pikafish: bool = True,
     step_dir: str | Path | None = None, progress: Callable[[str], None] | None = None,
@@ -209,7 +247,10 @@ def evaluate_xiangqi_multimodal_tasks(
                     "task_id": task["id"], "source_task_id": task.get("source_task_id", task["id"]),
                     "mode": mode, "input_mode": mode, "difficulty": task.get("difficulty", "unknown"),
                     "success": success, "goal_achieved": success, "status": status, "error": error,
-                    "protocol_version": PROTOCOL_VERSION, "diagnostics": diagnostics,
+                    "protocol_version": M2_PROTOCOL_VERSION, "diagnostics": diagnostics,
+                    "recognition_accuracy": step.get("recognition_accuracy", 0.0) if status != "error" else None,
+                    "recognition_exact": step.get("recognition_exact", False) if status != "error" else None,
+                    "recognition_status": step.get("recognition_status", "unavailable"),
                     "legality_rate": mean_or_none(step["is_legal"] for step in agent_steps) if status != "error" else None,
                     "opt_rate": mean_or_none(step["is_opt"] for step in agent_steps) if status != "error" else None,
                     "score": float(success) if success is not None else None,
@@ -237,10 +278,12 @@ def _analysis_value_cp(analysis: PikafishAnalysis) -> float:
 
 
 def _agent_side(task: dict[str, Any]) -> int:
-    color = task["agent_color"]
-    if color not in {"red", "black"}:
-        raise ValueError(f"unsupported Xiangqi agent color: {color!r}")
-    return 1 if color == "red" else -1
+    color = task.get("agent_color")
+    if color is not None:
+        if color not in {"red", "black"}:
+            raise ValueError(f"unsupported Xiangqi agent color: {color!r}")
+        return 1 if color == "red" else -1
+    return -1 if task.get("side_to_move") == "enemy" else 1
 
 
 def _verified_mate_moves(task: dict[str, Any]) -> set[str]:
@@ -272,31 +315,23 @@ def _verify_m2_oracle(
 
 
 def summarize_xiangqi_multimodal(results: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    valid = [result for result in results if result["status"] != "error"]
+    valid = [result for result in results if result.get("status", "ok") != "error"]
     by_mode = {mode: [r for r in results if r["mode"] == mode] for mode in sorted({r["mode"] for r in results})}
-    paired = summarize_paired_modes(valid, baseline_mode="text")
     mode_summary = {}
     for mode, items in by_mode.items():
-        known = [item for item in items if item["status"] != "error"]
-        losses = [item["engine_cp_loss"] for item in known if item.get("engine_cp_loss") is not None]
+        known = [item for item in items if item.get("status", "ok") != "error"]
         mode_summary[mode] = {
-            **status_counts(items), "success": sum(bool(item["success"]) for item in known),
-            "success_rate": mean_or_none(item["success"] for item in known),
-            "mean_legality_rate": mean_or_none(item["legality_rate"] for item in known),
-            "mean_opt_rate": mean_or_none(item["opt_rate"] for item in known),
-            "mean_score": mean_or_none(item["score"] for item in known),
-            "mean_raw_engine_cp_loss": mean_or_none(losses),
-            "mean_capped_engine_cp_loss": mean_or_none(min(loss, M2_CP_LOSS_REPORT_CAP) for loss in losses),
-            "cp_diagnostic_available_count": len(losses),
-            "pikafish_preferred_match_rate": mean_or_none(item.get("pikafish_preferred_match") for item in known),
+            **status_counts(items),
+            "mate_rate": mean_or_none(item["success"] for item in known),
+            "legality_rate": mean_or_none(item["legality_rate"] for item in known),
+            "recognition_accuracy": mean_or_none(item.get("recognition_accuracy") for item in known),
         }
-    for mode in set(by_mode) - {"text"}:
-        paired["visual_gap"].setdefault(mode, {"baseline_mode": "text", "paired_total": 0, "visual_gap": None, "ci95": None})
     return {
         **status_counts(results), "unique_tasks": len({item["source_task_id"] for item in results}),
         "primary_metric": "paired_mate_in_one_success", "oracle_policy": "exact strict checkmate; Pikafish is diagnostic only",
         "difficulty_policy": "same structural D3 strata in every input mode", "by_input_mode": mode_summary,
-        "visual_gap": paired["visual_gap"], "metrics": summarize_metrics(list(results)),
+        "recognition_metric": "correct piece type/color/square divided by union of occupied predicted/true squares; missing transcription=0; text is a transcription control",
+        "metrics": summarize_metrics(list(results)),
     }
 
 
@@ -312,10 +347,13 @@ def write_xiangqi_multimodal_run(
                 handle.write(json.dumps(result, ensure_ascii=False) + "\n")
     summary = summarize_xiangqi_multimodal(results)
     (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    lines = ["Xiangqi Multimodal Evaluation", f"Total: {summary['total']} Missing: {summary['missing']}",
-             f"Visual gap: {summary['visual_gap']}"]
+    lines = ["Xiangqi Multimodal Evaluation", f"Total: {summary['total']} Missing: {summary['missing']}"]
     for mode, values in summary["by_input_mode"].items():
-        lines.append(f"{mode}: success={display(values['success_rate'], '.1%')} missing={values['missing']}")
+        lines.append(
+            f"{mode}: mate={display(values['mate_rate'], '.1%')} "
+            f"legal={display(values['legality_rate'], '.1%')} missing={values['missing']}"
+            f" recognition={display(values['recognition_accuracy'], '.1%')}"
+        )
     (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return run_dir
 
@@ -336,6 +374,9 @@ def _run_multimodal_game(
         if not legal_moves or not verified_mates:
             raise ValueError("dataset position has no legal mate-in-one")
         prompt = _build_multimodal_prompt(board, mode, "", agent_side=side)
+        input_image_sha256 = None
+        input_image_path = None
+        input_image_manifest = None
         if mode == "text":
             stage = "model"
             raw = agent.generate(prompt, task)
@@ -346,20 +387,28 @@ def _run_multimodal_game(
                 raise ValueError("Xiangqi image modes require generate_multimodal()")
             stage = "render"
             png = render_board_png(board.board, mode)
+            input_image_sha256 = hashlib.sha256(png).hexdigest()
+            input_image_manifest = render_board_manifest(board.board, mode)
             if step_root is not None:
                 task_step_dir = step_root / task["id"]
                 task_step_dir.mkdir(parents=True, exist_ok=True)
-                (task_step_dir / f"{mode}_step00.png").write_bytes(png)
+                image_path = task_step_dir / f"{mode}_step00.png"
+                image_path.write_bytes(png)
+                input_image_path = str(image_path.resolve())
             stage = "model"
             raw = generate_multimodal(prompt, task, images=[ImageAttachment(data=png, mime_type="image/png")])
         stage = "judge"
         generated_uci = _extract_uci(raw)
+        recognition = score_board_recognition(raw, board.board)
         move = _move_by_uci(legal_moves, generated_uci)
         cp_before = _analysis_value_cp(initial_analysis) if initial_analysis else None
         step = {"step": 0, "actor": "agent", "uci": generated_uci or "PARSE_FAIL", "raw": raw,
                 "raw_output": raw, "is_legal": move is not None, "is_opt": generated_uci in verified_mates,
                 "verified_mate_moves_uci": sorted(verified_mates), "engine_cp_before": cp_before,
-                "engine_cp_after": None, "engine_cp_loss": None}
+                "engine_cp_after": None, "engine_cp_loss": None,
+                "input_image_sha256": input_image_sha256,
+                "input_image_path": input_image_path,
+                "input_image_manifest": input_image_manifest, **recognition}
         steps.append(step)
         if move is None:
             return steps, False, ["invalid_or_illegal_uci"]
@@ -404,33 +453,56 @@ Move history:
 No legal-move list is provided. Generate one legal UCI move yourself.
 Before emitting your JSON, silently verify that the origin square contains one of your pieces, the destination is not occupied by your own piece, the move obeys that piece's movement and path rules, and your own general is not left in check or facing the opposing general.
 Return exactly one JSON object:
-{{"move": "<uci_move>"}}
+{{"move": "<uci_move>", "pieces": {{"<square>": "<piece_symbol>", "...": "..."}}}}
+In pieces, transcribe EVERY occupied square of the INITIAL board before your
+move. Use K,A,B,N,R,C,P for Red and k,a,b,n,r,c,p for Black; omit empty squares.
+Do not use the example placeholder keys. The same transcription is required
+in text and image conditions. Do not change your move to match a guessed list.
 Do not include markdown, explanations, or any other text."""
 
 
 def _extract_uci(raw: str) -> str | None:
-    if not raw:
-        return None
-    values: list[str] = []
     try:
         payload = json.loads(raw)
-        if isinstance(payload, dict):
-            move = payload.get("move")
-            if isinstance(move, str):
-                values.append(move)
-            values.extend(value for value in payload.values() if isinstance(value, str))
     except (json.JSONDecodeError, TypeError):
-        pass
-    values.append(raw)
-    for value in values:
-        match = UCI_MOVE_PATTERN.search(value)
-        if match:
-            return match.group(1).lower()
-    return None
+        return None
+    if not isinstance(payload, dict) or "move" not in payload or set(payload) - {"move", "pieces"}:
+        return None
+    # Perception mistakes must not be confused with move illegality.
+    return extract_strict_uci_move(json.dumps({"move": payload["move"]}))
+
+
+def score_board_recognition(raw: str, board: Sequence[Sequence[int]]) -> dict[str, Any]:
+    """Score explicit model transcription, never infer perception from its move."""
+    import re
+    truth = {f"{FILES[c]}{9-r}": piece_symbol(p)
+             for r, row in enumerate(board) for c, p in enumerate(row) if p}
+    try:
+        payload = json.loads(raw)
+        predicted = payload.get("pieces") if isinstance(payload, dict) else None
+    except (json.JSONDecodeError, TypeError):
+        predicted = None
+    if not isinstance(predicted, dict):
+        return {"recognition_accuracy": 0.0, "recognition_exact": False,
+                "recognition_status": "missing_or_malformed_transcription"}
+    if any(not isinstance(k, str) or re.fullmatch(r"[a-i][0-9]", k) is None
+           or not isinstance(v, str) or v not in "KABNRCPkabnrcp" or len(v) != 1
+           for k, v in predicted.items()):
+        return {"recognition_accuracy": 0.0, "recognition_exact": False,
+                "recognition_status": "invalid_square_or_piece_symbol"}
+    union = set(truth) | set(predicted)
+    correct = sum(predicted.get(k) == truth.get(k) for k in union)
+    return {"recognition_accuracy": correct / len(union) if union else 1.0,
+            "recognition_exact": predicted == truth, "recognition_status": "scored"}
 
 
 def _move_by_uci(moves: Sequence[Move], uci: str | None) -> Move | None:
     return next((move for move in moves if move.to_uci() == uci), None)
+
+def _format_move(move: Move, board: VariantBoard) -> str:
+    piece = board.board[move.fr][move.fc]
+    return f"{PIECE_NAME.get(abs(_piece_base(piece)), '?')} {move.to_uci()}"
+
 
 def board_to_compact_with_coordinates(board: Sequence[Sequence[int]]) -> str:
     """Render the text condition with the same coordinate labels as images."""

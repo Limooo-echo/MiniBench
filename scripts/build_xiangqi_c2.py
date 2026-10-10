@@ -1,198 +1,386 @@
-"""Build same-position C2 rule-counterfactual scenarios from audited candidates."""
+"""Build the paired multi-ply C2 corpus from independently verified H2 mates.
+
+Every scenario contains the same position twice: standard rules and one focus
+rule.  The complete stored line is replayed by both the production and the
+independent rule implementations and must end in strict checkmate in both rows.
+"""
 from __future__ import annotations
 
 import argparse
-import json
+from collections import Counter
+from copy import deepcopy
 import hashlib
+import json
 from pathlib import Path
 import sys
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from minibench.datasets.xiangqi.schema import RULESETS, board_to_fen, validate_record
-from generate_xiangqi_c2_candidates import analyse, independently_verify
-from minibench.datasets.xiangqi.validation import validate_position, compare_standard_legal_moves
 from minibench.datasets.xiangqi import reference
-
-RELEASE_ID = "xiangqi-2026-09-19-r1"
-
-
-def validate_candidate(item, focus):
-    board = item["board"]
-    reasons = validate_position(board, 1)
-    comparison = compare_standard_legal_moves(board, 1)
-    if reasons or not comparison["valid"]:
-        raise ValueError(f"invalid candidate: {reasons + comparison['reasons']}")
-    if not item.get("source", {}).get("file_sha256"):
-        raise ValueError("missing audited PGN replay source")
-    names = RULESETS if focus != "standard-controls" else ("standard",)
-    for name in names:
-        expected = item["analysis"][name] if focus != "standard-controls" else item["analysis"]
-        actual = analyse(board, name)
-        if actual is None or any(actual[k] != expected[k] for k in ("best", "score", "margin", "legal")):
-            raise ValueError(f"stale or non-unique candidate answer: {name}")
-    if focus != "standard-controls":
-        if item["analysis"][focus]["best"] == item["analysis"]["standard"]["best"]:
-            raise ValueError("focus must change the best move")
-        independently_verify(item)
-    else:
-        scores = {m.to_uci(): v for m,v in reference.score_moves(board, 1, 3)}
-        expected = item["analysis"]["scores"]
-        if scores.keys() != expected.keys() or any(abs(scores[m]-expected[m]) > 1e-6 for m in scores):
-            raise ValueError("independent control search disagreement")
+from minibench.datasets.xiangqi.schema import (
+    FAMILY_PATHS,
+    RULESETS,
+    fen_to_board,
+    internal_rules,
+    load_records,
+    validate_record,
+)
+from minibench.datasets.xiangqi.variants.board import VariantBoard
+from minibench.datasets.xiangqi.variants.mate_search import LOSS_UNIT, replay_strict_mate_line
+from minibench.datasets.xiangqi.variants.rules import Rule
 
 
-PUBLIC_RULES = {
-    "standard": [],
-    "horse-no-leg-block": [
-        {"kind": "move-modification", "piece": "horse", "effect": "ignore-leg-block"}
-    ],
-    "chariot-no-center": [
-        {"kind": "zone-restriction", "piece": "chariot", "effect": "forbid-center-files"}
-    ],
-    "soldier-free-retreat": [
-        {"kind": "move-modification", "piece": "soldier", "effect": "allow-backward-after-river"}
-    ],
+FOCI = tuple(ruleset for ruleset in RULESETS if ruleset != "standard")
+TARGETS = {
+    "horse-no-leg-block": 42,
+    "chariot-no-center": 42,
+    "soldier-free-retreat": 41,
 }
+SEARCH_DEPTH = 3
+HORIZON_EXTENSION = 4
 
 
-def position_key(board):
-    return hashlib.sha256(board_to_fen(board).encode()).hexdigest()[:10]
+def _public_rules(ruleset: str) -> list[dict[str, str]]:
+    return {
+        "standard": [],
+        "horse-no-leg-block": [
+            {
+                "kind": "move-modification",
+                "piece": "horse",
+                "effect": "ignore-leg-block",
+            }
+        ],
+        "chariot-no-center": [
+            {
+                "kind": "zone-restriction",
+                "piece": "chariot",
+                "effect": "forbid-center-files",
+            }
+        ],
+        "soldier-free-retreat": [
+            {
+                "kind": "move-modification",
+                "piece": "soldier",
+                "effect": "allow-backward-after-river",
+            }
+        ],
+    }[ruleset]
 
 
-def build(candidates: dict[str, list[dict]]) -> list[dict]:
-    if set(candidates) != {"horse-no-leg-block", "chariot-no-center", "soldier-free-retreat", "standard-controls"}:
-        raise ValueError("expected 20 candidates per focus and 10 controls in exactly four groups")
-    all_items = [item for group in candidates.values() for item in group]
-    fens = [board_to_fen(item["board"]) for item in all_items]
-    if len(fens) != len(set(fens)):
-        raise ValueError("duplicate position across C2 scenarios")
-    records: list[dict] = []
-    sequence = 0
-    scenario_number = 0
-    for focus in ("horse-no-leg-block", "chariot-no-center", "soldier-free-retreat"):
-        items = candidates.get(focus, [])
-        if len(items) != 20:
-            raise ValueError(f"{focus}: expected 20 audited candidates, got {len(items)}")
-        for item in items:
-            validate_candidate(item, focus)
-            scenario_number += 1
-            scenario_id = f"xiangqi-rule-scenario-c2-r1-{scenario_number:03d}-{position_key(item['board'])}"
-            fen = board_to_fen(item["board"], active_color="red")
-            piece_count = sum(value != 0 for row in item["board"] for value in row)
-            for ruleset in RULESETS:
-                sequence += 1
-                analysis = item["analysis"][ruleset]
-                records.append({
-                    "schema_version": 2,
-                    "release_id": RELEASE_ID,
-                    "source": dict(item["source"]),
-                    "source_id": "ccpd:" + item["source"]["source_file"],
-                    "validation": dict(item["verification"]),
-                    "id": f"xiangqi-rule-variants-c2-r1-{sequence:04d}-{position_key(item['board'])}",
-                    "family": "xiangqi-rule-variants",
-                    "fen": fen,
-                    "agent_color": "red",
-                    "goal": "best-move-under-rule",
-                    "max_plies": 1,
-                    "difficulty": "counterfactual",
-                    "piece_count": piece_count,
-                    "oracle": {
-                        "best_move_uci": analysis["best"],
-                        "mate_in_plies": None,
-                        "evaluation_cp": None,
-                    },
-                    "tags": sorted({"c2", f"focus:{focus}", f"ruleset:{ruleset}"}),
-                    "ruleset": ruleset,
-                    "rules": PUBLIC_RULES[ruleset],
-                    "scenario_id": scenario_id,
-                    "design_stratum": focus,
-                    "c2_analysis": {
-                        "version": "c2-legal-replay-counterfactual-v2",
-                        "oracle_depth": 3,
-                        "legal_move_count": analysis["legal"],
-                        "best_value": analysis["score"],
-                        "unique_best_margin": analysis["margin"],
-                        "standard_best_uci": item["analysis"]["standard"]["best"],
-                        "focus_ruleset": focus,
-                        "focus_changes_best_move": (
-                            item["analysis"]["standard"]["best"]
-                            != item["analysis"][focus]["best"]
-                        ),
-                    },
-                })
-    controls = candidates.get("standard-controls", [])
-    if len(controls) != 10:
-        raise ValueError(f"standard-controls: expected 10, got {len(controls)}")
-    for item in controls:
-        validate_candidate(item, "standard-controls")
-        sequence += 1
-        scenario_number += 1
-        analysis = item["analysis"]
-        fen = board_to_fen(item["board"], active_color="red")
-        piece_count = sum(value != 0 for row in item["board"] for value in row)
-        records.append({
-            "schema_version": 2,
-                    "release_id": RELEASE_ID,
-                    "source": dict(item["source"]),
-                    "source_id": "ccpd:" + item["source"]["source_file"],
-                    "validation": dict(item["verification"]),
-            "id": f"xiangqi-rule-variants-c2-r1-{sequence:04d}-{position_key(item['board'])}",
-            "family": "xiangqi-rule-variants",
-            "fen": fen,
-            "agent_color": "red",
-            "goal": "best-move-under-rule",
-            "max_plies": 1,
-            "difficulty": "control",
-            "piece_count": piece_count,
-            "oracle": {
-                "best_move_uci": analysis["best"],
-                "mate_in_plies": None,
-                "evaluation_cp": None,
-            },
-            "tags": ["c2", "control", "ruleset:standard"],
-            "ruleset": "standard",
-            "rules": [],
-            "scenario_id": f"xiangqi-rule-scenario-control-c2-r1-{scenario_number:03d}-{position_key(item['board'])}",
-            "design_stratum": "standard-control",
-            "c2_analysis": {
-                "version": "c2-legal-replay-counterfactual-v2",
-                "oracle_depth": 3,
-                "legal_move_count": analysis["legal"],
-                "best_value": analysis["score"],
-                "unique_best_margin": analysis["margin"],
-                "standard_best_uci": analysis["best"],
-                "focus_ruleset": "standard",
-                "focus_changes_best_move": False,
-            },
-        })
-    for record in records:
-        validate_record(record, expected_family="xiangqi-rule-variants")
-    return records
+def _independent_replay(
+    board: list[list[int]],
+    side: int,
+    pv: list[str],
+    ruleset: str,
+) -> dict[str, Any]:
+    state = [row[:] for row in board]
+    turn = side
+    rules = internal_rules({"ruleset": ruleset})
+    for index, uci in enumerate(pv):
+        legal = {move.to_uci(): move for move in reference.legal_moves(state, turn, rules)}
+        move = legal.get(uci)
+        if move is None:
+            return {
+                "valid": False,
+                "terminal": "ongoing",
+                "plies": index,
+                "reason": f"illegal_ply_{index}:{uci}",
+            }
+        state = reference.apply_move(state, move)
+        turn = -turn
+    terminal = reference.terminal_status(state, turn, rules)
+    return {
+        "valid": terminal == "checkmate" and turn == -side,
+        "terminal": terminal,
+        "plies": len(pv),
+        "reason": "strict_checkmate" if terminal == "checkmate" else "line_did_not_mate",
+    }
+
+
+def _production_replay(
+    board: list[list[int]],
+    side: int,
+    pv: list[str],
+    ruleset: str,
+) -> dict[str, Any]:
+    variant = VariantBoard(
+        board,
+        [Rule.from_dict(rule) for rule in internal_rules({"ruleset": ruleset})],
+    )
+    return replay_strict_mate_line(
+        variant,
+        side,
+        pv,
+        attacker_side=side,
+    )
+
+
+def _rule_sensitive_along_line(
+    board: list[list[int]],
+    side: int,
+    pv: list[str],
+    focus: str,
+) -> bool:
+    standard = VariantBoard(board, [])
+    variant = VariantBoard(
+        board,
+        [Rule.from_dict(rule) for rule in internal_rules({"ruleset": focus})],
+    )
+    turn = side
+    changed = False
+    for uci in pv:
+        standard_moves = {move.to_uci(): move for move in standard.legal_moves(turn)}
+        variant_moves = {move.to_uci(): move for move in variant.legal_moves(turn)}
+        changed = changed or set(standard_moves) != set(variant_moves)
+        if uci not in standard_moves or uci not in variant_moves:
+            return False
+        standard.apply(standard_moves[uci])
+        variant.apply(variant_moves[uci])
+        turn = -turn
+    return changed
+
+
+def _candidate(source: dict[str, Any], focus: str) -> dict[str, Any] | None:
+    analysis = source["h2_analysis"]
+    pv = list(analysis["principal_variation_uci"])
+    mate_moves = int(analysis["mate_in_moves"])
+    if mate_moves < 2 or len(pv) != 2 * mate_moves - 1:
+        return None
+    board, color = fen_to_board(source["fen"])
+    side = 1 if color == "red" else -1
+    focus_rules = internal_rules({"ruleset": focus})
+    focus_board = VariantBoard(
+        board,
+        [Rule.from_dict(rule) for rule in focus_rules],
+    )
+    # Relaxed rules can turn a multi-move standard puzzle into mate-in-one.
+    for move in focus_board.legal_moves(side):
+        trial = focus_board.copy()
+        trial.apply(move)
+        if (trial.find_general(-side) is not None and trial._is_in_check(-side)
+                and not trial.legal_moves(-side)):
+            return None
+    # A rule change can retroactively expose a horse attack. Such a position is
+    # not a legal start state for the side declared to move and must be retired.
+    if focus_board._is_in_check(-side) or reference.in_check(board, -side, focus_rules):
+        return None
+    verification: dict[str, dict[str, Any]] = {}
+    for ruleset in ("standard", focus):
+        production = _production_replay(board, side, pv, ruleset)
+        independent = _independent_replay(board, side, pv, ruleset)
+        if not production["valid"] or not independent["valid"]:
+            return None
+        if production["terminal"] != independent["terminal"] or production["plies"] != independent["plies"]:
+            return None
+        verification[ruleset] = {
+            "production": production,
+            "independent": independent,
+        }
+    return {
+        "source": source,
+        "focus": focus,
+        "mate_moves": mate_moves,
+        "pv": pv,
+        "verification": verification,
+        "sensitive": _rule_sensitive_along_line(board, side, pv, focus),
+    }
+
+
+def _select_sources(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    source_ids = [str(row.get("id", "")) for row in rows]
+    duplicate_ids = sorted(
+        source_id
+        for source_id, count in Counter(source_ids).items()
+        if source_id and count > 1
+    )
+    if duplicate_ids:
+        raise ValueError(
+            "duplicate H2 source ids are not allowed: " + ", ".join(duplicate_ids[:5])
+        )
+    fens = [str(row.get("fen", "")) for row in rows]
+    duplicate_fens = sum(count > 1 for count in Counter(fens).values() if count)
+    if duplicate_fens:
+        raise ValueError(
+            f"duplicate H2 source positions are not allowed: {duplicate_fens} duplicate FEN group(s)"
+        )
+    pools: dict[str, list[dict[str, Any]]] = {focus: [] for focus in FOCI}
+    for source in rows:
+        for focus in FOCI:
+            item = _candidate(source, focus)
+            if item is not None:
+                pools[focus].append(item)
+    for focus in FOCI:
+        pools[focus].sort(
+            key=lambda item: (
+                not item["sensitive"],
+                item["mate_moves"] > 5,
+                item["mate_moves"],
+                item["source"]["piece_count"],
+                item["source"]["id"],
+            )
+        )
+
+    selected: list[dict[str, Any]] = []
+    used_sources: set[str] = set()
+    # The chariot restriction has the smallest valid pool, so allocate it first.
+    for focus in ("chariot-no-center", "horse-no-leg-block", "soldier-free-retreat"):
+        choices = [
+            item for item in pools[focus] if item["source"]["id"] not in used_sources
+        ]
+        required = TARGETS[focus]
+        if len(choices) < required:
+            raise ValueError(
+                f"insufficient independently replayed {focus} candidates: "
+                f"{len(choices)} < {required}"
+            )
+        chosen = choices[:required]
+        selected.extend(chosen)
+        used_sources.update(item["source"]["id"] for item in chosen)
+    return selected
+
+
+def _record(
+    item: dict[str, Any],
+    *,
+    scenario_number: int,
+    ruleset: str,
+) -> dict[str, Any]:
+    source = item["source"]
+    focus = item["focus"]
+    digest = hashlib.sha256(
+        f"{source['id']}|{focus}".encode("utf-8")
+    ).hexdigest()[:10]
+    scenario_id = f"xiangqi-rule-scenario-c2-r2-{scenario_number:03d}-{digest}"
+    suffix = "standard" if ruleset == "standard" else ruleset
+    task_id = f"xiangqi-rule-variants-c2-r2-{scenario_number:03d}-{suffix}-{digest}"
+    mate_moves = item["mate_moves"]
+    reference_plies = len(item["pv"])
+    tags = sorted(
+        {
+            "c2",
+            "source:h2-verified-mate",
+            f"focus:{focus}",
+            f"ruleset:{ruleset}",
+            f"mate-band:{source['difficulty']}",
+            f"mate-in-moves:{mate_moves}",
+            "rule-sensitive" if item["sensitive"] else "rule-control",
+        }
+    )
+    record = {
+        "schema_version": 2,
+        "release_id": source["release_id"],
+        "id": task_id,
+        "family": "xiangqi-rule-variants",
+        "fen": source["fen"],
+        "agent_color": source["agent_color"],
+        "goal": "checkmate",
+        "max_plies": reference_plies + HORIZON_EXTENSION,
+        "difficulty": source["difficulty"],
+        "piece_count": source["piece_count"],
+        "oracle": {
+            "best_move_uci": item["pv"][0],
+            "mate_in_plies": reference_plies,
+            "evaluation_cp": None,
+        },
+        "tags": tags,
+        "source": deepcopy(source["source"]),
+        "source_id": source["source_id"],
+        "source_task_id": source["id"],
+        "ruleset": ruleset,
+        "rules": _public_rules(ruleset),
+        "scenario_id": scenario_id,
+        "design_stratum": focus,
+        "c2_analysis": {
+            "version": "c2-multistep-rule-mate-v3",
+            "source_task_id": source["id"],
+            "focus_ruleset": focus,
+            "pair_rulesets": ["standard", focus],
+            "mate_in_moves": mate_moves,
+            "reference_mate_plies": reference_plies,
+            "principal_variation_uci": list(item["pv"]),
+            "rule_sensitive_along_reference": bool(item["sensitive"]),
+            "search_depth": SEARCH_DEPTH,
+            "loss_unit": LOSS_UNIT,
+            "max_plies_extension": HORIZON_EXTENSION,
+            "verification": deepcopy(item["verification"][ruleset]),
+            "interpretation": (
+                "The complete reference line is independently replayed under the "
+                "active rule and ends in strict checkmate. It is a bounded reference "
+                "line, not a proof of the shortest mate against every defence."
+            ),
+        },
+    }
+    validate_record(record, expected_family="xiangqi-rule-variants")
+    return record
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--candidates", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--history",
+        type=Path,
+        default=ROOT / FAMILY_PATHS["xiangqi-history"],
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=ROOT / FAMILY_PATHS["xiangqi-rule-variants"],
+    )
     args = parser.parse_args()
-    candidates = json.loads(args.candidates.read_text(encoding="utf-8"))
-    records = build(candidates)
+    rows = load_records(args.history, expected_family="xiangqi-history")
+    selected = _select_sources(rows)
+    records: list[dict[str, Any]] = []
+    for number, item in enumerate(selected, start=1):
+        records.append(_record(item, scenario_number=number, ruleset="standard"))
+        records.append(_record(item, scenario_number=number, ruleset=item["focus"]))
+    records.sort(key=lambda record: record["id"])
+    if len(records) != 250 or len({record["id"] for record in records}) != 250:
+        raise ValueError("C2 build must produce exactly 250 unique records")
+    if not all(record["oracle"]["mate_in_plies"] >= 3 for record in records):
+        raise ValueError("C2 must contain only multi-move mates")
+    short_or_medium = sum(
+        record["c2_analysis"]["mate_in_moves"] <= 5 for record in records
+    )
+    if short_or_medium <= len(records) // 2:
+        raise ValueError("C2 requires a majority of mates within five attacker moves")
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
         encoding="utf-8",
+        newline="\n",
     )
-    print(json.dumps({
-        "records": len(records),
-        "scenarios": len({record["scenario_id"] for record in records}),
-        "unique_fens": len({record["fen"] for record in records}),
-        "same_fen_complete": all(
-            len({record["fen"] for record in records if record["scenario_id"] == scenario}) == 1
-            for scenario in {record["scenario_id"] for record in records}
+    report = {
+        "version": "c2-multistep-rule-mate-v3",
+        "record_count": len(records),
+        "scenario_count": len(records) // 2,
+        # Count selected scenarios directly.  Do not infer the focus row from
+        # list parity after sorting: task-id ordering is not part of the data
+        # contract and may change independently of pair membership.
+        "focus_counts": dict(Counter(item["focus"] for item in selected)),
+        "ruleset_counts": dict(Counter(record["ruleset"] for record in records)),
+        "difficulty_counts": dict(Counter(record["difficulty"] for record in records)),
+        "mate_moves_counts": dict(
+            sorted(Counter(record["c2_analysis"]["mate_in_moves"] for record in records).items())
         ),
-    }))
+        "within_five_moves": short_or_medium,
+        "within_five_moves_rate": short_or_medium / len(records),
+        "rule_sensitive_records": sum(
+            record["c2_analysis"]["rule_sensitive_along_reference"] for record in records
+        ),
+        "source_policy": "125 unique H2 sources; standard/focus pairs only",
+        "verification": "production and independent full-line strict-checkmate replay",
+        "loss_unit": LOSS_UNIT,
+    }
+    (args.output.parent / "generation_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 
 

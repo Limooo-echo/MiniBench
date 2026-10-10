@@ -60,11 +60,11 @@ class XiangqiPikafishTests(unittest.TestCase):
 
     def test_current_dataset_is_loaded_with_fen_identity(self):
         tasks = load_xiangqi_tasks()
-        self.assertEqual(len(tasks), 250)
+        self.assertEqual(len(tasks), 100)
         self.assertEqual(
             {label: sum(task.difficulty == label for task in tasks)
              for label in ("easy", "medium", "hard")},
-            {"easy": 80, "medium": 85, "hard": 85},
+            {"easy": 34, "medium": 33, "hard": 33},
         )
         for task in tasks:
             self.assertEqual(task.schema_version, 2)

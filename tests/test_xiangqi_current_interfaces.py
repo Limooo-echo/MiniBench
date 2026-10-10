@@ -20,7 +20,7 @@ class CurrentInterfaceTests(unittest.TestCase):
             ["evaluate-xiangqi"], ["generate-xiangqi-pikafish"],
             ["generate-xiangqi-capture"], ["generate-ccpd-endgames"],
             ["migrate-xiangqi-v2"],
-            ["run-task", "xiangqi-rule-variants", "--search-depth", "3"],
+            ["run-task", "xiangqi-rule-variants", "--oracle-depth", "3"],
             ["run-task", "xiangqi-multimodal", "--max-plies", "20"],
         ):
             with self.subTest(argv=argv), redirect_stderr(io.StringIO()):
@@ -53,7 +53,7 @@ class CurrentInterfaceTests(unittest.TestCase):
 
     def test_removed_config_fields_fail_at_config_load_boundary(self):
         config = load_experiment_config("config/experiments/xiangqi_rule_variants.yaml")
-        for field in ("search_depth", "opponent_depth", "optimal_depth", "max_steps", "max_plies"):
+        for field in ("oracle_depth", "opponent_depth", "optimal_depth", "max_steps", "max_plies"):
             with self.subTest(field=field):
                 bad = deepcopy(config)
                 bad["evaluation"][field] = 3
@@ -63,20 +63,20 @@ class CurrentInterfaceTests(unittest.TestCase):
     def test_only_fixed_c2_oracle_depth_is_accepted(self):
         for value in (2, 4, True, 3.0, "3"):
             with self.subTest(value=value), self.assertRaises(ValueError):
-                validate_evaluation_config("xiangqi-rule-variants", {"oracle_depth": value})
+                validate_evaluation_config("xiangqi-rule-variants", {"search_depth": value})
 
     def test_cli_cannot_silently_apply_another_familys_option(self):
         parser = build_parser()
-        args = parser.parse_args(["run-task", "xiangqi-mate-in-one", "--oracle-depth", "3"])
+        args = parser.parse_args(["run-task", "xiangqi-mate-in-one", "--search-depth", "3"])
         with self.assertRaisesRegex(SystemExit, "not supported"):
             _xiangqi_config_with_overrides(args, args.task_name)
-        args = parser.parse_args(["run-suite", "--tasks", "xiangqi-mate-in-one,xiangqi-rule-variants", "--oracle-depth", "3"])
+        args = parser.parse_args(["run-suite", "--tasks", "xiangqi-mate-in-one,xiangqi-rule-variants", "--search-depth", "3"])
         config = _xiangqi_config_with_overrides(args, "xiangqi-mate-in-one")
-        self.assertNotIn("oracle_depth", config["evaluation"])
+        self.assertNotIn("search_depth", config["evaluation"])
         config = _xiangqi_config_with_overrides(args, "xiangqi-rule-variants")
-        self.assertEqual(config["evaluation"]["oracle_depth"], 3)
+        self.assertEqual(config["evaluation"]["search_depth"], 3)
 
-    def test_formal_and_smoke_configs_remain_loadable_and_frozen(self):
+    def test_submitted_full_and_frozen_smoke_configs_remain_loadable(self):
         paths = list(Path("config/experiments").glob("xiangqi_*.yaml"))
         paths += list(Path("config/experiments/xiangqi_smoke").glob("*.yaml"))
         self.assertEqual(len(paths), 8)
@@ -84,14 +84,18 @@ class CurrentInterfaceTests(unittest.TestCase):
             with self.subTest(path=path):
                 config = load_experiment_config(path)
                 self.assertNotIn("sampling", config["task"])
-                self.assertIn("selection", config["task"])
+                if path.parent.name == "xiangqi_smoke":
+                    self.assertIn("selection", config["task"])
+                else:
+                    self.assertEqual(config["task"]["limit"], 100)
+                    self.assertNotIn("selection", config["task"])
                 self.assertNotIn("max_plies", config["evaluation"])
 
     def test_cli_keeps_frozen_config_free_of_inactive_sampling_options(self):
         args = build_parser().parse_args(["run-task", "xiangqi-mate-in-one", "--agent", "cot"])
         config = _xiangqi_config_with_overrides(args, args.task_name)
         self.assertNotIn("sampling", config["task"])
-        self.assertIn("selection", config["task"])
+        self.assertEqual(config["task"]["limit"], 100)
 
 
 if __name__ == "__main__":

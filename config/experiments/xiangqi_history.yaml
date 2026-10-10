@@ -2,9 +2,7 @@ task:
   prompt_version: xiangqi-reasoning-v2
   family: xiangqi-history
   path: data/xiangqi/history/tasks.jsonl
-  selection:
-    path: data/xiangqi/evaluation_samples/formal/h2.jsonl
-    sha256: 0c3a3376b2a7a1d4e50dd5304f63692ea2374bf0fae76c8a8663dc4af3a7a981
+  limit: 100
 agent:
   name: direct
   max_tokens: 512
@@ -24,5 +22,5 @@ evaluation:
   pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
 run:
   output_dir: runs
-  run_name: xiangqi_h2_direct_formal_r1
+  run_name: xiangqi_h2_direct_submitted100_r1
   on_existing: error

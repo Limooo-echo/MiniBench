@@ -211,6 +211,103 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _display(value: Any, *, percent: bool = False) -> str:
+    if value is None:
+        return "NA"
+    if percent and isinstance(value, (bool, int, float)):
+        return f"{100 * float(value):.1f}%"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        return f"{value:.1f}"
+    return str(value)
+
+
+def _move_trace(record: dict[str, Any]) -> str:
+    steps = record.get("steps")
+    if isinstance(steps, list):
+        moves = [
+            f"{step.get('actor', '?')}:{step.get('uci', 'PARSE_FAIL')}"
+            for step in steps
+            if isinstance(step, dict) and step.get("actor") in {"agent", "pikafish", "depth-opponent"}
+        ]
+        if moves:
+            return ",".join(moves)
+    move = record.get("agent_uci")
+    return f"agent:{move}" if move else "none"
+
+
+def _print_item_result(key: str, record: dict[str, Any]) -> None:
+    task_id = record.get("task_id") or record.get("id") or "unknown"
+    legal = record.get("legality_rate", record.get("is_legal"))
+    mode = record.get("history_mode") or record.get("mode") or record.get("ruleset")
+    fields = [f"RESULT task={task_id}"]
+    if mode:
+        fields.append(f"mode={mode}")
+    if key == "h2":
+        fields.extend([
+            f"mate={_display(record.get('success'))}",
+            f"mate_within_prescribed={_display(record.get('mate_within_prescribed_steps'))}",
+            f"legal={_display(legal, percent=True)}",
+            f"cp_loss={_display(record.get('avg_cp_loss'))}",
+        ])
+    elif key in {"d3", "m2"}:
+        fields.extend([
+            f"mate={_display(record.get('success'))}",
+            f"legal={_display(legal, percent=True)}",
+        ])
+    elif key == "c2":
+        fields.extend([
+            f"mate={_display(record.get('success'))}",
+            f"mate_within_prescribed={_display(record.get('mate_within_prescribed_steps'))}",
+            f"legal={_display(legal, percent=True)}",
+            f"variant_loss={_display(record.get('avg_variant_loss'))}",
+        ])
+    else:
+        fields.extend([
+            f"mate={_display(record.get('success'))}",
+            f"legal={_display(legal, percent=True)}",
+        ])
+    fields.append(f"moves={_move_trace(record)}")
+    print(" ".join(fields), flush=True)
+
+
+def _print_family_summary(key: str, summary: dict[str, Any]) -> None:
+    if key == "d3":
+        print(
+            "SUMMARY D3 "
+            f"mate={_display(summary.get('mate_rate'), percent=True)} "
+            f"legal={_display(summary.get('legality_rate'), percent=True)}",
+            flush=True,
+        )
+    elif key == "h2":
+        print(
+            "SUMMARY H2 "
+            f"mate={_display(summary.get('mate_rate'), percent=True)} "
+            f"mate_within_prescribed={_display(summary.get('mate_within_prescribed_rate'), percent=True)} "
+            f"legal={_display(summary.get('legality_rate'), percent=True)} "
+            f"cp_loss={_display(summary.get('avg_cp_loss'))}",
+            flush=True,
+        )
+    elif key == "c2":
+        print(
+            "SUMMARY C2 "
+            f"mate={_display(summary.get('mate_rate'), percent=True)} "
+            f"mate_within_prescribed={_display(summary.get('mate_within_prescribed_rate'), percent=True)} "
+            f"legal={_display(summary.get('legality_rate'), percent=True)} "
+            f"variant_loss={_display(summary.get('avg_variant_loss'))}",
+            flush=True,
+        )
+    else:
+        for mode, values in summary.get("by_input_mode", {}).items():
+            print(
+                f"SUMMARY M2 mode={mode} "
+                f"mate={_display(values.get('mate_rate'), percent=True)} "
+                f"legal={_display(values.get('legality_rate'), percent=True)}",
+                flush=True,
+            )
+
+
 def prepare_web_session(suite_dir: Path, session_dir: Path, names: list[str], *,
                         pikafish_path: Path | None = None, history_mode: str | None = None,
                         m2_modes: Sequence[str] | None = None):
@@ -311,10 +408,13 @@ def main(argv: list[str] | None = None) -> int:
                     os.fsync(handle.fileno())
                 completed.append(record)
                 _write_json(active_dir / "run_state.json", {"status": "running", "completed_results": len(completed)})
+                _print_item_result(key, record)
             results = _evaluate(spec, tasks, agent, config["task"]["family"], config["evaluation"], on_result=persist)
             spec.write_run(results, active_dir.parent, active_dir.name, write_predictions=False)
-            summaries[key] = {"run_dir": str(active_dir), "summary": spec.summarize(results), "completed_results": len(completed)}
+            family_summary = spec.summarize(results)
+            summaries[key] = {"run_dir": str(active_dir), "summary": family_summary, "completed_results": len(completed)}
             _write_json(active_dir / "run_state.json", {"status": "completed", "completed_results": len(completed)})
+            _print_family_summary(key, family_summary)
     except KeyboardInterrupt:
         status = "stopped_by_user"
     except Exception as exc:
@@ -324,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
         _write_json(active_dir / "run_state.json", {"status": status, "completed_results": len(completed), "error": summaries.get("error")})
     report = {"status": status, "source_suite_dir": str(suite_dir), "session_dir": str(session_dir), "tasks": summaries}
     _write_json(session_dir / "web_test_results.json", report)
-    print(json.dumps(report, indent=2, ensure_ascii=False))
+    print(f"WEB TEST {status}; full details: {session_dir / 'web_test_results.json'}")
     return 0 if status == "completed" else 1
 
 

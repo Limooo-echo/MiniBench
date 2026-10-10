@@ -15,9 +15,7 @@ REQUIRED_EXTERNAL_PROVENANCE = (
 )
 
 
-def audit_xiangqi_release(
-    manifest_path: str | Path, *, validation_report: str | Path | None = None,
-) -> dict[str, Any]:
+def audit_xiangqi_release(manifest_path: str | Path, *, validation_report: str | Path | None = None) -> dict[str, Any]:
     manifest_file = Path(manifest_path)
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
     repository_root = Path(__file__).resolve().parents[4]
@@ -39,10 +37,11 @@ def audit_xiangqi_release(
                 by_fen[record["fen"]].append(record)
             expected_duplicates = sorted(
                 fen for fen, group in by_fen.items()
-                if len(group) == 4
+                if len(group) == 2
                 and len({item.get("scenario_id") for item in group}) == 1
+                and len({item.get("design_stratum") for item in group}) == 1
                 and {item.get("ruleset") for item in group}
-                == {"standard", "horse-no-leg-block", "chariot-no-center", "soldier-free-retreat"}
+                == {"standard", group[0].get("design_stratum")}
             )
             unexpected_duplicates = sorted(set(duplicates) - set(expected_duplicates))
         unexpected_duplicate_total += len(unexpected_duplicates)
@@ -72,20 +71,43 @@ def audit_xiangqi_release(
         field for field in REQUIRED_EXTERNAL_PROVENANCE
         if field not in manifest or has_unresolved(manifest[field])
     ]
-    expected_cross_family = {
+    expected_d3_m2 = {
         fen: families for fen, families in cross_family.items()
         if set(families) == {"xiangqi-mate-in-one", "xiangqi-multimodal"}
     }
+    expected_h2_c2 = {
+        fen: families for fen, families in cross_family.items()
+        if set(families) == {"xiangqi-history", "xiangqi-rule-variants"}
+    }
+    expected_cross_family = {**expected_d3_m2, **expected_h2_c2}
     unexpected_cross_family = {
         fen: families for fen, families in cross_family.items()
         if fen not in expected_cross_family
     }
-    gate_path = (Path(validation_report) if validation_report is not None
-                 else manifest_file.parent / "independent_validation.json")
+    gate_path = Path(validation_report) if validation_report else manifest_file.parent / "independent_validation.json"
     gate_problems = []
+    submitted = manifest.get("submission")
+    if submitted:
+        selection_path = manifest_file.parent / "submission_manifest.json"
+        try:
+            selection = json.loads(selection_path.read_text(encoding="utf-8"))
+            if hashlib.sha256(selection_path.read_bytes()).hexdigest() != submitted.get("sha256"):
+                gate_problems.append("submitted_selection_manifest_hash_mismatch")
+            keys = {"xiangqi-mate-in-one": "d3", "xiangqi-history": "h2",
+                    "xiangqi-rule-variants": "c2", "xiangqi-multimodal": "m2"}
+            for family, rows in records_by_family.items():
+                entry = selection["datasets"][keys[family]]
+                actual = hashlib.sha256((repository_root / FAMILY_PATHS[family]).read_bytes()).hexdigest()
+                if (len(rows) != 100 or entry["sha256"] != actual
+                        or entry["task_ids"] != [r["id"] for r in rows]):
+                    gate_problems.append(f"submitted_selection_changed:{family}")
+        except (OSError, ValueError, KeyError, TypeError):
+            gate_problems.append("submitted_selection_manifest_missing_or_invalid")
+    runtime_policy_problems = []
+    gate: dict[str, Any] = {}
     if gate_path.is_file():
         gate = json.loads(gate_path.read_text(encoding="utf-8"))
-        if not (gate.get("release_ready") and gate.get("valid") and gate.get("full")):
+        if not (gate.get("static_data_ready") and gate.get("valid") and gate.get("full")):
             gate_problems.append("independent_validation_not_full_or_failed")
         if gate.get("release_id") != manifest.get("release_id"):
             gate_problems.append("independent_validation_release_mismatch")
@@ -101,7 +123,10 @@ def audit_xiangqi_release(
             gate_problems.append("independent_validation_frozen_inputs_incomplete")
         source_inputs = gate.get("c2_sources", {}).get("inputs", {})
         for relative, recorded in source_inputs.items():
-            source_path = manifest_file.parent / "sources" / "ccpd" / relative
+            # C2 v3 derives directly from the canonical H2 dataset.  Resolve
+            # only the gate-owned relative key under data/xiangqi; never follow
+            # the absolute path recorded for human audit evidence.
+            source_path = manifest_file.parent / relative
             if not source_path.is_file() or hashlib.sha256(source_path.read_bytes()).hexdigest() != recorded.get("sha256"):
                 gate_problems.append(f"independent_validation_source_hash_mismatch:{relative}")
         if not gate.get("c2_sources", {}).get("valid") or not source_inputs:
@@ -112,22 +137,35 @@ def audit_xiangqi_release(
                 gate_problems.append(f"independent_validation_code_hash_mismatch:{relative}")
         if not gate.get("validator_hashes"):
             gate_problems.append("independent_validation_code_hash_missing")
+        if not gate.get("runtime_policy_certified"):
+            runtime_policy_problems.append("c2_runtime_policy_not_certified")
+        else:
+            cert_path = manifest_file.parent / "rule_variants/runtime_certificates.json"
+            cert = gate.get("c2_runtime_certificates", {})
+            if (not cert.get("valid") or not cert_path.is_file()
+                    or hashlib.sha256(cert_path.read_bytes()).hexdigest() != cert.get("sha256")):
+                runtime_policy_problems.append("c2_runtime_certificate_missing_or_changed")
     else:
         gate_problems.append("independent_validation_missing")
+        runtime_policy_problems.append("independent_validation_missing")
     technical_ready = not gate_problems and unexpected_duplicate_total == 0 and not unexpected_cross_family
+    experiment_ready = technical_ready and not runtime_policy_problems
     return {
         "manifest": str(manifest_file),
         "per_family": per_family,
         "cross_family_exact_fen_overlap_count": len(cross_family),
         "cross_family_exact_fen_overlaps": cross_family,
-        "expected_d3_m2_overlap_count": len(expected_cross_family),
+        "expected_d3_m2_overlap_count": len(expected_d3_m2),
+        "expected_h2_c2_overlap_count": len(expected_h2_c2),
         "unexpected_cross_family_overlap_count": len(unexpected_cross_family),
         "unexpected_cross_family_overlaps": unexpected_cross_family,
         "unresolved_external_provenance": unresolved,
         "independent_validation_report": str(gate_path),
         "independent_validation_problems": gate_problems,
+        "runtime_policy_problems": runtime_policy_problems,
         "technical_ready": technical_ready,
-        "release_ready": not unresolved and technical_ready,
+        "experiment_ready": experiment_ready,
+        "release_ready": not unresolved and experiment_ready,
         "limitations": [
             "Exact-FEN auditing cannot prove absence of near-duplicate positions.",
             "Training-data contamination cannot be established from local files alone; document source and model-provider policy.",

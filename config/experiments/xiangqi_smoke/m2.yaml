@@ -1,10 +1,10 @@
 task:
-  prompt_version: xiangqi-reasoning-v2
+  prompt_version: xiangqi-m2-recognition-v1
   family: xiangqi-multimodal
   path: data/xiangqi/multimodal/tasks.jsonl
   selection:
     path: data/xiangqi/evaluation_samples/smoke/m2.jsonl
-    sha256: ddaa18fda992d4b80654bb9e0919c2e69186c3d06079606a4221846f480e4509
+    sha256: 71ebeefdd45e62db7e83c04af988d289b54df7cdb6ee3314439fe476d1f7d500
 agent:
   name: direct
   max_tokens: 512
@@ -21,7 +21,6 @@ evaluation:
   input_modes:
   - text
   - chinese-piece-image
-  - latin-piece-image
   verify_with_pikafish: true
   pikafish_depth: 8
   pikafish_timeout: 60.0

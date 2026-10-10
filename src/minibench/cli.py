@@ -551,7 +551,7 @@ def _xiangqi_config_with_overrides(args: argparse.Namespace, family: str) -> dic
     family_options = {
         "history_mode": {"xiangqi-history"},
         "input_modes": {"xiangqi-multimodal"},
-        "oracle_depth": {"xiangqi-rule-variants"},
+        "search_depth": {"xiangqi-rule-variants"},
         "pikafish_depth": set(XIANGQI_CONFIGS) - {"xiangqi-rule-variants"},
         "pikafish_timeout": set(XIANGQI_CONFIGS) - {"xiangqi-rule-variants"},
     }
@@ -571,7 +571,7 @@ def _xiangqi_config_with_overrides(args: argparse.Namespace, family: str) -> dic
         ("history_mode", "history_mode", evaluation),
         ("pikafish_depth", "pikafish_depth", evaluation),
         ("pikafish_timeout", "pikafish_timeout", evaluation),
-        ("oracle_depth", "oracle_depth", evaluation),
+        ("search_depth", "search_depth", evaluation),
     ):
         value = getattr(args, attribute, None)
         if value is not None and (attribute not in family_options or family in family_options[attribute]):
@@ -647,7 +647,7 @@ def _add_xiangqi_run_overrides(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--input-modes", default=None)
     parser.add_argument("--pikafish-depth", type=int, default=None)
     parser.add_argument("--pikafish-timeout", type=float, default=None)
-    parser.add_argument("--oracle-depth", type=int, default=None, help="C2 fixed oracle depth (3).")
+    parser.add_argument("--search-depth", type=int, default=None, help="C2 fixed opponent/search depth (3).")
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--run-name", default=None)
 
