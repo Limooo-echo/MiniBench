@@ -150,7 +150,7 @@ class MahjongTests(unittest.TestCase):
     def test_loader_validates_builtin_tasks(self):
         tasks = load_mahjong_tasks()
 
-        self.assertEqual(len(tasks), 90)
+        self.assertEqual(len(tasks), 600)
         self.assertEqual(
             Counter(
                 (task.tags[0], task.goal, len(task.visible_tiles))
@@ -158,12 +158,12 @@ class MahjongTests(unittest.TestCase):
             ),
             Counter(
                 {
-                    ("easy", "winning_tiles", 0): 15,
-                    ("easy", "max_wait_discard", 0): 15,
-                    ("hard", "winning_tiles", 0): 15,
-                    ("hard", "max_wait_discard", 0): 15,
-                    ("easy", "winning_tiles", 12): 15,
-                    ("easy", "max_ukeire_discard", 12): 15,
+                    ("easy", "winning_tiles", 0): 100,
+                    ("easy", "max_wait_discard", 0): 100,
+                    ("hard", "winning_tiles", 0): 100,
+                    ("hard", "max_wait_discard", 0): 100,
+                    ("easy", "winning_tiles", 12): 100,
+                    ("easy", "max_ukeire_discard", 12): 100,
                 }
             ),
         )
