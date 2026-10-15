@@ -107,9 +107,9 @@ class MahjongMultimodalTests(unittest.TestCase):
         cls.static_tasks = load_mahjong_tasks("data/mahjong/tasks.jsonl")
         cls.tasks = load_mahjong_tasks("data/mahjong/visual_tasks.jsonl")
 
-    def test_visual_dataset_is_an_exact_ninety_task_static_mirror(self):
-        self.assertEqual(len(self.static_tasks), 90)
-        self.assertEqual(len(self.tasks), 90)
+    def test_visual_dataset_is_an_exact_six_hundred_task_static_mirror(self):
+        self.assertEqual(len(self.static_tasks), 600)
+        self.assertEqual(len(self.tasks), 600)
         self.assertTrue(
             all(task.image_path and task.image_path.is_file() for task in self.tasks)
         )
@@ -120,12 +120,12 @@ class MahjongMultimodalTests(unittest.TestCase):
             ),
             Counter(
                 {
-                    ("easy", "winning_tiles", 0): 15,
-                    ("easy", "max_wait_discard", 0): 15,
-                    ("hard", "winning_tiles", 0): 15,
-                    ("hard", "max_wait_discard", 0): 15,
-                    ("easy", "winning_tiles", 12): 15,
-                    ("easy", "max_ukeire_discard", 12): 15,
+                    ("easy", "winning_tiles", 0): 100,
+                    ("easy", "max_wait_discard", 0): 100,
+                    ("hard", "winning_tiles", 0): 100,
+                    ("hard", "max_wait_discard", 0): 100,
+                    ("easy", "winning_tiles", 12): 100,
+                    ("easy", "max_ukeire_discard", 12): 100,
                 }
             ),
         )

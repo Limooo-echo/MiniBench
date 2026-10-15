@@ -160,6 +160,23 @@ def _cell(rows: list[dict], *, cap: float) -> dict:
     }
 
 
+def _rule_mode_cells(rows: list[dict], *, cap: float) -> dict[str, dict]:
+    """Report each frozen rule group on its own 0–1 scale.
+
+    Main aggregation keeps each group's fixed share, including all missing
+    rows.  Subscores divide by that planned share, rather than reporting half
+    of a group's accuracy or redistributing a missing group's weight.
+    """
+    result = {}
+    for group in sorted({row["group"] for row in rows}):
+        subset = [row for row in rows if row["group"] == group]
+        share = math.fsum(row["within_task_weight"] for row in subset)
+        normalized = [dict(row, within_task_weight=row["within_task_weight"] / share)
+                      for row in subset]
+        result[group] = _cell(normalized, cap=cap)
+    return result
+
+
 def _axis(cells: dict, weights: dict, dimension: str) -> dict:
     selected = [(weights[t][dimension], cells[t, dimension]) for t in TASKS
                 if weights[t][dimension] > 0]
@@ -421,6 +438,8 @@ def aggregate_suite(rows: list[dict], weights: dict, *, partial_credit_cap: floa
                 for dimension in DIMENSIONS:
                     subset = [r for r in arch_rows if r["task"] == task and r["dimension"] == dimension]
                     cell = _cell(subset, cap=cap)
+                    if task == "zebra" and dimension == "R":
+                        cell["by_rule_mode"] = _rule_mode_cells(subset, cap=cap)
                     cells[task, dimension] = cell
                     task_scores.append({"profile": profile, "architecture": architecture,
                                         "task": task, "dimension": dimension,

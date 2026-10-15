@@ -1,0 +1,605 @@
+{
+  "source_sha256": "37b2c21437d5fdb0635ba766f4ffc22b279880ac22078220c9685c46f5cd58ad",
+  "records": [
+    {
+      "id": "multimodal-easy-01",
+      "source_task_id": "direct-easy-01",
+      "image": "images/multimodal-easy-01.png",
+      "sha256": "237bc7a5204b22db8bb427e5c5e9d05e4d91a07e6c37f1fb06962041243f0d57"
+    },
+    {
+      "id": "multimodal-easy-02",
+      "source_task_id": "direct-easy-02",
+      "image": "images/multimodal-easy-02.png",
+      "sha256": "76139b8b9411adf679f0d80d2336ccbfd4478dc9a776c5f56bf80b2f232cdb45"
+    },
+    {
+      "id": "multimodal-easy-03",
+      "source_task_id": "direct-easy-03",
+      "image": "images/multimodal-easy-03.png",
+      "sha256": "3758a3c8739ab24294b5f55183a8aea27cef09b31aa4f74b0bd3229b69ff1d44"
+    },
+    {
+      "id": "multimodal-easy-04",
+      "source_task_id": "direct-easy-04",
+      "image": "images/multimodal-easy-04.png",
+      "sha256": "c65514da0a5d8032bbb93058b399f16271f4d5588b25d28889ca3bedd8320a59"
+    },
+    {
+      "id": "multimodal-easy-05",
+      "source_task_id": "direct-easy-05",
+      "image": "images/multimodal-easy-05.png",
+      "sha256": "d9ba19d284f3ca351f390a5f0169f8c2aeb2a711abc53086fd39665aaa431873"
+    },
+    {
+      "id": "multimodal-easy-06",
+      "source_task_id": "direct-easy-06",
+      "image": "images/multimodal-easy-06.png",
+      "sha256": "ec9d1f13e5f8a2406f840d237458eb073082526ac845e88bd9e89e1057d1ab3d"
+    },
+    {
+      "id": "multimodal-easy-07",
+      "source_task_id": "direct-easy-07",
+      "image": "images/multimodal-easy-07.png",
+      "sha256": "b5e76d731cbe5205eb0e021f1ba3725f1dd49c755fd550b687dc7fc1930ba598"
+    },
+    {
+      "id": "multimodal-easy-08",
+      "source_task_id": "direct-easy-08",
+      "image": "images/multimodal-easy-08.png",
+      "sha256": "18bcdc426a1f688661e98b1ca3727fc3809716c4b407a3dedf63328d96d935cb"
+    },
+    {
+      "id": "multimodal-easy-09",
+      "source_task_id": "direct-easy-09",
+      "image": "images/multimodal-easy-09.png",
+      "sha256": "9abb3a93e5ea0e4f57c0d609b58338e3279475aa5eb83f121fddd5c4f7f1048f"
+    },
+    {
+      "id": "multimodal-easy-10",
+      "source_task_id": "direct-easy-10",
+      "image": "images/multimodal-easy-10.png",
+      "sha256": "7024d92531706abf81da212f1644e3619b9b881e0f7f25d0865ce32f2edbb3fb"
+    },
+    {
+      "id": "multimodal-easy-11",
+      "source_task_id": "direct-easy-11",
+      "image": "images/multimodal-easy-11.png",
+      "sha256": "0f7e42dbcab6d0fff9f2cafd2aac72303188ce96889695c7d29c206dc9b1f99d"
+    },
+    {
+      "id": "multimodal-easy-12",
+      "source_task_id": "direct-easy-12",
+      "image": "images/multimodal-easy-12.png",
+      "sha256": "dbd1510ff9554887d65204a94efce7421307057261a185b89dccde4f5cff8ebb"
+    },
+    {
+      "id": "multimodal-easy-13",
+      "source_task_id": "direct-easy-13",
+      "image": "images/multimodal-easy-13.png",
+      "sha256": "822ec80d894aa7a84f8e854cd040172d0ab4edefe88a682549f1a7ff7bc252fb"
+    },
+    {
+      "id": "multimodal-easy-14",
+      "source_task_id": "direct-easy-14",
+      "image": "images/multimodal-easy-14.png",
+      "sha256": "22f33ef78da3710b24235f3aad16d02ba3cd10020485460da85170907541ad79"
+    },
+    {
+      "id": "multimodal-easy-15",
+      "source_task_id": "direct-easy-15",
+      "image": "images/multimodal-easy-15.png",
+      "sha256": "247040d9c49cb0bea37f31bb95a4105ca598951033745b91e3db229182fe2f1c"
+    },
+    {
+      "id": "multimodal-easy-16",
+      "source_task_id": "direct-easy-16",
+      "image": "images/multimodal-easy-16.png",
+      "sha256": "9c3adfea302f0e3ef298a9de2dc2420eb10be385db376dee75b745c9ce61e16c"
+    },
+    {
+      "id": "multimodal-easy-17",
+      "source_task_id": "direct-easy-17",
+      "image": "images/multimodal-easy-17.png",
+      "sha256": "a4bad222503d2c92ce6f650d55149b15002e08c37052d8ed9565d776e997ec6b"
+    },
+    {
+      "id": "multimodal-easy-18",
+      "source_task_id": "direct-easy-18",
+      "image": "images/multimodal-easy-18.png",
+      "sha256": "2c05af7813a9ae2ad4b1dc7178f96c400136a3be47a8adc1ae0521cf73158a9c"
+    },
+    {
+      "id": "multimodal-easy-19",
+      "source_task_id": "direct-easy-19",
+      "image": "images/multimodal-easy-19.png",
+      "sha256": "782cc13c548b02584135bce1b4abd63a6d5748de5117bfb5ad013047246dacbd"
+    },
+    {
+      "id": "multimodal-easy-20",
+      "source_task_id": "direct-easy-20",
+      "image": "images/multimodal-easy-20.png",
+      "sha256": "02a51a8262436105afe3d62c33ff7a51b8a9d904d23e2e8c98222a3ab71b6d80"
+    },
+    {
+      "id": "multimodal-easy-21",
+      "source_task_id": "direct-easy-21",
+      "image": "images/multimodal-easy-21.png",
+      "sha256": "bfc7fd7d730cfaf06707c0867cf6c8b68c7efd934a975e19f583107a0a9a9ef4"
+    },
+    {
+      "id": "multimodal-easy-22",
+      "source_task_id": "direct-easy-22",
+      "image": "images/multimodal-easy-22.png",
+      "sha256": "535d9082ca8bf15b6f6e8cc360bfd6fed217595937c082a99e52b3ed36b95dde"
+    },
+    {
+      "id": "multimodal-easy-23",
+      "source_task_id": "direct-easy-23",
+      "image": "images/multimodal-easy-23.png",
+      "sha256": "c7dda53df87f8b2859230fd71f67bf009b17a9c20d5c59fda3436843497ee68f"
+    },
+    {
+      "id": "multimodal-easy-24",
+      "source_task_id": "direct-easy-24",
+      "image": "images/multimodal-easy-24.png",
+      "sha256": "29ff6935835db61731f1e179b006f59d60c286efbccda5157793f9daca19645b"
+    },
+    {
+      "id": "multimodal-easy-25",
+      "source_task_id": "direct-easy-25",
+      "image": "images/multimodal-easy-25.png",
+      "sha256": "d354b35d71ca850e49d3d86eac6f323bb9f4c8098c9a488cfe50a50e9a494a65"
+    },
+    {
+      "id": "multimodal-easy-26",
+      "source_task_id": "direct-easy-26",
+      "image": "images/multimodal-easy-26.png",
+      "sha256": "c8ff4f0968ffe9740a2759cdb606b4fb7b8314f102fe913ed205032d706d171f"
+    },
+    {
+      "id": "multimodal-easy-27",
+      "source_task_id": "direct-easy-27",
+      "image": "images/multimodal-easy-27.png",
+      "sha256": "4494b1e8864fa339833c3057a9b11ef5cfb050e7affb20a7dde6510a071848ca"
+    },
+    {
+      "id": "multimodal-easy-28",
+      "source_task_id": "direct-easy-28",
+      "image": "images/multimodal-easy-28.png",
+      "sha256": "fe9b03f32ec04247b162f3e513cf85ad8f6bc3c0da55e3a4299e77e355e32264"
+    },
+    {
+      "id": "multimodal-easy-29",
+      "source_task_id": "direct-easy-29",
+      "image": "images/multimodal-easy-29.png",
+      "sha256": "9f4876c922da9fb3b5256db77d7a1b2d218a3b2c7e4860fcb9c469898434d8d0"
+    },
+    {
+      "id": "multimodal-easy-30",
+      "source_task_id": "direct-easy-30",
+      "image": "images/multimodal-easy-30.png",
+      "sha256": "4f03ce5571a1b8f9c28bc3b1c5a54153c6dbe406c3482441fd590a60318751ca"
+    },
+    {
+      "id": "multimodal-easy-31",
+      "source_task_id": "direct-easy-31",
+      "image": "images/multimodal-easy-31.png",
+      "sha256": "2bc0cfded6c29dbfb27b5d862cce9736d38570a72f5246f23f8b098cb8b93bf6"
+    },
+    {
+      "id": "multimodal-easy-32",
+      "source_task_id": "direct-easy-32",
+      "image": "images/multimodal-easy-32.png",
+      "sha256": "cf5fb08b2f61450cf8ab975fe0e53d46f6c55608e48b411c2fc85f7febba4e0f"
+    },
+    {
+      "id": "multimodal-easy-33",
+      "source_task_id": "direct-easy-33",
+      "image": "images/multimodal-easy-33.png",
+      "sha256": "7a8ee253620e639c25d7ced0067a509ab1212bd6093bfbd7e0f9092720736676"
+    },
+    {
+      "id": "multimodal-easy-34",
+      "source_task_id": "direct-easy-34",
+      "image": "images/multimodal-easy-34.png",
+      "sha256": "dabbc76b631b600e81728191095b7739b5e0ae0201a3fe79e14558ee32272df5"
+    },
+    {
+      "id": "multimodal-medium-01",
+      "source_task_id": "direct-medium-01",
+      "image": "images/multimodal-medium-01.png",
+      "sha256": "ac488848ddec05985d408ecb70e6e9a27071df221ee6566efb6c3d7db9e69009"
+    },
+    {
+      "id": "multimodal-medium-02",
+      "source_task_id": "direct-medium-02",
+      "image": "images/multimodal-medium-02.png",
+      "sha256": "0ed84dfee9df797f184b5733f28ecb455f024465cc4d36727d5f325731aa30a6"
+    },
+    {
+      "id": "multimodal-medium-03",
+      "source_task_id": "direct-medium-03",
+      "image": "images/multimodal-medium-03.png",
+      "sha256": "5260d772bf8309a735e25a73de7e3f53ae4f46a49c8d4a6e1c23e180fe510070"
+    },
+    {
+      "id": "multimodal-medium-04",
+      "source_task_id": "direct-medium-04",
+      "image": "images/multimodal-medium-04.png",
+      "sha256": "82ec35bb3819436a755e5148c25913332d9629b63ec425571c2bda0ceab189b4"
+    },
+    {
+      "id": "multimodal-medium-05",
+      "source_task_id": "direct-medium-05",
+      "image": "images/multimodal-medium-05.png",
+      "sha256": "5be1ced924c956f78ba0fe52da7a54d4bdce4b31e3af57ff7ddab8687adbbd23"
+    },
+    {
+      "id": "multimodal-medium-06",
+      "source_task_id": "direct-medium-06",
+      "image": "images/multimodal-medium-06.png",
+      "sha256": "7ca0cd5dd22a22938a5c45b81483f82d9ca6fa04e9df39e7f201948a2e2f9997"
+    },
+    {
+      "id": "multimodal-medium-07",
+      "source_task_id": "direct-medium-07",
+      "image": "images/multimodal-medium-07.png",
+      "sha256": "ff65f7c9bdf5031da5a5289532e91d1812ec959489e7d1d2e8c240fb6b338746"
+    },
+    {
+      "id": "multimodal-medium-08",
+      "source_task_id": "direct-medium-08",
+      "image": "images/multimodal-medium-08.png",
+      "sha256": "b10c0bb3d28a3e52fcb068cf1abf5feb9c4dc88e78bd20e8e85d0523c6d532e4"
+    },
+    {
+      "id": "multimodal-medium-09",
+      "source_task_id": "direct-medium-09",
+      "image": "images/multimodal-medium-09.png",
+      "sha256": "12bc0a0870c078af0bbc0db81261025ac024d43e3222436d6c727358fb927816"
+    },
+    {
+      "id": "multimodal-medium-10",
+      "source_task_id": "direct-medium-10",
+      "image": "images/multimodal-medium-10.png",
+      "sha256": "a616d15e69bc56ffd64234dd49a61d4989ac55427e726931bdf497cac8c1b0f5"
+    },
+    {
+      "id": "multimodal-medium-11",
+      "source_task_id": "direct-medium-11",
+      "image": "images/multimodal-medium-11.png",
+      "sha256": "22dd2fdea32b7eb8e0e09c38199b7891409b982c17466771df2a21356b1b3daa"
+    },
+    {
+      "id": "multimodal-medium-12",
+      "source_task_id": "direct-medium-12",
+      "image": "images/multimodal-medium-12.png",
+      "sha256": "6af2505fbb3cc0a2783c24e40e1b06f6dbab1d5291532fac83ae854f1a2160c3"
+    },
+    {
+      "id": "multimodal-medium-13",
+      "source_task_id": "direct-medium-13",
+      "image": "images/multimodal-medium-13.png",
+      "sha256": "f1152b2fbebc50c982807d9f513644451582b7f491bf79e268fb765cc47bfb3b"
+    },
+    {
+      "id": "multimodal-medium-14",
+      "source_task_id": "direct-medium-14",
+      "image": "images/multimodal-medium-14.png",
+      "sha256": "0d15d9f06eab04920436efbdbb2b0cd995948646152e6b15551a63f16965c2aa"
+    },
+    {
+      "id": "multimodal-medium-15",
+      "source_task_id": "direct-medium-15",
+      "image": "images/multimodal-medium-15.png",
+      "sha256": "f874d43a75a5470833383e66ce62bb64c83366f4b8a0349f53dc95d3a3865318"
+    },
+    {
+      "id": "multimodal-medium-16",
+      "source_task_id": "direct-medium-16",
+      "image": "images/multimodal-medium-16.png",
+      "sha256": "4cc2c60e1e97db1541ca18c63ff476a5df9076f71b115da121fc2eddf91a70f6"
+    },
+    {
+      "id": "multimodal-medium-17",
+      "source_task_id": "direct-medium-17",
+      "image": "images/multimodal-medium-17.png",
+      "sha256": "ae1b365f61e1b1d2704de70f272a4eea2960ba1bfb55a440850e2ae55f203e8f"
+    },
+    {
+      "id": "multimodal-medium-18",
+      "source_task_id": "direct-medium-18",
+      "image": "images/multimodal-medium-18.png",
+      "sha256": "01b20fd71d63c3310c62e44dc113ce00cb6d2f85843b29350c4f979298c32168"
+    },
+    {
+      "id": "multimodal-medium-19",
+      "source_task_id": "direct-medium-19",
+      "image": "images/multimodal-medium-19.png",
+      "sha256": "beecefed265e06f96fdffa4ce079fcf31d02326ec051aa0eafd25069fe146a7a"
+    },
+    {
+      "id": "multimodal-medium-20",
+      "source_task_id": "direct-medium-20",
+      "image": "images/multimodal-medium-20.png",
+      "sha256": "a5bf3291995f2a4a4980e03d6b033c9124600b7210ad01d7c51823579d577d2b"
+    },
+    {
+      "id": "multimodal-medium-21",
+      "source_task_id": "direct-medium-21",
+      "image": "images/multimodal-medium-21.png",
+      "sha256": "b3de9eeacff43182b7aa893fdf41087294460a3d7c00d7a554a1561dc69c01ef"
+    },
+    {
+      "id": "multimodal-medium-22",
+      "source_task_id": "direct-medium-22",
+      "image": "images/multimodal-medium-22.png",
+      "sha256": "ea05bc4c44cbac31d1a4d5ae1019ff5421932fab4493a34a6f7e74335fa11b08"
+    },
+    {
+      "id": "multimodal-medium-23",
+      "source_task_id": "direct-medium-23",
+      "image": "images/multimodal-medium-23.png",
+      "sha256": "14351a4ba0a5b80281f393293d03ebf0d8e6eadd964bc93ffa38ceade4847d7e"
+    },
+    {
+      "id": "multimodal-medium-24",
+      "source_task_id": "direct-medium-24",
+      "image": "images/multimodal-medium-24.png",
+      "sha256": "fa381f75375ef8acbc7a2a25fe8d95c1401cefa47d55a955cdc90d100c91d7ce"
+    },
+    {
+      "id": "multimodal-medium-25",
+      "source_task_id": "direct-medium-25",
+      "image": "images/multimodal-medium-25.png",
+      "sha256": "608071f36194e17bd0af4548303704d5167f6d6074234dfba5ae22d60ea5f2de"
+    },
+    {
+      "id": "multimodal-medium-26",
+      "source_task_id": "direct-medium-26",
+      "image": "images/multimodal-medium-26.png",
+      "sha256": "062f0b4e6c7d709737c3c75c53c07f30fcfe882ce0cbb9a1417e50065e4c5e6c"
+    },
+    {
+      "id": "multimodal-medium-27",
+      "source_task_id": "direct-medium-27",
+      "image": "images/multimodal-medium-27.png",
+      "sha256": "56f003abe462c77f60234d8e280100da9a54055dfcff18f1183673bfe6c2c869"
+    },
+    {
+      "id": "multimodal-medium-28",
+      "source_task_id": "direct-medium-28",
+      "image": "images/multimodal-medium-28.png",
+      "sha256": "5f1e6bc70b1a2df79eeff82a2809835aa93b1696bc7787a92e761a0407bb7d91"
+    },
+    {
+      "id": "multimodal-medium-29",
+      "source_task_id": "direct-medium-29",
+      "image": "images/multimodal-medium-29.png",
+      "sha256": "a68d621be0efcda5e76394468de9a2b5645deb0d3d0ab739bdaf00101ee17db6"
+    },
+    {
+      "id": "multimodal-medium-30",
+      "source_task_id": "direct-medium-30",
+      "image": "images/multimodal-medium-30.png",
+      "sha256": "056721479c4b883504882ff6ab7728ecdedce5671a204247c910f7b625d86f78"
+    },
+    {
+      "id": "multimodal-medium-31",
+      "source_task_id": "direct-medium-31",
+      "image": "images/multimodal-medium-31.png",
+      "sha256": "8a59cbc8512b68bb648d44f2f664b5e6398bc90b3a4fd8ae15e3ccbd4b7845b7"
+    },
+    {
+      "id": "multimodal-medium-32",
+      "source_task_id": "direct-medium-32",
+      "image": "images/multimodal-medium-32.png",
+      "sha256": "959fbb2d3d41b4b3ca45cf3ba384edb988375225356c1799a598b872c5c97fc8"
+    },
+    {
+      "id": "multimodal-medium-33",
+      "source_task_id": "direct-medium-33",
+      "image": "images/multimodal-medium-33.png",
+      "sha256": "0fb54aa444cd736d3de680fdd5b6dd3e130f8ec0e7437bbb886459a93249fe21"
+    },
+    {
+      "id": "multimodal-hard-01",
+      "source_task_id": "direct-hard-01",
+      "image": "images/multimodal-hard-01.png",
+      "sha256": "70b8abd4bbbacbdc07632c91b5fcfa022e6b3230837c0cc7d398b7bf76fd975b"
+    },
+    {
+      "id": "multimodal-hard-02",
+      "source_task_id": "direct-hard-02",
+      "image": "images/multimodal-hard-02.png",
+      "sha256": "2030abee65cf47110201db167165c378561fbe605d3dca29784674753d71aaef"
+    },
+    {
+      "id": "multimodal-hard-03",
+      "source_task_id": "direct-hard-03",
+      "image": "images/multimodal-hard-03.png",
+      "sha256": "b399889f498e0bb39f707d3563de31d4db64c2b1a65d8f9ffb1565fdc17c547c"
+    },
+    {
+      "id": "multimodal-hard-04",
+      "source_task_id": "direct-hard-04",
+      "image": "images/multimodal-hard-04.png",
+      "sha256": "e87204c6ecce038c89882adf91dc57a4073d2f491bf810a8a0e873da846f41ae"
+    },
+    {
+      "id": "multimodal-hard-05",
+      "source_task_id": "direct-hard-05",
+      "image": "images/multimodal-hard-05.png",
+      "sha256": "232ad019a59ea55a599dd3e5c6aa85777145751790a50160b50614923096c0d0"
+    },
+    {
+      "id": "multimodal-hard-06",
+      "source_task_id": "direct-hard-06",
+      "image": "images/multimodal-hard-06.png",
+      "sha256": "a95296f55954b95d19241af07a9104315d8d69db8f360fc969ec8b1470d40bf8"
+    },
+    {
+      "id": "multimodal-hard-07",
+      "source_task_id": "direct-hard-07",
+      "image": "images/multimodal-hard-07.png",
+      "sha256": "d07ee78651ca7503a60063479816615ee747c652bf303e77b18e72ca6bb04c8d"
+    },
+    {
+      "id": "multimodal-hard-08",
+      "source_task_id": "direct-hard-08",
+      "image": "images/multimodal-hard-08.png",
+      "sha256": "30732221f3b95967517fdf879e0dd9d88aa32436a99ca90f56e5ec281ba7e8e0"
+    },
+    {
+      "id": "multimodal-hard-09",
+      "source_task_id": "direct-hard-09",
+      "image": "images/multimodal-hard-09.png",
+      "sha256": "fa21ca741dd0087cc26af1499117ff8e15922e30b7d6504da453ecc09890a1b0"
+    },
+    {
+      "id": "multimodal-hard-10",
+      "source_task_id": "direct-hard-10",
+      "image": "images/multimodal-hard-10.png",
+      "sha256": "ef6c98a28f0c328b30c404cd5e80045042a2ce8911f3330357f926199049f16e"
+    },
+    {
+      "id": "multimodal-hard-11",
+      "source_task_id": "direct-hard-11",
+      "image": "images/multimodal-hard-11.png",
+      "sha256": "8de12ae036e0e74689446e8564f16c0f8732ee81255ffc0c9022f104766e103a"
+    },
+    {
+      "id": "multimodal-hard-12",
+      "source_task_id": "direct-hard-12",
+      "image": "images/multimodal-hard-12.png",
+      "sha256": "1e2500ff3d656be8dd3e2e25f25f4f4ddd0e171d706e0548ff09e7dc1fdee3bf"
+    },
+    {
+      "id": "multimodal-hard-13",
+      "source_task_id": "direct-hard-13",
+      "image": "images/multimodal-hard-13.png",
+      "sha256": "d32b65a8ad3c6fa78578464ce3ba2e9cd128121b34937b73efe1f6433f73cbd4"
+    },
+    {
+      "id": "multimodal-hard-14",
+      "source_task_id": "direct-hard-14",
+      "image": "images/multimodal-hard-14.png",
+      "sha256": "c56dfb0f107d31d3491c1d1ac593c2efb8f03bb8d1e3145881491dc3dd94ca00"
+    },
+    {
+      "id": "multimodal-hard-15",
+      "source_task_id": "direct-hard-15",
+      "image": "images/multimodal-hard-15.png",
+      "sha256": "fd474739b45b6559f0d47df44c2f767080426df8a6454ec826ab81cb1eaca952"
+    },
+    {
+      "id": "multimodal-hard-16",
+      "source_task_id": "direct-hard-16",
+      "image": "images/multimodal-hard-16.png",
+      "sha256": "39e820ef6308aa3d1c225e91a20c12747f8909ec2cf4a0d9028dfb583f5af038"
+    },
+    {
+      "id": "multimodal-hard-17",
+      "source_task_id": "direct-hard-17",
+      "image": "images/multimodal-hard-17.png",
+      "sha256": "9451f0db98968545f0bd852cb7310386853e9b997ca9a643ec24e29326f02985"
+    },
+    {
+      "id": "multimodal-hard-18",
+      "source_task_id": "direct-hard-18",
+      "image": "images/multimodal-hard-18.png",
+      "sha256": "5c51ea3ee47b61e2f2f1e30d100f351d615fe49d9151aea32beee73abac38a39"
+    },
+    {
+      "id": "multimodal-hard-19",
+      "source_task_id": "direct-hard-19",
+      "image": "images/multimodal-hard-19.png",
+      "sha256": "8314ac53fc7f4f9a6266bba1f4bc62688c5deb2814de43766615d81d93954bf1"
+    },
+    {
+      "id": "multimodal-hard-20",
+      "source_task_id": "direct-hard-20",
+      "image": "images/multimodal-hard-20.png",
+      "sha256": "d53e7b70cc1ca6e09d660b232964d91999b1b83f7b1e044d5511aacec0912fde"
+    },
+    {
+      "id": "multimodal-hard-21",
+      "source_task_id": "direct-hard-21",
+      "image": "images/multimodal-hard-21.png",
+      "sha256": "4d4be5d8682720ee11d2abc82146836408325b9f2ecba95f8c3810bdd73e0bbb"
+    },
+    {
+      "id": "multimodal-hard-22",
+      "source_task_id": "direct-hard-22",
+      "image": "images/multimodal-hard-22.png",
+      "sha256": "e694d7038db878e1e6b46c53086e9bab2282075332566a753df915292420814f"
+    },
+    {
+      "id": "multimodal-hard-23",
+      "source_task_id": "direct-hard-23",
+      "image": "images/multimodal-hard-23.png",
+      "sha256": "1c0ac99338fd7151cf5efd06f02a4a92b7f60ba5d3bd25bf1080c5ea8ea93b49"
+    },
+    {
+      "id": "multimodal-hard-24",
+      "source_task_id": "direct-hard-24",
+      "image": "images/multimodal-hard-24.png",
+      "sha256": "408fb4c267daa28f8f939c12f753e44401426c1e69048fc4216eaea6e8ac65c2"
+    },
+    {
+      "id": "multimodal-hard-25",
+      "source_task_id": "direct-hard-25",
+      "image": "images/multimodal-hard-25.png",
+      "sha256": "10f57a5f4543163925e262c5d9a5868c4664b1ea3964545481cb343bd18f0db7"
+    },
+    {
+      "id": "multimodal-hard-26",
+      "source_task_id": "direct-hard-26",
+      "image": "images/multimodal-hard-26.png",
+      "sha256": "0bd8927766a857d949675a582b7875fa81e3f06e13d2b87ba39c84acbce510ea"
+    },
+    {
+      "id": "multimodal-hard-27",
+      "source_task_id": "direct-hard-27",
+      "image": "images/multimodal-hard-27.png",
+      "sha256": "68b7f18a3ffa3c5cef39e0e52a1d3cc6605e2471272a90bf0f8fbd4071fdccc5"
+    },
+    {
+      "id": "multimodal-hard-28",
+      "source_task_id": "direct-hard-28",
+      "image": "images/multimodal-hard-28.png",
+      "sha256": "bc63eb64ec5dd14b589f107d7ea3b90a3396761b9b7ae60962a9fcfe6a13255d"
+    },
+    {
+      "id": "multimodal-hard-29",
+      "source_task_id": "direct-hard-29",
+      "image": "images/multimodal-hard-29.png",
+      "sha256": "2988f2cfc9d052de4e5d51eee7573b548f0dc3589212f33c89cf34b413470e33"
+    },
+    {
+      "id": "multimodal-hard-30",
+      "source_task_id": "direct-hard-30",
+      "image": "images/multimodal-hard-30.png",
+      "sha256": "339e1bcce9758f1960b23a2957f3ce057a51d20a1fa42a684ef8dac8252c053c"
+    },
+    {
+      "id": "multimodal-hard-31",
+      "source_task_id": "direct-hard-31",
+      "image": "images/multimodal-hard-31.png",
+      "sha256": "e0a00cd79ac57c9a864cbf5cef4ce9a34e42b593465d36d284e8fc0849b64c64"
+    },
+    {
+      "id": "multimodal-hard-32",
+      "source_task_id": "direct-hard-32",
+      "image": "images/multimodal-hard-32.png",
+      "sha256": "40c292812e96fbf0a2818f34fc1296a2f0ecd29cc06f079765800348b7e7cbf1"
+    },
+    {
+      "id": "multimodal-hard-33",
+      "source_task_id": "direct-hard-33",
+      "image": "images/multimodal-hard-33.png",
+      "sha256": "7227312880971ca9df2a6b67ef69f63a3bccd66dc996e1a02b72ec5cc711c1c3"
+    }
+  ]
+}

@@ -488,5 +488,154 @@ class ScoringSuiteTests(unittest.TestCase):
                         "item_scores.jsonl").read_text(encoding="utf-8").splitlines()]
                 self.assertEqual([row["mode"] for row in rows], ["deferred_reasoning"])
 
+    @staticmethod
+    def zebra_rule_task(item, mode="temporary_codebook"):
+        original = {"header": ["House", "Name", "Pet"],
+                    "rows": [["1", "Ada", "Cat"], ["2", "Bo", "Dog"]]}
+        task = {"id": f"{item}--{mode}", "source_id": str(item), "size": "2*2",
+                "puzzle": "Example", "capability": "rule_condition", "rule_mode": mode,
+                "solution": copy.deepcopy(original), "difficulty": "easy"}
+        if mode == "counterfactual_semantics":
+            task.update(validation_status="verified_unique", original_solution=original,
+                        rule_context="First and second house references are swapped.")
+            task["solution"]["rows"] = [["1", "Bo", "Dog"], ["2", "Ada", "Cat"]]
+        return task
+
+    def zebra_rules(self, *, include_counterfactual=True, counterfactual_results=True):
+        modes = ["temporary_codebook"]
+        if include_counterfactual:
+            modes.append("counterfactual_semantics")
+        tasks = [self.zebra_rule_task(i, mode) for mode in modes for i in range(100)]
+        for index, task in enumerate(tasks):
+            task["difficulty"] = ("easy" if index % 100 < 34 else
+                                  "medium" if index % 100 < 67 else "hard")
+        records = [{"task_id": task["id"], "rule_mode": task["rule_mode"],
+                    "correct_cells": 4, "total_cells": 4}
+                   for task in tasks if counterfactual_results
+                   or task["rule_mode"] == "temporary_codebook"]
+        return self.experiment("zebra", "R", tasks=tasks, records=records)
+
+    def test_zebra_rule_roster_has_two_hundred_slots_and_normalized_subscores(self):
+        self.zebra_rules()
+        result = self.run_suite()
+        cell = self.task_score(result, "zebra", "R")
+        self.assertEqual((cell["expected_slots"], cell["available_slots"], cell["score"]), (200, 200, 1))
+        self.assertEqual(set(cell["by_rule_mode"]), {"temporary_codebook", "counterfactual_semantics"})
+        for subscore in cell["by_rule_mode"].values():
+            self.assertEqual(subscore["expected_slots"], 100)
+            self.assertAlmostEqual(subscore["score"], 1)
+            self.assertAlmostEqual(subscore["strict_score"], 1)
+        rows = [json.loads(line) for line in (self.base / "output/item_scores.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual({row["mode"] for row in rows}, {"single"})
+        for group in cell["by_rule_mode"]:
+            self.assertAlmostEqual(sum(row["within_task_weight"] for row in rows if row["group"] == group), .5)
+        report = (self.base / "output/report.md").read_text(encoding="utf-8")
+        self.assertIn("counterfactual_semantics | 1.0000 | 1.0000 | 100.00% | 100/100", report)
+
+    def test_missing_counterfactual_results_retain_half_the_rule_weight(self):
+        self.zebra_rules(counterfactual_results=False)
+        result = self.run_suite()
+        cell = self.task_score(result, "zebra", "R")
+        self.assertEqual((cell["expected_slots"], cell["available_slots"]), (200, 100))
+        self.assertIsNone(cell["score"])
+        self.assertIsNone(cell["strict_score"])
+        self.assertAlmostEqual(cell["coverage"], .5)
+        self.assertAlmostEqual(cell["by_rule_mode"]["temporary_codebook"]["score"], 1)
+        missing = cell["by_rule_mode"]["counterfactual_semantics"]
+        self.assertEqual((missing["expected_slots"], missing["available_slots"], missing["coverage"]), (100, 0, 0))
+        self.assertIsNone(missing["score"])
+        self.assertIsNone(self.architecture(result)["dimensions"]["R"]["score"])
+
+    def test_old_codebook_only_roster_keeps_full_rule_weight(self):
+        self.zebra_rules(include_counterfactual=False)
+        result = self.run_suite()
+        cell = self.task_score(result, "zebra", "R")
+        self.assertEqual((cell["expected_slots"], cell["coverage"]), (100, 1))
+        self.assertAlmostEqual(cell["score"], 1)
+        self.assertEqual(set(cell["by_rule_mode"]), {"temporary_codebook"})
+        self.assertAlmostEqual(cell["by_rule_mode"]["temporary_codebook"]["score"], 1)
+
+    def test_counterfactual_raw_answer_is_scored_against_its_new_gold(self):
+        codebook = self.zebra_rule_task("cb")
+        counterfactual = self.zebra_rule_task("cf", "counterfactual_semantics")
+        old_answer = {"solution": {"House 1": {"Name": "Ada", "Pet": "Cat"},
+                                   "House 2": {"Name": "Bo", "Pet": "Dog"}}}
+        new_answer = {"solution": {"House 1": {"Name": "Bo", "Pet": "Dog"},
+                                   "House 2": {"Name": "Ada", "Pet": "Cat"}}}
+        for label, answer, expected in (("original", old_answer, 0), ("new", new_answer, 1)):
+            with self.subTest(answer=label):
+                self.manifest["experiments"] = []
+                self.experiment("zebra", "R", tasks=[codebook, counterfactual], records=[
+                    {"task_id": codebook["id"], "rule_mode": "temporary_codebook", "raw_output": json.dumps(old_answer)},
+                    {"task_id": counterfactual["id"], "rule_mode": "counterfactual_semantics", "raw_output": json.dumps(answer)}])
+                result = self.run_suite("counterfactual-" + label)
+                cell = self.task_score(result, "zebra", "R")
+                self.assertEqual(cell["by_rule_mode"]["counterfactual_semantics"]["score"], expected)
+                self.assertEqual(cell["score"], (1 + expected) / 2)
+
+    def test_counterfactual_candidates_without_complete_verified_gold_are_excluded(self):
+        codebook = self.zebra_rule_task("cb")
+        invalid_variants = (
+            {"validation_status": "pending_manual_review"}, {"solution": None},
+            {"tags": ["not-scoreable"]}, {"rule_context": "Pending solution validation"},
+            {"solution": {"header": ["House", "Name", "Pet"], "rows": [["1", "Ada", "Cat"]]}},
+        )
+        tasks = [codebook]
+        for index, changes in enumerate(invalid_variants):
+            task = self.zebra_rule_task(f"invalid-{index}", "counterfactual_semantics")
+            task.update(changes)
+            tasks.append(task)
+        self.experiment("zebra", "R", tasks=tasks, records=[])
+        self.save_manifest()
+        suite = load_suite(self.manifest_path)
+        self.assertEqual(len(suite["rows"]), 1)
+        self.assertEqual(len(suite["exclusions"]), len(invalid_variants))
+        self.assertEqual({entry["reason"] for entry in suite["exclusions"]}, {"counterfactual_not_verified_unique"})
+
+    def test_explicit_zebra_history_modes_expand_one_hundred_paired_tasks(self):
+        tasks = [{**self.zebra_rule_task(i), "id": f"h-{i}", "capability": "history_memory",
+                  "rule_mode": None, "clue_turns": ["Ada owns the cat."]} for i in range(100)]
+        modes = ["incremental_state", "deferred_reasoning"]
+        records = [{"task_id": task["id"], "memory_mode": mode,
+                    "correct_cells": 4 if mode == "incremental_state" else 0, "total_cells": 4}
+                   for task in tasks for mode in modes]
+        exp = self.experiment("zebra", "H", tasks=tasks, records=records)
+        exp["protocol"]["evaluation"] = {"memory_modes": modes}
+        exp["runs"][0]["provenance"]["protocol"] = copy.deepcopy(exp["protocol"])
+        result = self.run_suite()
+        cell = self.task_score(result, "zebra", "H")
+        self.assertEqual((cell["expected_slots"], cell["available_slots"]), (200, 200))
+        self.assertAlmostEqual(cell["score"], .5)
+        rows = [json.loads(line) for line in (self.base / "output/item_scores.jsonl").read_text(encoding="utf-8").splitlines()]
+        identities = {(row["item_id"], row["mode"]) for row in rows}
+        self.assertEqual(len(identities), 200)
+        self.assertEqual({row["mode"] for row in rows}, set(modes))
+        for task in tasks:
+            self.assertEqual(sum(row["item_id"] == task["id"] for row in rows), 2)
+
+    def test_missing_explicit_zebra_history_mode_keeps_half_coverage(self):
+        task = {**self.zebra_rule_task("h"), "capability": "history_memory", "rule_mode": None,
+                "clue_turns": ["Ada owns the cat."]}
+        exp = self.experiment("zebra", "H", tasks=[task], records=[
+            {"task_id": task["id"], "memory_mode": "deferred_reasoning", "correct_cells": 4, "total_cells": 4}])
+        exp["protocol"]["evaluation"] = {"memory_modes": ["incremental_state", "deferred_reasoning"]}
+        exp["runs"][0]["provenance"]["protocol"] = copy.deepcopy(exp["protocol"])
+        result = self.run_suite()
+        cell = self.task_score(result, "zebra", "H")
+        self.assertEqual(cell["expected_slots"], 2)
+        self.assertAlmostEqual(cell["coverage"], .5)
+        self.assertIsNone(cell["score"])
+
+    def test_explicit_zebra_history_modes_must_be_supported_and_unique(self):
+        for modes in ([], ["incremental_state", "incremental_state"], ["unknown"], "deferred_reasoning"):
+            with self.subTest(modes=modes):
+                self.manifest["experiments"] = []
+                exp = self.experiment("zebra", "H", tasks=[{
+                    **self.zebra_rule_task("h"), "capability": "history_memory", "rule_mode": None,
+                    "clue_turns": ["Ada owns the cat."]}], records=[])
+                exp["protocol"]["evaluation"] = {"memory_modes": modes}
+                with self.assertRaisesRegex(ValueError, "memory_modes must declare"):
+                    self.run_suite()
+
 if __name__ == "__main__":
     unittest.main()

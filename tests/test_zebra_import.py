@@ -122,5 +122,21 @@ class ZebraImportTests(unittest.TestCase):
             )
 
 
+    def test_target_total_and_clue_bands_are_frozen_before_exclusions(self):
+        self.assertEqual(MODULE.difficulty_targets(100), {"easy": 34, "medium": 33, "hard": 33})
+        sizes = sorted(size for group in MODULE.ZEROEVAL_SIZE_GROUPS.values() for size in group)
+        pool = [{"id": f"{size}-{index:02d}", "size": size,
+                 "puzzle": "\n".join(f"{i}. clue" for i in range(1, index + 2)), "tags": []}
+                for size in sizes for index in range(40)]
+        bands = MODULE.frozen_clue_bands(pool)
+        excluded = {row["id"] for row in pool if row["id"].endswith("-00")}
+        selected = MODULE.select_target_records(pool, target_total=100, seed=20261013,
+                                                exclude_ids=excluded)
+        self.assertEqual(len(selected), 100)
+        self.assertTrue(excluded.isdisjoint(row["id"] for row in selected))
+        self.assertTrue(all(f"clue-band:{bands[row['id']]}" in row["tags"] for row in selected))
+        self.assertEqual(MODULE.build_parser().parse_args(["--target-total", "100"]).target_total, 100)
+
+
 if __name__ == "__main__":
     unittest.main()

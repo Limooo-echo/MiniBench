@@ -20,6 +20,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+zebra-generation = [
+    "z3-solver==4.16.0.0",
+]
 xiangqi-generation = [
     "cchess==1.25.5",
 ]

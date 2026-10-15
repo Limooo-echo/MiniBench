@@ -142,8 +142,13 @@ def _tasks(path: Path, family: str, dim: str) -> tuple[list[dict], list[dict]]:
                         "R": {"rule_condition", "rule"}}[dim]
             if cap not in expected:
                 reason = "different_capability"
-            if dim == "R" and task.get("rule_mode") != "temporary_codebook":
-                reason = "not_temporary_codebook"
+            if dim == "R":
+                rule_mode = task.get("rule_mode")
+                if rule_mode == "counterfactual_semantics":
+                    if not _verified_counterfactual(task):
+                        reason = "counterfactual_not_verified_unique"
+                elif rule_mode != "temporary_codebook":
+                    reason = "unsupported_rule_mode"
         if family == "one_stroke":
             expected = {"D": {"direct"}, "H": {"history_memory"}, "V": {"multimodal"}}[dim]
             if cap not in expected:
@@ -157,7 +162,50 @@ def _tasks(path: Path, family: str, dim: str) -> tuple[list[dict], list[dict]]:
     return selected, excluded
 
 
+def _verified_counterfactual(task: dict) -> bool:
+    """Only admit solver-verified variants with a complete, usable new gold."""
+    if task.get("validation_status") != "verified_unique":
+        return False
+    tags = task.get("tags", [])
+    if (task.get("scoreable") is False or task.get("not_scoreable") is True
+            or any("not-scoreable" in str(tag) or "pending" in str(tag).lower()
+                   for tag in tags)
+            or "pending" in str(task.get("rule_context", "")).lower()):
+        return False
+    try:
+        from minibench.datasets.zebra.dataset import zebra_task_from_dict
+        parsed = zebra_task_from_dict(task)
+    except (ValueError, TypeError, KeyError):
+        return False
+    houses, attributes = (int(value) for value in parsed.size.split("*"))
+    solution = parsed.solution
+    return (len(solution.rows) == houses and len(solution.header) == attributes + 1
+            and [row[0] for row in solution.rows] == [str(i) for i in range(1, houses + 1)]
+            and all(len({row[column] for row in solution.rows}) == houses
+                    for column in range(1, len(solution.header))))
+
+
+def _condition_modes(exp: dict, family: str, dim: str) -> tuple[str, ...]:
+    """Preserve old Zebra H cohorts, while honoring an explicit frozen roster."""
+    modes = CONDITIONS[family, dim][1]
+    if family == "zebra" and dim == "H":
+        evaluation = exp["protocol"].get("evaluation", {})
+        if not isinstance(evaluation, dict):
+            raise ValueError(f"{exp['id']}: protocol.evaluation must be a mapping")
+        if "memory_modes" in evaluation:
+            declared = evaluation["memory_modes"]
+            supported = {"incremental_state", "deferred_reasoning"}
+            if (not isinstance(declared, list) or not declared
+                    or not all(isinstance(mode, str) for mode in declared)
+                    or len(set(declared)) != len(declared) or set(declared) - supported):
+                raise ValueError(f"{exp['id']}: memory_modes must declare unique supported Zebra history modes")
+            modes = tuple(declared)
+    return modes
+
+
 def _group(task: dict, family: str, dim: str) -> str:
+    if family == "zebra" and dim == "R":
+        return task["rule_mode"]
     if family == "mahjong":
         return str(task.get("goal", "unspecified"))
     if family == "one_stroke":
@@ -191,7 +239,8 @@ def _record_mode(record: dict, family: str, dim: str) -> str | None:
         return None
     if dim == "D" and record.get("ruleset") not in (None, "standard"):
         return None
-    if family == "zebra" and dim == "R" and record.get("rule_mode") not in (None, "temporary_codebook"):
+    if family == "zebra" and dim == "R" and record.get("rule_mode") not in (
+            None, "temporary_codebook", "counterfactual_semantics"):
         return None
     if family == "mahjong":
         return record.get("input_mode")
@@ -246,14 +295,15 @@ def load_suite(path: Path) -> dict:
         family, dim = exp.get("family"), exp.get("dimension")
         if (family, dim) not in CONDITIONS:
             raise ValueError(f"Unsupported v1 condition: {family}/{dim}")
-        task_family, modes = CONDITIONS[family, dim]
+        task_family = CONDITIONS[family, dim][0]
         if (task_family, dim) in seen_cells:
             raise ValueError(f"Only one frozen experiment per task/dimension: {task_family}/{dim}")
         seen_cells.add((task_family, dim))
-        if "modes" in exp and tuple(exp["modes"]) != modes:
-            raise ValueError(f"{exp_id}: v1 modes are fixed to {modes}")
         if not isinstance(exp.get("protocol"), dict) or not exp["protocol"]:
             raise ValueError(f"{exp_id}: declare the original evaluation protocol")
+        modes = _condition_modes(exp, family, dim)
+        if "modes" in exp and tuple(exp["modes"]) != modes:
+            raise ValueError(f"{exp_id}: v1 modes are fixed to {modes}")
         dataset = exp.get("dataset", {})
         data_path = _path(path.parent, dataset.get("path"))
         data_hash = file_hash(data_path)

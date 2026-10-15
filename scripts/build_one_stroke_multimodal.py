@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from minibench.datasets.one_stroke.dataset import one_stroke_task_from_dict
 from minibench.datasets.one_stroke.multimodal import (
@@ -11,6 +15,7 @@ from minibench.datasets.one_stroke.multimodal import (
     write_contact_sheet,
     write_one_stroke_input_png,
 )
+from scripts.build_one_stroke_direct_history import legacy_direct_records
 
 
 def build_multimodal_dataset(
@@ -29,10 +34,14 @@ def build_multimodal_dataset(
         for line in source_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    if len(source_records) != 30:
-        raise ValueError("Multimodal must be derived from exactly 30 direct records")
+    if not source_records:
+        raise ValueError("Multimodal requires a non-empty direct collection")
+    if len({raw["id"] for raw in source_records}) != len(source_records):
+        raise ValueError("Multimodal source contains duplicate direct IDs")
 
     image_root = output_path.parent / "images"
+    legacy_by_id = {raw["id"]: raw for raw in legacy_direct_records()}
+    legacy_images = Path(__file__).resolve().parents[1] / "data/one_stroke/images"
     records: list[dict[str, object]] = []
     image_paths: list[Path] = []
     for raw in source_records:
@@ -72,7 +81,16 @@ def build_multimodal_dataset(
             }
         )
         image_path = image_root / f"{task_id}.png"
-        write_one_stroke_input_png(render_task, image_path)
+        legacy = legacy_by_id.get(source_id)
+        original_image = legacy_images / f"{task_id}.png"
+        if legacy is not None and original_image.is_file() and all(
+            raw.get(key) == legacy.get(key)
+            for key in ("vertices", "edges", "start", "end", "solution_exists", "solution_path")
+        ):
+            image_path.parent.mkdir(parents=True, exist_ok=True)
+            image_path.write_bytes(original_image.read_bytes())
+        else:
+            write_one_stroke_input_png(render_task, image_path)
         image_paths.append(image_path)
         records.append(record)
 
@@ -80,9 +98,25 @@ def build_multimodal_dataset(
     output_path.write_text(
         "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
         encoding="utf-8",
+        newline="\n",
     )
     if contact_sheet is not None:
         write_contact_sheet(image_paths, contact_sheet)
+        # Small, readable sheets cover every image for human visual QA.
+        for index in range(0, len(image_paths), 20):
+            page = Path(contact_sheet).with_name(
+                f"{Path(contact_sheet).stem}-{index // 20 + 1:02d}.png"
+            )
+            write_contact_sheet(image_paths[index:index + 20], page, columns=4, thumbnail_size=320)
+    report = {
+        "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        "records": [{"id": raw["id"], "source_task_id": raw["source_task_id"],
+                     "image": raw["image"], "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                    for raw, path in zip(records, image_paths)],
+    }
+    (output_path.parent / "multimodal-validation-20261013.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
     return {
         "source": str(source_path),
         "output": str(output_path),

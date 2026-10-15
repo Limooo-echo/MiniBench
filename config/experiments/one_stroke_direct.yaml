@@ -27,5 +27,5 @@ evaluation:
 
 run:
   output_dir: runs
-  run_name: null
+  run_name: one-stroke-direct-100-20261013
   on_existing: error

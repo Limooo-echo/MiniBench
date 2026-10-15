@@ -22,6 +22,43 @@ ONE_STROKE_RENDERER_VERSION = "multimodal-v3"
 ONE_STROKE_RENDER_SEED = 20260813
 
 
+def one_stroke_layout_issues(
+    task: OneStrokeTask, *, node_clearance: float = 0.19, edge_clearance: float = 0.10,
+) -> list[str]:
+    """Detect ambiguous edge/node overlap without changing the v3 renderer.
+
+    Arc3 edges are quadratic Beziers. Sampling the unshrunk curve is
+    conservative for nonincident nodes and matches the renderer's radii.
+    New dataset candidates use their eventual multimodal IDs, since layouts
+    are keyed by ID. Original released graphs are intentionally grandfathered.
+    """
+    positions = _layout(task)
+    issues: list[str] = []
+    for index, a in enumerate(task.vertices):
+        for b in task.vertices[index + 1:]:
+            if math.dist(positions[a], positions[b]) < node_clearance:
+                issues.append(f"nodes:{a}:{b}")
+    counts = Counter(_canonical_edge(edge) for edge in task.edges)
+    seen: defaultdict[tuple[str, str], int] = defaultdict(int)
+    for a, b in task.edges:
+        key = _canonical_edge((a, b))
+        index = seen[key]
+        seen[key] += 1
+        rad = 0.0 if counts[key] == 1 else 0.22 * (index - (counts[key] - 1) / 2)
+        x1, y1 = positions[a]
+        x2, y2 = positions[b]
+        cx, cy = (x1 + x2) / 2 + rad * (y2 - y1), (y1 + y2) / 2 - rad * (x2 - x1)
+        samples = [
+            ((1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t ** 2 * x2,
+             (1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t ** 2 * y2)
+            for t in (step / 256 for step in range(257))
+        ]
+        for vertex in task.vertices:
+            if vertex not in (a, b) and min(math.dist(positions[vertex], point) for point in samples) < edge_clearance:
+                issues.append(f"edge:{a}:{b}:{index}:behind:{vertex}")
+    return issues
+
+
 def render_one_stroke_input_png(
     task: OneStrokeTask,
 ) -> bytes:

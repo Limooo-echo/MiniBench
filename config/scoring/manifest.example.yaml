@@ -16,7 +16,7 @@ experiments:
   dimension: D
   dataset:
     path: ../../data/zebra/eval.jsonl
-    sha256: 7163d88b25c0b9a86c94ef586b46b623a05da9f80167a86ab02c8a4f77f0b9c1
+    sha256: 9faa81a8926a824ddb167eaa92fc5c7ec42a39f6f2bd09b196a5922236e3596c
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -26,8 +26,8 @@ experiments:
   family: zebra
   dimension: R
   dataset:
-    path: ../../data/zebra/rule_codebook_eval.jsonl
-    sha256: 827dec7ec7e86f89bd7fd635636be1e541f0806256429b19371f9a2229b57794
+    path: ../../data/zebra/rule_eval.jsonl
+    sha256: 8462c2242580613a14bff061df2d0d2fce9d58c588a02f9e94f918750ad8c40f
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -38,11 +38,12 @@ experiments:
   dimension: H
   dataset:
     path: ../../data/zebra/history_eval.jsonl
-    sha256: bc0984980a9d8f5d3f09e17ab95d5878afe06074fb4c53c806fadfe9d62dbb4f
+    sha256: 609a08568e321f356163153c112421fb28522c97b29a8a18d33771e377442f1f
   protocol:
     version: existing-task-protocol-v1
     evaluation:
       memory_modes:
+      - incremental_state
       - deferred_reasoning
       state_max_tokens: 512
       ack_max_tokens: 32
@@ -54,7 +55,7 @@ experiments:
   dimension: D
   dataset:
     path: ../../data/one_stroke/direct.jsonl
-    sha256: 0556189988526c93f062ee93307d37cf8c7d4676df0ff14195f98cb555fa3786
+    sha256: 37b2c21437d5fdb0635ba766f4ffc22b279880ac22078220c9685c46f5cd58ad
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -66,7 +67,7 @@ experiments:
   dimension: H
   dataset:
     path: ../../data/one_stroke/history.jsonl
-    sha256: 3dda677dc64d7217f4eda9481caa5910136deb7f21d1447851819fb363dfcf25
+    sha256: d143a4e3552b075505f27818fe6fa16ec650f9297eb40a45f0d1534ec4041c0e
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -83,7 +84,7 @@ experiments:
   dimension: V
   dataset:
     path: ../../data/one_stroke/multimodal.jsonl
-    sha256: bd07f099ae70a67be645961889f39c57e20c12280b202aa40bfe7363173d206d
+    sha256: 68baf705f12661a4910f8ea9d75d5e82d8d9276f018522a02ea592e8c5343531
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -171,7 +172,7 @@ experiments:
   dimension: D
   dataset:
     path: ../../data/mahjong/tasks.jsonl
-    sha256: f2903f75b25438b8e75ec4316564a5203e277f0089ef2e51a9a1c339ed5d28c2
+    sha256: 5d07b5fdd24800b9f9aff43395159a6cacc7a2ee6f52efa227bebc0018544f70
   protocol:
     version: existing-task-protocol-v1
     evaluation: {}
@@ -181,7 +182,7 @@ experiments:
   dimension: R
   dataset:
     path: ../../data/mahjong_solo/tasks_win.jsonl
-    sha256: 6f3eeffbdfb43c9bba6e6fb54cec3b3db9d53aebbb0cbe921723dce0f53fed32
+    sha256: df407fa4e767c585da7381aff32f363f0829bbf27f7f0d2b56e8cd792751014a
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -193,7 +194,7 @@ experiments:
   dimension: H
   dataset:
     path: ../../data/mahjong_solo/tasks_win.jsonl
-    sha256: 6f3eeffbdfb43c9bba6e6fb54cec3b3db9d53aebbb0cbe921723dce0f53fed32
+    sha256: df407fa4e767c585da7381aff32f363f0829bbf27f7f0d2b56e8cd792751014a
   protocol:
     version: existing-task-protocol-v1
     evaluation:
@@ -204,7 +205,7 @@ experiments:
   dimension: V
   dataset:
     path: ../../data/mahjong/visual_tasks.jsonl
-    sha256: b939e02d9f96ee899207884515d423c15d59f5bcacc5ea70a93a681bb281413d
+    sha256: 1768e4a76f3d181becd11995c768120c362bacd2a0c4ff6b154054a4794afeae
   protocol:
     version: existing-task-protocol-v1
     evaluation:

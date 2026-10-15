@@ -52,7 +52,7 @@ class OneStrokeMultimodalDatasetTests(unittest.TestCase):
         cls.multimodal = load_one_stroke_tasks("data/one_stroke/multimodal.jsonl")
 
     def test_multimodal_is_strictly_paired_with_direct(self):
-        self.assertEqual(len(self.multimodal), 30)
+        self.assertEqual(len(self.multimodal), 100)
         direct_by_id = {task.id: task for task in self.direct}
         for task in self.multimodal:
             source = direct_by_id[task.source_task_id]
@@ -73,8 +73,8 @@ class OneStrokeMultimodalDatasetTests(unittest.TestCase):
     def test_difficulty_and_solvability_balance(self):
         for difficulty in ("easy", "medium", "hard"):
             selected = [task for task in self.multimodal if task.difficulty == difficulty]
-            self.assertEqual(len(selected), 10)
-            self.assertEqual(Counter(task.solution_exists for task in selected), {True: 7, False: 3})
+            self.assertEqual(len(selected), 34 if difficulty == "easy" else 33)
+            self.assertEqual(Counter(task.solution_exists for task in selected), {True: 24 if difficulty == "easy" else 23, False: 10})
 
     def test_only_hard_contains_parallel_edges(self):
         parallel = []
@@ -82,7 +82,8 @@ class OneStrokeMultimodalDatasetTests(unittest.TestCase):
             counts = Counter(tuple(sorted(edge)) for edge in task.edges)
             if max(counts.values()) > 1:
                 parallel.append(task)
-        self.assertEqual([task.id for task in parallel], ["multimodal-hard-03", "multimodal-hard-06"])
+        self.assertTrue(all(task.difficulty == "hard" for task in parallel))
+        self.assertTrue({"multimodal-hard-03", "multimodal-hard-06"} <= {task.id for task in parallel})
 
     def test_image_prompt_does_not_leak_graph_or_metadata(self):
         task = self.multimodal[10]
@@ -135,25 +136,25 @@ class OneStrokeMultimodalEvaluationTests(unittest.TestCase):
     def setUpClass(cls):
         cls.tasks = load_one_stroke_tasks("data/one_stroke/multimodal.jsonl")
 
-    def test_default_image_mode_runs_thirty_results(self):
+    def test_default_image_mode_runs_one_hundred_results(self):
         agent = OracleMultimodalAgent()
 
         results = evaluate_one_stroke_tasks(self.tasks, agent)
 
-        self.assertEqual(len(results), 30)
-        self.assertEqual(agent.image_calls, 30)
+        self.assertEqual(len(results), 100)
+        self.assertEqual(agent.image_calls, 100)
         self.assertEqual({result.input_mode for result in results}, {"image"})
         self.assertTrue(all(result.success for result in results))
 
-    def test_two_modes_expand_to_sixty_results(self):
+    def test_two_modes_expand_to_two_hundred_results(self):
         agent = OracleMultimodalAgent()
         results = evaluate_one_stroke_tasks(
             self.tasks,
             agent,
             input_modes=("text", "image"),
         )
-        self.assertEqual(len(results), 60)
-        self.assertEqual(agent.image_calls, 30)
+        self.assertEqual(len(results), 200)
+        self.assertEqual(agent.image_calls, 100)
         self.assertTrue(all(result.success for result in results))
         self.assertTrue(all(result.graph_transcription_exact for result in results))
         self.assertTrue(all(result.response_schema_valid for result in results))

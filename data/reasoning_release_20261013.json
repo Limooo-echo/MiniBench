@@ -1,0 +1,100 @@
+{
+  "status": "passed",
+  "datasets": {
+    "zebra_direct": {
+      "path": "data/zebra/eval.jsonl",
+      "count": 100,
+      "sha256": "9faa81a8926a824ddb167eaa92fc5c7ec42a39f6f2bd09b196a5922236e3596c"
+    },
+    "zebra_codebook": {
+      "path": "data/zebra/rule_codebook_eval.jsonl",
+      "count": 100,
+      "sha256": "0309b9dfff932104bfe437f524bb34ced88860af8e256ac19c3af75f69c18dcd"
+    },
+    "zebra_counterfactual": {
+      "path": "data/zebra/rule_counterfactual_eval.jsonl",
+      "count": 100,
+      "sha256": "4e02450254cb0ea7f2c10126b9fc606184bbbe696dadd1f70239b299174535af"
+    },
+    "zebra_history": {
+      "path": "data/zebra/history_eval.jsonl",
+      "count": 100,
+      "sha256": "609a08568e321f356163153c112421fb28522c97b29a8a18d33771e377442f1f"
+    },
+    "zebra_rules": {
+      "path": "data/zebra/rule_eval.jsonl",
+      "count": 200,
+      "sha256": "8462c2242580613a14bff061df2d0d2fce9d58c588a02f9e94f918750ad8c40f"
+    },
+    "one_stroke_direct": {
+      "path": "data/one_stroke/direct.jsonl",
+      "count": 100,
+      "sha256": "37b2c21437d5fdb0635ba766f4ffc22b279880ac22078220c9685c46f5cd58ad"
+    },
+    "one_stroke_history": {
+      "path": "data/one_stroke/history.jsonl",
+      "count": 100,
+      "sha256": "d143a4e3552b075505f27818fe6fa16ec650f9297eb40a45f0d1534ec4041c0e"
+    },
+    "one_stroke_visual": {
+      "path": "data/one_stroke/multimodal.jsonl",
+      "count": 100,
+      "sha256": "68baf705f12661a4910f8ea9d75d5e82d8d9276f018522a02ea592e8c5343531"
+    }
+  },
+  "difficulty_quotas": {
+    "easy": 34,
+    "medium": 33,
+    "hard": 33
+  },
+  "zebra_semantic_records_verified": 400,
+  "zebra_source": {
+    "records": 1000,
+    "sha256": "545cd5cce9c54575c7f74769b8f1250b8bb94f5745519c83b99b8db01f95924d"
+  },
+  "counterfactual_paired_sources": 69,
+  "counterfactual_supplemental_sources": [
+    "lgp-test-3x2-26",
+    "lgp-test-3x3-12",
+    "lgp-test-3x3-24",
+    "lgp-test-3x5-0",
+    "lgp-test-3x5-23",
+    "lgp-test-3x6-12",
+    "lgp-test-3x6-20",
+    "lgp-test-4x2-27",
+    "lgp-test-4x2-39",
+    "lgp-test-4x2-5",
+    "lgp-test-4x3-21",
+    "lgp-test-4x3-37",
+    "lgp-test-4x4-11",
+    "lgp-test-4x4-13",
+    "lgp-test-4x4-23",
+    "lgp-test-4x6-16",
+    "lgp-test-4x6-35",
+    "lgp-test-5x2-12",
+    "lgp-test-5x2-15",
+    "lgp-test-5x3-14",
+    "lgp-test-5x3-15",
+    "lgp-test-5x3-26",
+    "lgp-test-5x3-32",
+    "lgp-test-5x5-25",
+    "lgp-test-5x6-31",
+    "lgp-test-6x2-38",
+    "lgp-test-6x3-23",
+    "lgp-test-6x4-31",
+    "lgp-test-6x5-20",
+    "lgp-test-6x5-26",
+    "lgp-test-6x5-3"
+  ],
+  "independent_graph_checks": 300,
+  "valid_images": 100,
+  "work_plans": {
+    "zebra_direct": 100,
+    "zebra_rules": 200,
+    "zebra_history": 200,
+    "one_stroke_direct": 100,
+    "one_stroke_history": 200,
+    "one_stroke_visual": 100
+  },
+  "total_instances": 900
+}

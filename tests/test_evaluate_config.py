@@ -345,7 +345,7 @@ class EvaluateConfigTests(unittest.TestCase):
         canonical = load_experiment_config("config/experiments/one_stroke_direct.yaml")
         self.assertFalse(Path("config/experiments/one_stroke.yaml").exists())
         self.assertEqual(canonical["provider"]["max_tokens"], 1024)
-        self.assertIsNone(canonical["run"]["run_name"])
+        self.assertEqual(canonical["run"]["run_name"], "one-stroke-direct-100-20261013")
         self.assertEqual(canonical["run"]["on_existing"], "error")
 
         theorem = load_experiment_config(
@@ -437,14 +437,18 @@ class EvaluateConfigTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_experiment_config({**base, "provider": provider})
 
-    def test_zebra_history_config_enables_bounded_retry_and_resume(self):
+    def test_zebra_history_config_enables_bounded_retry_and_paired_modes(self):
         config = load_experiment_config("config/experiments/zebra_history.yaml")
 
         self.assertEqual(config["provider"]["max_retries"], 3)
         self.assertEqual(config["provider"]["retry_initial_backoff_seconds"], 1.0)
         self.assertEqual(config["provider"]["retry_max_backoff_seconds"], 30.0)
-        self.assertEqual(config["run"]["run_name"], "zebra-history-deferred_0823")
-        self.assertEqual(config["run"]["on_existing"], "resume")
+        self.assertEqual(config["run"]["run_name"], "zebra-history-both-100-20261013")
+        self.assertEqual(config["run"]["on_existing"], "error")
+        self.assertEqual(
+            config["evaluation"]["memory_modes"],
+            ["incremental_state", "deferred_reasoning"],
+        )
 
     def test_missing_section_reports_clear_error(self):
         with self.assertRaisesRegex(ValueError, "missing required section: provider"):

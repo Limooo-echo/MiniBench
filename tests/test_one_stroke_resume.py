@@ -359,7 +359,7 @@ class OneStrokeResumeTests(unittest.TestCase):
             work_plan=direct_plan,
             input_modes=("image",),
         )
-        self.assertEqual(direct_profile["protocol_generation_total"], 30)
+        self.assertEqual(direct_profile["protocol_generation_total"], len(direct_tasks))
 
         history_tasks = load_one_stroke_tasks("data/one_stroke/history.jsonl")
         self.assertEqual(_one_stroke_input_assets(history_tasks), [])
@@ -372,8 +372,8 @@ class OneStrokeResumeTests(unittest.TestCase):
             work_plan=history_plan,
             input_modes=("image",),
         )
-        self.assertEqual(history_profile["work_item_total"], 60)
-        self.assertEqual(history_profile["protocol_generation_total"], 652)
+        self.assertEqual(history_profile["work_item_total"], 2 * len(history_tasks))
+        self.assertEqual(history_profile["protocol_generation_total"], 2 * sum(len(task.history_events) + 1 for task in history_tasks))
         self.assertEqual(history_profile["history"]["negative_history_count"], 0)
         self.assertTrue(history_profile["history"]["no_negative_history_cases"])
         history_codes = {warning["code"] for warning in history_warnings}
@@ -382,10 +382,10 @@ class OneStrokeResumeTests(unittest.TestCase):
 
         multimodal_tasks = load_one_stroke_tasks("data/one_stroke/multimodal.jsonl")
         multimodal_assets = _one_stroke_input_assets(multimodal_tasks)
-        self.assertEqual(len(multimodal_assets), 30)
+        self.assertEqual(len(multimodal_assets), len(multimodal_tasks))
         self.assertEqual(
             len({asset["task_id"] for asset in multimodal_assets}),
-            30,
+            len(multimodal_tasks),
         )
         self.assertTrue(all(len(asset["sha256"]) == 64 for asset in multimodal_assets))
         self.assertTrue(
@@ -400,7 +400,7 @@ class OneStrokeResumeTests(unittest.TestCase):
             work_plan=multimodal_plan,
             input_modes=("image",),
         )
-        self.assertEqual(multimodal_profile["protocol_generation_total"], 30)
+        self.assertEqual(multimodal_profile["protocol_generation_total"], len(multimodal_tasks))
         self.assertEqual(
             multimodal_profile["multimodal"]["selected_input_modes"],
             ["image"],
@@ -429,7 +429,7 @@ class OneStrokeResumeTests(unittest.TestCase):
             work_plan=multimodal_ablation_plan,
             input_modes=("text", "image"),
         )
-        self.assertEqual(multimodal_ablation_profile["protocol_generation_total"], 60)
+        self.assertEqual(multimodal_ablation_profile["protocol_generation_total"], 2 * len(multimodal_tasks))
 
     def test_changed_multimodal_asset_refuses_resume_before_agent_creation(self):
         with tempfile.TemporaryDirectory() as tmpdir:

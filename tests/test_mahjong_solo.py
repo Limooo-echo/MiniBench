@@ -155,6 +155,17 @@ def delayed_tsumo_task():
 
 
 class MahjongSoloTests(unittest.TestCase):
+    def test_builtin_dataset_has_one_hundred_unique_source_tasks(self):
+        tasks = load_mahjong_solo_tasks()
+
+        self.assertEqual(len(tasks), 100)
+        self.assertEqual(
+            {task.id for task in tasks},
+            {f"mj-solo-{index:03d}" for index in range(1, 101)},
+        )
+        self.assertEqual(len({task.seed for task in tasks}), 100)
+        self.assertTrue(all(task.max_draws == len(task.wall) == 50 for task in tasks))
+
     def test_cli_accepts_mahjong_solo_commands(self):
         evaluate_args = build_parser().parse_args(
             [
