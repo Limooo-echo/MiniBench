@@ -21,10 +21,7 @@ from minibench.datasets.xiangqi.multimodal import (
 from minibench.datasets.xiangqi.schema import FAMILY_PATHS, load_records, runtime_dict
 from minibench.datasets.xiangqi.text_encoding import FILES, piece_symbol
 from minibench.factory.providers import OpenAICompatibleClient
-from minibench.datasets.xiangqi.variants.certification import (
-    CERTIFICATE_VERSION, POLICY, certificate_header_valid, policy_fingerprint,
-    verify_winning_line,
-)
+from minibench.datasets.xiangqi.solution_tree import validate_tree_record,TreeSession
 from tests.test_reasoning_agents import FakeClient, one_level_tot_responses
 
 
@@ -34,6 +31,38 @@ def transcription(board):
 
 
 class FinalProtocolTests(unittest.TestCase):
+    def test_all_shipped_xiangqi_configs_share_thinking_and_deadline_policy(self):
+        from minibench.factory.config import load_experiment_config
+        paths=list(Path('config/experiments').glob('xiangqi_*.yaml'))
+        paths+=list(Path('config/experiments/xiangqi_smoke').glob('*.yaml'))
+        self.assertEqual(len(paths),8)
+        for path in paths:
+            with self.subTest(path=path):
+                config=load_experiment_config(path)
+                self.assertTrue(config['provider']['extra_body']['enable_thinking'])
+                self.assertTrue(config['provider']['omit_max_tokens'])
+                self.assertEqual(config['provider']['max_retries'],0)
+                self.assertEqual(config['evaluation']['final_move_timeout_seconds'],900)
+                self.assertNotIn('max_tokens',config['agent'])
+                if config['task']['family']=='xiangqi-rule-variants':
+                    self.assertEqual(config['evaluation']['horizon_policy'],
+                                     'shortest_plus_two_attacker_moves')
+
+    def test_candidate_tools_cannot_overwrite_release_even_via_alias(self):
+        from minibench.datasets.xiangqi.provenance import require_candidate_outputs
+        root=Path(__file__).resolve().parents[1]
+        for target in ('data/xiangqi/history/tasks.jsonl',
+                       'data/xiangqi/rule_variants/runtime_certificates.json',
+                       'data/xiangqi/../xiangqi/provenance.json'):
+            with self.subTest(target=target),self.assertRaisesRegex(ValueError,'Candidate-only'):
+                require_candidate_outputs(root/target)
+        with tempfile.TemporaryDirectory() as temporary:
+            alias=Path(temporary)/'alias'
+            alias.symlink_to(root/'data/xiangqi',target_is_directory=True)
+            with self.assertRaises(ValueError):
+                require_candidate_outputs(alias/'history/tasks.jsonl')
+            require_candidate_outputs(Path(temporary)/'candidate.jsonl',None)
+
     def test_every_submitted_m2_png_and_serialized_request(self):
         client = OpenAICompatibleClient(model='offline-test', base_url='https://invalid.example',
                                         api_key_env='MINIBENCH_UNUSED_OFFLINE_KEY')
@@ -59,19 +88,19 @@ class FinalProtocolTests(unittest.TestCase):
                     self.assertEqual(manifest, render_board_manifest(board, 'chinese-piece-image'))
                     self.assertEqual({p['square']: piece_symbol(p['piece_id']) for p in manifest}, transcription(board))
 
-    def test_submitted100_four_corpora_and_two_m2_modes(self):
+    def test_submitted100_four_corpora_and_one_m2_mode(self):
         raw = yaml.safe_load(Path('config/cloud/xiangqi-all-agents.yaml').read_text())
         raw['engine_binding'] = 'reference'
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / 'cloud.yaml'; cfg.write_text(yaml.safe_dump(raw))
             plan = cloud.prepare(cfg, Path(tmp) / 'suite')
-        self.assertEqual(plan['planned_jobs'], 5400)
+        self.assertEqual(plan['planned_jobs'], 4500)
         for entry in plan['experiments'].values():
             rows = load_records(FAMILY_PATHS[entry['family']])
             self.assertEqual(len(rows), 100)
             self.assertEqual(entry['task_ids'], [r['id'] for r in rows])
         self.assertEqual(plan['experiments']['m2']['condition_counts'],
-                         {'text': 100, 'chinese-piece-image': 100})
+                         {'chinese-piece-image': 100})
         self.assertEqual(plan['experiments']['h2']['condition_counts'],
                          {'full-state': 100, 'move-history-only': 100})
 
@@ -133,18 +162,19 @@ class FinalProtocolTests(unittest.TestCase):
 
     def test_certificate_must_bind_code_dataset_and_exact_defender_choices(self):
         record = load_records(FAMILY_PATHS['xiangqi-rule-variants'])[0]
-        certificates = json.loads(Path('data/xiangqi/rule_variants/runtime_certificates.json').read_text())
-        line = certificates['tasks'][record['id']]['moves_uci']
-        proof = verify_winning_line(record, line)
-        self.assertTrue(proof['valid'], proof)
-        wrong = list(line); wrong[1] = 'a0a9'
-        self.assertFalse(verify_winning_line(record, wrong)['valid'])
-        bundle = {'version': CERTIFICATE_VERSION, 'policy': POLICY, 'policy_fingerprint': policy_fingerprint(),
-                  'dataset_sha256': 'sha', 'complete': True, 'tasks': {record['id']: {**proof, 'moves_uci': line}}}
-        self.assertTrue(certificate_header_valid(bundle, [record], 'sha'))
-        self.assertFalse(certificate_header_valid(bundle, [record], 'changed'))
-        changed = deepcopy(bundle); changed['policy']['depth'] = 2
-        self.assertFalse(certificate_header_valid(changed, [record], 'sha'))
+        path=Path(record['shortest_proof']['tree_path'])
+        proof=validate_tree_record(record,path)
+        self.assertTrue(proof['valid'],proof)
+        self.assertTrue(proof['tree_complete'])
+        with tempfile.TemporaryDirectory() as directory:
+            changed=json.loads(path.read_text())
+            root=changed['nodes'][changed['root']]
+            root['edges']['a0a9']='missing'
+            target=Path(directory)/path.name
+            target.write_text(json.dumps(changed))
+            self.assertFalse(validate_tree_record(record,target)['valid'])
+            with self.assertRaisesRegex(ValueError,'hash'):
+                TreeSession(record,directory)
 
 
 if __name__ == '__main__':

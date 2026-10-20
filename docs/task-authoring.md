@@ -73,6 +73,23 @@ be sorted unique non-empty strings. Rule-variant records additionally require
 `scenario_id`, `ruleset`, and the normalized structured `rules` list. Current H2
 requires its reference analysis; C2 requires multi-ply references and paired
 source mapping. Neither may use a one-step best-move record as a mate certificate.
+The submitted H2/C2 release additionally requires a complete certified shortest
+strategy tree per condition, bound through `shortest_proof` and its file SHA-256.
+Historical engine PVs alone do not establish a shortest or all-defences result.
+The certified shortest distance is 2–3 attacker moves in 50 rows and 4–5 in 50
+rows, independently for H2 and C2. C2 contains 50 same-FEN standard/focus pairs:
+17 chariot, 17 horse, and 16 soldier scenarios. Both conditions must be certified
+under their own active rules and the rule change must actually apply.
+
+D3/M2 share all 100 positions and retain the same structural difficulty labels;
+both use `max_plies: 1`. M2 is Chinese-piece-image only; D3 is the text baseline.
+Both return a move and a piece-coordinate transcription, but recognition is
+scored only for M2. For H2/C2, `max_plies` is `2*(n+2)-1`, where `n` is the
+certified shortest number of attacker moves. Report mate within `n` and within
+`n+2` separately, never renew the allowance after leaving a tree. Each complete
+Agent decision has a 900-second final-move deadline; search-budget exhaustion
+while constructing a certificate is instead unknown and cannot publish a task.
+
 The complete record contract is implemented in
 [`schema.py`](../src/minibench/datasets/xiangqi/schema.py); submitted IDs and
 selection hashes are recorded in

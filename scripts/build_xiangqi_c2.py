@@ -330,6 +330,8 @@ def main() -> int:
         default=ROOT / FAMILY_PATHS["xiangqi-rule-variants"],
     )
     args = parser.parse_args()
+    from minibench.datasets.xiangqi.provenance import require_candidate_outputs
+    require_candidate_outputs(args.output)
     rows = load_records(args.history, expected_family="xiangqi-history")
     selected = _select_sources(rows)
     records: list[dict[str, Any]] = []

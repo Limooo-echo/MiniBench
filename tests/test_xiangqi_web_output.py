@@ -30,6 +30,8 @@ class XiangqiWebOutputTests(unittest.TestCase):
             "success": True,
             "extended_mate_success": True,
             "mate_within_prescribed_steps": False,
+            "mate_within_shortest_steps": False,
+            "mate_within_shortest_plus_two_steps": True,
             "legality_rate": 1.0,
             "avg_cp_loss": 12.5,
             "steps": [
@@ -38,7 +40,7 @@ class XiangqiWebOutputTests(unittest.TestCase):
             ],
         }
         output = self.capture(web._print_item_result, "h2", record)
-        self.assertIn("mate=yes mate_within_prescribed=no legal=100.0%", output)
+        self.assertIn("mate_shortest=no mate_shortest_plus2=yes legal=100.0%", output)
         self.assertIn("cp_loss=12.5", output)
         self.assertNotIn("first_optimal", output)
         self.assertIn("moves=agent:a0a1,pikafish:a9a8", output)
@@ -53,13 +55,15 @@ class XiangqiWebOutputTests(unittest.TestCase):
         summary = {
             "mate_rate": 0.3,
             "mate_within_prescribed_rate": 0.2,
+            "mate_within_shortest_rate": 0.2,
+            "mate_within_shortest_plus_two_rate": 0.3,
             "legality_rate": 0.8,
             "avg_cp_loss": 321.0,
         }
         output = self.capture(web._print_family_summary, "h2", summary)
         self.assertEqual(
             output,
-            "SUMMARY H2 mate=30.0% mate_within_prescribed=20.0% "
+            "SUMMARY H2 mate_shortest=20.0% mate_shortest_plus2=30.0% "
             "legal=80.0% cp_loss=321.0",
         )
 

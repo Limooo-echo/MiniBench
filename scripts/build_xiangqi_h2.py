@@ -303,6 +303,8 @@ def main() -> int:
     parser.add_argument("--audit-only", action="store_true")
     parser.add_argument("--pikafish", type=Path)
     args = parser.parse_args()
+    from minibench.datasets.xiangqi.provenance import require_candidate_outputs
+    require_candidate_outputs(args.output, args.report, args.checkpoint)
     if args.workers < 1:
         parser.error("require workers>=1")
     if (args.depth_a, args.depth_b) != (16, 20):

@@ -1,4 +1,4 @@
-"""Shared Xiangqi evaluation protocol (missing is never an incorrect answer)."""
+"""Xiangqi protocol: infrastructure is missing; an explicit decision deadline loses."""
 from __future__ import annotations
 
 import json
@@ -8,8 +8,9 @@ from math import isfinite
 from typing import Any, Iterable
 
 from minibench.core.runtime import StrictJSONObjectError
+from minibench.datasets.xiangqi.deadline import FinalMoveTimeout, validate_move_timeout
 
-PROTOCOL_VERSION = "xiangqi-reasoning-v2"
+PROTOCOL_VERSION = "xiangqi-shortest-tree-v1"
 UCI_MOVE_PATTERN = re.compile(r"[a-i][0-9][a-i][0-9]", re.IGNORECASE)
 
 _ENGINE_FIELDS = {"pikafish_path", "pikafish_depth", "pikafish_timeout",
@@ -26,15 +27,23 @@ def validate_evaluation_config(family: str, config: dict[str, Any]) -> None:
     """Reject ignored options before any paid call. Horizons belong to records."""
     if not isinstance(config, dict):
         raise ValueError("Xiangqi evaluation must be a mapping")
-    unsupported = sorted(set(config) - _EVALUATION_FIELDS[family])
+    allowed = _EVALUATION_FIELDS[family] | {"pricing", "final_move_timeout_seconds"}
+    if family in {"xiangqi-history", "xiangqi-rule-variants"}:
+        allowed |= {"solution_tree_dir"}
+    unsupported = sorted(set(config) - allowed)
     if unsupported:
         raise ValueError(f"{family}: unsupported evaluation fields: {', '.join(unsupported)}")
+    from minibench.datasets.xiangqi.resources import validate_pricing
+    validate_pricing(config.get("pricing"))
+    validate_move_timeout(config.get("final_move_timeout_seconds", 900.0))
     if family == "xiangqi-rule-variants":
         depth = config.get("search_depth", 3)
         if isinstance(depth, bool) or not isinstance(depth, int) or depth != 3:
             raise ValueError("C2 requires search_depth=3")
-        if config.get("horizon_policy", "reference_mate_plies_plus_4") != "reference_mate_plies_plus_4":
-            raise ValueError("C2 horizon must be reference_mate_plies_plus_4")
+        expected_horizon = ("shortest_plus_two_attacker_moves" if config.get("solution_tree_dir")
+                            else "reference_mate_plies_plus_4")
+        if config.get("horizon_policy", expected_horizon) != expected_horizon:
+            raise ValueError(f"C2 horizon must be {expected_horizon}")
         if config.get("loss_unit", "rule-aware-centipawn-equivalent-not-pikafish") != "rule-aware-centipawn-equivalent-not-pikafish":
             raise ValueError("C2 loss is CPE, not Pikafish CP")
     if "pikafish_depth" in config:
@@ -72,9 +81,11 @@ def extract_strict_uci_move(raw_output: str) -> str | None:
     return move.strip().lower()
 
 
-def error_detail(stage: str, error: Exception | str) -> dict[str, Any]:
-    detail = {"stage": stage, "type": type(error).__name__ if isinstance(error, Exception) else "EvaluationError",
+def error_detail(stage: str, error: BaseException | str) -> dict[str, Any]:
+    detail = {"stage": stage, "type": type(error).__name__ if isinstance(error, BaseException) else "EvaluationError",
               "reason": str(error)}
+    if isinstance(error, FinalMoveTimeout):
+        detail.update(deadline_seconds=error.seconds, elapsed_seconds=round(error.elapsed_seconds, 6))
     if isinstance(error, StrictJSONObjectError):
         detail["raw_outputs"] = list(error.raw_outputs)
     return detail
@@ -120,7 +131,7 @@ def display(value: float | None, spec: str = ".3f") -> str:
 
 class EvaluationFailure(RuntimeError):
     """Keep failure stage and partial evidence when a helper cannot finish."""
-    def __init__(self, stage: str, cause: Exception, steps: list[dict] | None = None):
+    def __init__(self, stage: str, cause: BaseException, steps: list[dict] | None = None):
         super().__init__(str(cause))
         self.stage = stage
         self.cause = cause

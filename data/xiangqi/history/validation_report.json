@@ -1,7 +1,7 @@
 {
-  "note": "Selected rows retain their two engine reference analyses; fresh independent_validation.json is the authoritative current gate.",
+  "certified_shortest_count": 100,
   "parent_dataset_sha256": "eda3df0c68447d5f660881f1256194d29bf9d4967916f11d4d6f3062d5e79a3d",
   "selected_count": 100,
-  "selected_dataset_sha256": "6aefc49bc3042d8b92932f8173e147b9db00dfd97b644bc3485270a5563c5c37",
-  "version": "xiangqi-submitted-stratified100-v1"
+  "selected_dataset_sha256": "1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27",
+  "version": "xiangqi-shortest-paired100-v2"
 }

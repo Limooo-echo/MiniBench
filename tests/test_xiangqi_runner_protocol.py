@@ -30,6 +30,16 @@ class RunnerProtocolTests(unittest.TestCase):
             if key == "h2":
                 record = json.loads((smoke.ROOT / "data/xiangqi/history/tasks.jsonl").read_text(encoding="utf-8").splitlines()[0])
                 record["id"] = family + "-fixture"
+                # This fixture tests legacy checkpoint plumbing, not copied
+                # identity-bound certificates under a fabricated task ID.
+                for field in ("shortest_proof","shortest_mate_moves","shortest_line_uci"):
+                    record.pop(field,None)
+                analysis=record["h2_analysis"]
+                n=analysis["mate_in_moves"]
+                record["oracle"].update(best_move_uci=analysis["principal_variation_uci"][0],
+                                         mate_in_plies=analysis["reference_mate_plies"])
+                record["max_plies"]=analysis["reference_mate_plies"]+4
+                record["difficulty"]="short" if n<=3 else "medium" if n<=5 else "long"
             other = deepcopy(record)
             other["id"] += "-other"
             source, selected, config_path = self.root / f"{key}-source.jsonl", self.root / f"{key}-selected.jsonl", self.root / f"{key}.yaml"

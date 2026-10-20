@@ -16,11 +16,14 @@ import matplotlib.pyplot as plt
 
 from minibench.assets.fonts import matplotlib_font
 from minibench.core.agent import Agent
+from minibench.datasets.xiangqi.deadline import (
+    FINAL_MOVE_TIMEOUT_SECONDS, FinalMoveTimeout, call_agent_move, validate_move_timeout,
+)
 from minibench.datasets.xiangqi.mate_in_one import enumerate_mate_in_one_moves
 from minibench.datasets.xiangqi.runtime import (
     validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, EvaluationFailure, error_detail, extract_strict_uci_move, reset_agent, mean_or_none, rounded, status_counts, display,
 )
-from minibench.core.metrics import (
+from minibench.datasets.xiangqi.resources import (
     finish_task_metrics,
     start_task_metrics,
     summarize_metrics,
@@ -60,8 +63,8 @@ XIANGQI_MULTIMODAL_INPUT_MODES = (
     "chinese-piece-image",
     "latin-piece-image",
 )
-XIANGQI_MULTIMODAL_DEFAULT_MODES = ("text", "chinese-piece-image")
-M2_PROTOCOL_VERSION = "xiangqi-m2-recognition-v1"
+XIANGQI_MULTIMODAL_DEFAULT_MODES = ("chinese-piece-image",)
+M2_PROTOCOL_VERSION = "xiangqi-paired-one-move-v3"
 XIANGQI_RENDERER_VERSION = 2
 COORDINATE_CONVENTION = "UCI a0a1 uses file a-i and rank 0-9; rank 0 is the bottom row."
 
@@ -186,7 +189,10 @@ def evaluate_xiangqi_multimodal_tasks(
     pikafish_binary_sha256: str | None = None,
     pikafish_nnue_sha256: str | None = None,
     on_result: Callable[[dict[str, Any]], None] | None = None,
+    pricing: dict | None = None,
+    final_move_timeout_seconds: float = FINAL_MOVE_TIMEOUT_SECONDS,
 ) -> list[dict[str, Any]]:
+    final_move_timeout_seconds = validate_move_timeout(final_move_timeout_seconds)
     unknown = set(modes) - set(XIANGQI_MULTIMODAL_INPUT_MODES)
     if unknown:
         raise ValueError(f"unknown Xiangqi multimodal modes: {', '.join(sorted(unknown))}")
@@ -214,7 +220,8 @@ def evaluate_xiangqi_multimodal_tasks(
                 except Exception as exc:
                     initial_diagnostics.append(error_detail("diagnostic_engine_before", exc))
             for mode in modes:
-                metrics_start = start_task_metrics(agent)
+                metrics_start = start_task_metrics(agent, pricing=pricing)
+                metrics_start["_xiangqi_final_move_timeout_seconds"] = final_move_timeout_seconds
                 diagnostics = list(initial_diagnostics)
                 steps, reasons, error = [], [], None
                 stage = "agent_reset"
@@ -225,6 +232,7 @@ def evaluate_xiangqi_multimodal_tasks(
                         task, agent, mode, step_root=step_root, pikafish=engine,
                         pikafish_depth=pikafish_depth, initial_analysis=initial_analysis,
                         diagnostics=diagnostics,
+                        final_move_timeout_seconds=final_move_timeout_seconds,
                     )
                     status = "invalid" if "invalid_or_illegal_uci" in reasons else "ok"
                 except Exception as exc:
@@ -233,14 +241,17 @@ def evaluate_xiangqi_multimodal_tasks(
                     else:
                         cause = exc
                     malformed = stage == "model" and isinstance(cause, StrictJSONObjectError)
-                    status, success = ("invalid", False) if malformed else ("error", None)
+                    timed_out = isinstance(cause, FinalMoveTimeout)
+                    status, success = ("invalid", False) if malformed or timed_out else ("error", None)
+                    if timed_out:
+                        stage = "timeout"
                     if malformed:
                         stage = "format"
                         steps = [{"step": 0, "actor": "agent", "raw": cause.raw_output or "",
                                   "raw_output": cause.raw_output or "", "uci": "PARSE_FAIL",
                                   "is_legal": False, "is_opt": False, "engine_cp_loss": None}]
                     error = error_detail(stage, cause)
-                    reasons = [stage + "_error"]
+                    reasons = ["final_move_timeout" if timed_out else stage + "_error"]
                 agent_steps = [step for step in steps if step["actor"] == "agent"]
                 step = agent_steps[0] if agent_steps else {}
                 result = {
@@ -354,6 +365,8 @@ def write_xiangqi_multimodal_run(
             f"legal={display(values['legality_rate'], '.1%')} missing={values['missing']}"
             f" recognition={display(values['recognition_accuracy'], '.1%')}"
         )
+    from minibench.datasets.xiangqi.resources import resource_summary_lines
+    lines.extend(resource_summary_lines(summary["metrics"]))
     (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return run_dir
 
@@ -362,6 +375,7 @@ def _run_multimodal_game(
     task: dict[str, Any], agent: Agent, mode: str, *,
     step_root: Path | None, pikafish: PikafishEngine | None, pikafish_depth: int,
     initial_analysis: PikafishAnalysis | None, diagnostics: list[dict[str, Any]] | None = None,
+    final_move_timeout_seconds: float = FINAL_MOVE_TIMEOUT_SECONDS,
 ) -> tuple[list[dict[str, Any]], bool, list[str]]:
     diagnostics = diagnostics if diagnostics is not None else []
     steps = []
@@ -379,7 +393,7 @@ def _run_multimodal_game(
         input_image_manifest = None
         if mode == "text":
             stage = "model"
-            raw = agent.generate(prompt, task)
+            raw = call_agent_move(agent.generate, prompt, task, timeout_seconds=final_move_timeout_seconds)
         else:
             stage = "configuration"
             generate_multimodal = getattr(agent, "generate_multimodal", None)
@@ -396,7 +410,9 @@ def _run_multimodal_game(
                 image_path.write_bytes(png)
                 input_image_path = str(image_path.resolve())
             stage = "model"
-            raw = generate_multimodal(prompt, task, images=[ImageAttachment(data=png, mime_type="image/png")])
+            raw = call_agent_move(generate_multimodal, prompt, task,
+                                  images=[ImageAttachment(data=png, mime_type="image/png")],
+                                  timeout_seconds=final_move_timeout_seconds)
         stage = "judge"
         generated_uci = _extract_uci(raw)
         recognition = score_board_recognition(raw, board.board)
@@ -424,7 +440,16 @@ def _run_multimodal_game(
         step["engine_cp_after"] = rounded(cp_after)
         step["engine_cp_loss"] = rounded(max(0.0, cp_before - cp_after)) if cp_before is not None and cp_after is not None else None
         return steps, success, ["agent_checkmated_opponent" if success else "not_mate_in_one"]
-    except Exception as exc:
+    except (Exception, FinalMoveTimeout) as exc:
+        if isinstance(exc, FinalMoveTimeout):
+            stage = "timeout"
+            steps.append({"step":0, "actor":"agent", "raw":"", "raw_output":"",
+                          "uci":"TIMEOUT", "is_legal":False, "is_opt":False,
+                          "engine_cp_loss":None, "recognition_accuracy":0.0,
+                          "recognition_exact":False, "recognition_status":"timeout",
+                          "input_image_sha256":input_image_sha256,
+                          "input_image_path":input_image_path,
+                          "input_image_manifest":input_image_manifest})
         raise EvaluationFailure(stage, exc, steps) from exc
 
 

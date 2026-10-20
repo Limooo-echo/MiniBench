@@ -56,13 +56,16 @@ def candidate_lines(paths, expected):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--data", type=Path, default=ROOT / "data/xiangqi/rule_variants/tasks.jsonl")
-    p.add_argument("--output", type=Path, default=ROOT / "data/xiangqi/rule_variants/runtime_certificates.json")
+    p.add_argument("--output", type=Path, required=True,
+                   help="Candidate-only depth-3 witness report; not a shortest-tree certificate")
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--seed-certificates", type=Path,
                    default=ROOT / "data/xiangqi/rule_variants/runtime_certificates.json",
                    help="Matching published witness candidates; every candidate is revalidated")
     p.add_argument("--pikafish-path", type=Path, help="Offline ordering guidance only, never the C2 judge")
     a = p.parse_args()
+    from minibench.datasets.xiangqi.provenance import require_candidate_outputs
+    require_candidate_outputs(a.output)
     records = load_records(a.data, expected_family="xiangqi-rule-variants")
     bundle = {"version": CERTIFICATE_VERSION, "policy": POLICY,
               "policy_fingerprint": policy_fingerprint(), "dataset_sha256": sha256_file(a.data),

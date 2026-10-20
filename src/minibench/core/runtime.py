@@ -135,6 +135,10 @@ class StageResult:
     metadata: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
+        from minibench.core.metrics import publish_token_usage
+        usage = {"llm_calls": self.llm_calls, "usage_missing_calls": self.usage_missing_calls,
+                 "token_usage": dict(self.token_usage)}
+        publish_token_usage(usage)
         return {
             "stage_name": self.stage_name,
             "call_index": self.call_index,
@@ -143,7 +147,9 @@ class StageResult:
             "model_elapsed_seconds": self.model_elapsed_seconds,
             "llm_calls": self.llm_calls,
             "usage_missing_calls": self.usage_missing_calls,
-            "token_usage": dict(self.token_usage),
+            "token_usage": usage["token_usage"],
+            "known_token_usage": usage["known_token_usage"],
+            "usage_complete": usage["usage_complete"],
             "parent_id": self.parent_id,
             "finish_reason": self.finish_reason,
             "model": self.model,
@@ -182,6 +188,8 @@ class AgentRun:
     def to_dict(self) -> dict[str, object]:
         metrics = dict(self.metrics)
         metrics["token_usage"] = dict(metrics.get("token_usage") or {})
+        from minibench.core.metrics import publish_token_usage
+        publish_token_usage(metrics)
         return {
             "span_id": self.span_id,
             "name": self.name,
@@ -946,6 +954,11 @@ def _completion_token_usage(
     result: CompletionResult | None,
 ) -> dict[str, int] | None:
     if result is None or result.usage is None:
+        return None
+    from minibench.core.token_usage import assess_token_usage
+    if ((result.metadata or {}).get("usage_validation", {}).get("status") == "invalid"
+            or assess_token_usage(result.usage, reasoning_chars=len(result.reasoning or ""),
+                                  content_chars=len(result.content or ""))["status"] == "invalid"):
         return None
     from minibench.core.metrics import extract_token_usage
 

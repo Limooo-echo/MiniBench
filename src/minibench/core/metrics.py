@@ -3,6 +3,8 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
+from minibench.core.token_usage import assess_token_usage
+
 
 STANDARD_TOKEN_KEYS = (
     "prompt_tokens",
@@ -51,6 +53,7 @@ def finish_task_metrics(agent: Any, start: dict[str, Any]) -> dict[str, Any]:
     metrics["usage_available"] = (
         int(metrics["llm_calls"]) > int(metrics["usage_missing_calls"])
     )
+    publish_token_usage(metrics)
     runtime = start.get("_runtime")
     span_id = start.get("_runtime_span_id")
     if runtime is not None and isinstance(span_id, str):
@@ -115,12 +118,18 @@ def summarize_metrics(results: list[Any]) -> dict[str, Any]:
         totals["llm_calls"] += int(metrics.get("llm_calls", 0))
         totals["usage_missing_calls"] += int(metrics.get("usage_missing_calls", 0))
         token_usage = metrics.get("token_usage") or {}
+        assessment = assess_token_usage(token_usage)
+        if assessment["status"] == "invalid" and not metrics.get("usage_missing_calls"):
+            totals["usage_missing_calls"] += max(1, int(metrics.get("llm_calls", 0)))
+        token_usage = metrics.get("known_token_usage", assessment["tokens"] or {}) or {}
         for key, value in token_usage.items():
-            totals["token_usage"][key] = int(totals["token_usage"].get(key, 0)) + int(value)
+            if value is not None:
+                totals["token_usage"][key] = int(totals["token_usage"].get(key, 0)) + int(value)
 
     totals["task_elapsed_seconds"] = round(float(totals["task_elapsed_seconds"]), 6)
     totals["model_elapsed_seconds"] = round(float(totals["model_elapsed_seconds"]), 6)
     totals["usage_available"] = int(totals["llm_calls"]) > int(totals["usage_missing_calls"])
+    publish_token_usage(totals)
 
     return {
         "total": totals,
@@ -139,7 +148,8 @@ def summarize_metrics(results: list[Any]) -> dict[str, Any]:
             if total_tasks
             else 0.0,
             "token_usage": {
-                key: round(value / total_tasks, 6) if total_tasks else 0.0
+                key: (round(value / total_tasks, 6) if total_tasks else 0.0)
+                if value is not None else None
                 for key, value in sorted(totals["token_usage"].items())
             },
         },
@@ -149,39 +159,38 @@ def summarize_metrics(results: list[Any]) -> dict[str, Any]:
 def summary_metrics_line(metrics: dict[str, Any]) -> str:
     total = metrics["total"]
     usage = total["token_usage"]
+    def display(key: str) -> str:
+        value = usage.get(key)
+        return "unknown" if value is None else str(value)
     return (
         f"task_elapsed_seconds={total['task_elapsed_seconds']:.6f} "
         f"model_elapsed_seconds={total['model_elapsed_seconds']:.6f} "
         f"llm_calls={total['llm_calls']} "
-        f"prompt_tokens={usage.get('prompt_tokens', 0)} "
-        f"completion_tokens={usage.get('completion_tokens', 0)} "
-        f"total_tokens={usage.get('total_tokens', 0)} "
+        f"prompt_tokens={display('prompt_tokens')} "
+        f"completion_tokens={display('completion_tokens')} "
+        f"total_tokens={display('total_tokens')} "
         f"usage_available={str(total['usage_available']).lower()}\n"
     )
 
 
 def extract_token_usage(usage: object) -> dict[str, int] | None:
-    if not isinstance(usage, dict):
-        return None
-    tokens = empty_token_usage()
-    _collect_token_values(usage, tokens)
-    return tokens
+    assessment = assess_token_usage(usage)
+    # A client/task subtotal requires a real full breakdown, never synthetic 0s.
+    return assessment["tokens"] if assessment["complete"] else None
 
 
-def _collect_token_values(value: object, tokens: dict[str, int]) -> None:
-    if not isinstance(value, dict):
-        return
-    for key, item in value.items():
-        if isinstance(item, bool):
-            continue
-        if isinstance(item, int) and _looks_like_token_key(str(key)):
-            tokens[str(key)] = tokens.get(str(key), 0) + item
-        elif isinstance(item, dict):
-            _collect_token_values(item, tokens)
+def publish_token_usage(metrics: dict[str, Any]) -> None:
+    """Public task/summary totals are unknown if any request is unaccounted.
 
-
-def _looks_like_token_key(key: str) -> bool:
-    return key in STANDARD_TOKEN_KEYS or key.endswith("_tokens")
+    Numeric snapshots/deltas remain private additive counters. A validated
+    subtotal is kept separately and must not be interpreted as the full bill.
+    """
+    known = dict(metrics["token_usage"])
+    calls, missing = int(metrics["llm_calls"]), int(metrics["usage_missing_calls"])
+    metrics["usage_complete"] = calls > 0 and missing == 0
+    metrics["known_token_usage"] = known if calls > missing else {k: None for k in known}
+    if not metrics["usage_complete"]:
+        metrics["token_usage"] = {k: None for k in known}
 
 
 def _metrics_target(agent: Any) -> Any | None:

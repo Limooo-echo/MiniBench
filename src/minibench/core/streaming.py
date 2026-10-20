@@ -1,18 +1,20 @@
 """Durable streaming and successful-call replay for isolated cloud workers."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 from datetime import datetime, timezone
 import json
 import os
+import signal
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Any
 import urllib.request
 
 from minibench.core.agent import CompletionResult
 from minibench.core.checkpoint import atomic_write_json, fingerprint_payload
+from minibench.core.token_usage import assess_token_usage
 from minibench.factory.providers import OpenAICompatibleClient
 
 def now() -> str:
@@ -32,6 +34,66 @@ def safe_error(exc: BaseException, secret: str | None = None) -> str:
     if secret:
         text = text.replace(secret, "[REDACTED]")
     return text
+
+
+@contextmanager
+def _atomic_gate_rpc():
+    """Do not interrupt a manager response between grant and local bookkeeping.
+
+    Only short, nonblocking gate operations belong here; HTTP reads, sleeps,
+    and waiting for quota must remain interruptible by the decision deadline.
+    """
+    handler = signal.getsignal(signal.SIGALRM) if hasattr(signal, "SIGALRM") else None
+    defer = getattr(handler, "defer_atomic_timeout", None)
+    with defer() if callable(defer) else nullcontext():
+        yield
+
+
+def call_attempts(journal: Path):
+    """One accounting row per started physical attempt, never per replay.
+
+    Old journals are supported. A logical call can fail, then succeed on an
+    explicit restart: the failed attempt must still be counted separately.
+    Queued requests that never acquired a reservation are not charged.
+    """
+    saved = {p.stem: json.loads(p.read_text(encoding="utf-8"))
+             for p in journal.glob("[0-9][0-9][0-9][0-9].json")}
+    attempts = sorted((journal / "attempts").glob("*/started.json"))
+    committed = {}
+    for index, entry in saved.items():
+        location = (entry["response"].get("metadata") or {}).get("attempt_dir")
+        candidates = [p.parent.name for p in attempts if p.parent.name.split("-")[0] == index]
+        committed[index] = Path(location).name if location else (candidates[-1] if candidates else None)
+    represented = set()
+    for path in attempts:
+        directory = path.parent
+        index = directory.name.split("-")[0]
+        start = json.loads(path.read_text(encoding="utf-8"))
+        record = {"at": start["at"], "usage": None, "status": "unfinished"}
+        for filename in ("partial.json", "accounting.json"):
+            evidence = directory / filename
+            if evidence.exists():
+                record.update(json.loads(evidence.read_text(encoding="utf-8")))
+        if index in saved and committed[index] == directory.name:
+            record.update(at=saved[index].get("at", record["at"]),
+                          usage=saved[index]["response"].get("usage"), status="success")
+            record["reasoning_chars"] = len(saved[index]["response"].get("reasoning") or "")
+            record["content_chars"] = len(saved[index]["response"].get("content") or "")
+            metadata = saved[index]["response"].get("metadata") or {}
+            if metadata.get("usage_validation"):
+                record["usage_validation"] = metadata["usage_validation"]
+            represented.add(index)
+        record["attempt_dir"] = str(directory)
+        record["started_at"] = start["at"]
+        yield record
+    # Compatibility with successful journals created before attempt tracking.
+    for index, entry in saved.items():
+        if index not in represented:
+            yield {"at": entry.get("at"), "started_at": None, "status": "success",
+                   "usage": entry["response"].get("usage"), "attempt_dir": None,
+                   "usage_validation": (entry["response"].get("metadata") or {}).get("usage_validation"),
+                   "reasoning_chars": len(entry["response"].get("reasoning") or ""),
+                   "content_chars": len(entry["response"].get("content") or "")}
 
 
 def sse_data(response):
@@ -68,6 +130,7 @@ class JournalClient(OpenAICompatibleClient):
         self.account = account
         self.omit_max_tokens = omit_max_tokens
         self.index = 0
+        self._attempt_usage = None
         self.journal.mkdir(parents=True, exist_ok=True)
 
     def build_messages_payload(self, *args, **kwargs):
@@ -106,6 +169,9 @@ class JournalClient(OpenAICompatibleClient):
                     "finish_reason": finish_reason, "done_received": done,
                     "response_id": response_id, "model": model,
                     "elapsed_seconds": elapsed,
+                    "reasoning_chars": reasoning_chars, "content_chars": content_chars,
+                    "usage_validation": assess_token_usage(
+                        usage, reasoning_chars=reasoning_chars, content_chars=content_chars),
                 })
                 last_snapshot = elapsed
             if self.callback and (force or chunks == 1 or elapsed - last_report >= 10):
@@ -158,6 +224,11 @@ class JournalClient(OpenAICompatibleClient):
                             raise RuntimeError("Unexpected streaming token usage")
                         # These are cumulative request totals, not per-chunk charges.
                         usage = chunk["usage"]
+                        self._attempt_usage = usage
+                        # Persist cumulative usage even if parsing later fails.
+                        atomic_write_json(attempt / "accounting.json", {
+                            "at": now(), "status": "receiving", "usage": usage,
+                        })
                     choices = chunk.get("choices", [])
                     if not isinstance(choices, list) or len(choices) > 1:
                         raise RuntimeError("Unexpected streaming choices")
@@ -208,13 +279,20 @@ class JournalClient(OpenAICompatibleClient):
                 model=model, response_id=response_id,
                 elapsed_seconds=perf_counter() - started,
                 metadata={"transport": "sse", "stream_chunks": chunks,
-                          "attempt_dir": str(attempt), "usage_known": usage is not None},
+                          "attempt_dir": str(attempt),
+                          "usage_known": assess_token_usage(usage, reasoning_chars=reasoning_chars,
+                                                            content_chars=content_chars)["complete"],
+                          "usage_validation": assess_token_usage(
+                              usage, reasoning_chars=reasoning_chars, content_chars=content_chars)},
             )
         except BaseException:
             snapshot("interrupted", force=True)
             raise
         finally:
-            self._record_completion_metrics(perf_counter() - started, usage)
+            assessment = assess_token_usage(usage, reasoning_chars=reasoning_chars,
+                                            content_chars=content_chars)
+            self._record_completion_metrics(perf_counter() - started,
+                                            usage if assessment["status"] != "invalid" else None)
 
     def _complete_request_once(self, request):
         index = self.index
@@ -230,7 +308,10 @@ class JournalClient(OpenAICompatibleClient):
                     "to silently change or rebill the unfinished observation."
                 )
             result = CompletionResult(**entry["response"])
-            self._record_completion_metrics(result.elapsed_seconds or 0, result.usage)
+            assessment = assess_token_usage(result.usage, reasoning_chars=len(result.reasoning or ""),
+                                            content_chars=len(result.content or ""))
+            self._record_completion_metrics(result.elapsed_seconds or 0,
+                                            result.usage if assessment["status"] != "invalid" else None)
             if self.callback:
                 self.callback({"kind": "replayed_call", "call": index,
                                "usage": result.usage, "at": now()})
@@ -253,11 +334,17 @@ class JournalClient(OpenAICompatibleClient):
         atomic_write_json(request_path, payload)
         if self.callback:
             self.callback({"kind": "request_queued", "call": index, "at": now()})
+        result = None
+        acquired = False
+        self._attempt_usage = None
         try:
-            if self.gate is not None:
-                self.gate.acquire(self.account)
-            result = None
             try:
+                if self.gate is not None:
+                    while not acquired:
+                        with _atomic_gate_rpc():
+                            acquired = self.gate.try_acquire(self.account)
+                        if not acquired:
+                            sleep(.05)
                 at = now()
                 atomic_write_json(attempt / "started.json", {"at": at, "call": index})
                 if self.callback:
@@ -267,14 +354,29 @@ class JournalClient(OpenAICompatibleClient):
                 atomic_write_json(saved, {"at": now(), "request_sha256": identity,
                                           "response": asdict(result)})
             finally:
-                if self.gate is not None:
-                    self.gate.release(self.account, result.usage if result else None)
+                received_usage = result.usage if result is not None else self._attempt_usage
+                evidence = result.metadata if result is not None else None
+                if evidence is None and (attempt / "partial.json").exists():
+                    evidence = json.loads((attempt / "partial.json").read_text())
+                assessment = (evidence or {}).get("usage_validation") or assess_token_usage(received_usage)
+                try:
+                    atomic_write_json(attempt / "accounting.json", {
+                        "at": now(), "status": "success" if result is not None and saved.exists() else "failed",
+                        "usage": received_usage,
+                        "usage_validation": assessment,
+                    })
+                finally:
+                    if self.gate is not None and acquired:
+                        with _atomic_gate_rpc():
+                            self.gate.release(self.account,
+                                              received_usage if assessment["status"] != "invalid" else None)
         except BaseException as exc:
             append_json(self.journal / "failed_attempts.jsonl", {
                 "at": now(), "call": index, "request_sha256": identity,
                 "error_type": type(exc).__name__,
                 "error": safe_error(exc, os.environ.get(self.api_key_env)),
                 "attempt_dir": str(attempt),
+                "usage": self._attempt_usage if (attempt / "started.json").exists() else None,
                 "note": "A lost server response may already have consumed quota.",
             })
             raise

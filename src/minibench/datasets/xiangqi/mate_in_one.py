@@ -13,7 +13,10 @@ from time import strftime
 from typing import Any, Callable
 
 from minibench.core.agent import Agent
-from minibench.core.metrics import start_task_metrics, finish_task_metrics, summarize_metrics
+from minibench.datasets.xiangqi.deadline import (
+    FINAL_MOVE_TIMEOUT_SECONDS, FinalMoveTimeout, call_agent_move, validate_move_timeout,
+)
+from minibench.datasets.xiangqi.resources import start_task_metrics, finish_task_metrics, summarize_metrics
 from minibench.datasets.xiangqi.runtime import (
     validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, error_detail, extract_strict_uci_move, reset_agent, mean_or_none, rounded, status_counts, display,
 )
@@ -58,50 +61,30 @@ class MateInOneResult:
     diagnostics: list[dict[str, Any]] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     termination_reason: str = ""
-    protocol_version: str = PROTOCOL_VERSION
+    protocol_version: str = "xiangqi-paired-one-move-v3"
 
 
-MATE_IN_ONE_SYSTEM_PROMPT = """You are the direct agent in a Xiangqi
+MATE_IN_ONE_SYSTEM_PROMPT = """You are solving a Xiangqi
 (Chinese Chess) mate-in-one benchmark. Solve only the current board and
 generate exactly one legal UCI move yourself. Return one JSON object and no
 explanation, markdown, or candidate list."""
 
 
 def _build_mate_in_one_prompt(task: XiangqiTask, vb: VariantBoard) -> str:
-    """Prompt D3 as free move generation, not candidate selection."""
-    agent_color, opponent_color = ("Red", "Black") if task.side_to_move == "ally" else ("Black", "Red")
-    return f"""{MATE_IN_ONE_SYSTEM_PROMPT}
-
-Objective: {agent_color} must CHECKMATE {opponent_color} immediately with this one move.
-A move that only gives check, captures material, improves the position, or begins
-a longer combination is incorrect.
-
-Use this silent decision procedure:
-1. Look first for moves that attack the {opponent_color} general immediately.
-2. For each candidate, visualize the board after the move.
-3. Reject it if {opponent_color} can answer by moving the general, capturing the checking
-   piece, blocking the checking line, or otherwise escaping check.
-4. Choose only a move for which the {opponent_color} general is in check and {opponent_color} has zero
-   legal replies. Do not print this analysis.
-
-Before answering, silently perform a final legality check:
-- the origin contains the stated {agent_color} piece and the destination is not {agent_color}-occupied;
-- the piece geometry is correct;
-- every chariot/cannon intermediate square and cannon screen count is correct;
-- the move neither leaves {agent_color}'s general in check nor exposes facing generals.
-
-Side to move: {task.side_to_move} (uppercase pieces are Red; lowercase pieces are Black).
-{BOARD_ENCODING}
-
-Current board:
-{board_state_text(vb.board)}
-
-Return exactly one JSON object with schema {{"move": "<uci_move>"}}.
-Do not include markdown fences or explanations."""
+    """D3 is the text arm of exactly the same D3/M2 task and output schema."""
+    from minibench.datasets.xiangqi.multimodal import _build_multimodal_prompt
+    side = 1 if task.agent_color == "red" else -1
+    return _build_multimodal_prompt(vb, "text", "", agent_side=side)
 
 
 def _extract_mate_in_one_uci(raw_output: str) -> str | None:
-    return extract_strict_uci_move(raw_output)
+    try:
+        payload = json.loads(raw_output)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict) or "move" not in payload or set(payload)-{"move", "pieces"}:
+        return None
+    return extract_strict_uci_move(json.dumps({"move": payload["move"]}))
 
 
 def enumerate_mate_in_one_moves(board: list[list[int]], side: int) -> list[str]:
@@ -200,8 +183,11 @@ def evaluate_mate_in_one_tasks(
     pikafish_binary_sha256: str | None = None,
     pikafish_nnue_sha256: str | None = None,
     on_result: Callable[[MateInOneResult], None] | None = None,
+    pricing: dict | None = None,
+    final_move_timeout_seconds: float = FINAL_MOVE_TIMEOUT_SECONDS,
 ) -> list[MateInOneResult]:
     """One model answer per task; exact mate and optional CP diagnostics are separate."""
+    final_move_timeout_seconds = validate_move_timeout(final_move_timeout_seconds)
     results: list[MateInOneResult] = []
     engine = None
     startup_error = None
@@ -217,7 +203,8 @@ def evaluate_mate_in_one_tasks(
         engine = None
     try:
         for i, task in enumerate(tasks):
-            start = start_task_metrics(agent)
+            start = start_task_metrics(agent, pricing=pricing)
+            start["_xiangqi_final_move_timeout_seconds"] = final_move_timeout_seconds
             diagnostics = [startup_error] if startup_error else []
             raw_output, agent_uci, optimal_uci = "", None, None
             cp_before = cp_after = cp_loss = quality_score = normalized_score = None
@@ -243,7 +230,8 @@ def evaluate_mate_in_one_tasks(
                     except Exception as exc:
                         diagnostics.append(error_detail("diagnostic_engine_before", exc))
                 stage = "model"
-                raw_output = agent.generate(_build_mate_in_one_prompt(task, vb), task)
+                raw_output = call_agent_move(agent.generate, _build_mate_in_one_prompt(task, vb), task,
+                                             timeout_seconds=final_move_timeout_seconds)
                 stage = "judge"
                 agent_uci = _extract_mate_in_one_uci(raw_output)
                 agent_move = legal_by_uci.get(agent_uci or "")
@@ -271,14 +259,18 @@ def evaluate_mate_in_one_tasks(
                 if quality_score is not None:
                     correctness = 1.0 if goal_achieved else 0.5 if is_legal else 0.0
                     normalized_score = 100.0 * (0.7 * correctness + 0.2 * quality_score + 0.1 * is_legal)
-            except Exception as exc:
+            except (Exception, FinalMoveTimeout) as exc:
                 malformed = stage == "model" and isinstance(exc, StrictJSONObjectError)
-                status, goal_achieved = ("invalid", False) if malformed else ("error", None)
+                timed_out = isinstance(exc, FinalMoveTimeout)
+                status, goal_achieved = ("invalid", False) if malformed or timed_out else ("error", None)
+                if timed_out:
+                    stage = "timeout"
+                    agent_uci = "TIMEOUT"
                 if malformed:
                     raw_output = exc.raw_output or ""
                     stage = "format"
                 error = error_detail(stage, exc)
-                termination = stage + "_error"
+                termination = "final_move_timeout" if timed_out else stage + "_error"
             result = MateInOneResult(
                 task_id=task.id or f"xiangqi-mate-in-one-{i + 1:04d}", difficulty=task.difficulty,
                 is_legal=is_legal, is_optimal=is_optimal, goal_achieved=goal_achieved,
@@ -343,5 +335,7 @@ def write_mate_in_one_run(
     lines = ["Xiangqi Mate-in-One Evaluation", f"Total: {summary['total']} Evaluated: {summary['evaluated']} Missing: {summary['missing']}",
              f"Mate@1: {display(summary['mate_rate'], '.1%')}",
              f"Legality: {display(summary['legality_rate'], '.1%')}"]
+    from minibench.datasets.xiangqi.resources import resource_summary_lines
+    lines.extend(resource_summary_lines(summary["metrics"]))
     (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return run_dir

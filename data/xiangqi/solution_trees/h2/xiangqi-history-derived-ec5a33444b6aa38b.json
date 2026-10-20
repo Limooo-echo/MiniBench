@@ -1,0 +1,203 @@
+{
+  "attacker": 1,
+  "complete": true,
+  "deepest_mate_attacker_moves": 4,
+  "defender_coverage": "all_optimal",
+  "extension_attacker_moves": 2,
+  "forced_mate": true,
+  "initial_fen": "2c1kab2/4a4/C3b4/1N1R4p/3r5/P8/2P1P3P/6p2/4A4/3K1A3 w - - 0 1",
+  "max_attacker_moves": 4,
+  "nodes": {
+    "1e6423f512ebfad9913b0878e5ed2d06": {
+      "dtm_plies": 5,
+      "edges": {
+        "d5d9": "a7d6de0051c2700cfe4b387a0b8d96d3"
+      },
+      "fen": "3ckab2/4a4/C3b4/1N6p/3R5/P8/2P1P3P/6p2/4A4/3K1A3 w - - 0 1",
+      "legal_moves": [
+        "d5d9",
+        "b6d7",
+        "a7d7",
+        "d0e0",
+        "d5a5",
+        "d5b5",
+        "d5c5",
+        "d5e5",
+        "d5f5",
+        "d5g5",
+        "d5h5",
+        "d5i5",
+        "e1d2"
+      ],
+      "longest_mate_plies": 5,
+      "remaining_plies": 5,
+      "terminal": false,
+      "turn": 1
+    },
+    "7325abbd38ecc6408d3aec7e5b5f389e": {
+      "dtm_plies": 2,
+      "edges": {
+        "e9e8": "9c1a3c3f55914d8592203531acd1dafd"
+      },
+      "fen": "3akab2/2N6/C3b4/8p/9/P8/2P1P3P/6p2/4A4/3K1A3 b - - 0 1",
+      "legal_moves": [
+        "e9e8"
+      ],
+      "longest_mate_plies": 2,
+      "remaining_plies": 2,
+      "terminal": false,
+      "turn": -1
+    },
+    "7e7d54422452e03e79f74d196275e893": {
+      "dtm_plies": 7,
+      "edges": {
+        "d6d5": "8d259ed04bcd722001faa029f3b40b94"
+      },
+      "fen": "2c1kab2/4a4/C3b4/1N1R4p/3r5/P8/2P1P3P/6p2/4A4/3K1A3 w - - 0 1",
+      "legal_moves": [
+        "d6d5",
+        "b6d5",
+        "d0e0",
+        "e1d2"
+      ],
+      "longest_mate_plies": 7,
+      "remaining_plies": 7,
+      "terminal": false,
+      "turn": 1
+    },
+    "8d259ed04bcd722001faa029f3b40b94": {
+      "dtm_plies": 6,
+      "edges": {
+        "c9d9": "1e6423f512ebfad9913b0878e5ed2d06"
+      },
+      "fen": "2c1kab2/4a4/C3b4/1N6p/3R5/P8/2P1P3P/6p2/4A4/3K1A3 b - - 0 1",
+      "legal_moves": [
+        "c9d9",
+        "c9a9",
+        "c9b9",
+        "c9c4",
+        "c9c5",
+        "c9c6",
+        "c9c7",
+        "c9c8",
+        "e7c5",
+        "e7g5",
+        "e8d7",
+        "e8d9",
+        "e8f7",
+        "g2f2",
+        "g2g1",
+        "g2h2",
+        "g9i7",
+        "i6i5"
+      ],
+      "longest_mate_plies": 6,
+      "remaining_plies": 6,
+      "terminal": false,
+      "turn": -1
+    },
+    "9c1a3c3f55914d8592203531acd1dafd": {
+      "dtm_plies": 1,
+      "edges": {
+        "a7a8": "c626f38e9c758850314c111e50a09a3d"
+      },
+      "fen": "3a1ab2/2N1k4/C3b4/8p/9/P8/2P1P3P/6p2/4A4/3K1A3 w - - 0 1",
+      "legal_moves": [
+        "a7a8",
+        "c8d6",
+        "c8e7",
+        "a4a5",
+        "a7a5",
+        "a7a6",
+        "a7a9",
+        "a7b7",
+        "a7c7",
+        "a7d7",
+        "c3c4",
+        "c8a9",
+        "c8b6",
+        "c8e9",
+        "d0d1",
+        "d0e0",
+        "e1d2",
+        "e1f2",
+        "e3e4",
+        "i3i4"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "a7d6de0051c2700cfe4b387a0b8d96d3": {
+      "dtm_plies": 4,
+      "edges": {
+        "e8d9": "d16f92d75b9dd31fccbf15828843f652"
+      },
+      "fen": "3Rkab2/4a4/C3b4/1N6p/9/P8/2P1P3P/6p2/4A4/3K1A3 b - - 0 1",
+      "legal_moves": [
+        "e8d9"
+      ],
+      "longest_mate_plies": 4,
+      "remaining_plies": 4,
+      "terminal": false,
+      "turn": -1
+    },
+    "c626f38e9c758850314c111e50a09a3d": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3a1ab2/C1N1k4/4b4/8p/9/P8/2P1P3P/6p2/4A4/3K1A3 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "d16f92d75b9dd31fccbf15828843f652": {
+      "dtm_plies": 3,
+      "edges": {
+        "b6c8": "7325abbd38ecc6408d3aec7e5b5f389e"
+      },
+      "fen": "3akab2/9/C3b4/1N6p/9/P8/2P1P3P/6p2/4A4/3K1A3 w - - 0 1",
+      "legal_moves": [
+        "b6c8",
+        "a7a9",
+        "b6d7",
+        "a4a5",
+        "a7a5",
+        "a7a6",
+        "a7a8",
+        "a7b7",
+        "a7c7",
+        "a7d7",
+        "b6a8",
+        "b6c4",
+        "b6d5",
+        "c3c4",
+        "d0d1",
+        "d0e0",
+        "e1d2",
+        "e1f2",
+        "e3e4",
+        "i3i4"
+      ],
+      "longest_mate_plies": 3,
+      "remaining_plies": 3,
+      "terminal": false,
+      "turn": 1
+    }
+  },
+  "proof_defender_coverage": "all_legal",
+  "record_key": "308dcb20fcc3d0ff5fc695fd2c3bd8f80bfc2c0fc8dbcf1b388dd0bd21e53dcd",
+  "requested_max_attacker_moves": 5,
+  "root": "7e7d54422452e03e79f74d196275e893",
+  "ruleset": "standard",
+  "scope": "bounded legal play; no official long-check/chase adjudication",
+  "seconds": 21.516939,
+  "shortest_attacker_moves": 4,
+  "shortest_certified": true,
+  "solution_set": "all locally shortest forced-mate attacker choices",
+  "task_id": "xiangqi-history-derived-ec5a33444b6aa38b",
+  "version": "xiangqi-shortest-solution-dag-v2",
+  "visits": 49207
+}

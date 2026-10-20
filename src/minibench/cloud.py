@@ -22,6 +22,7 @@ import shutil
 import signal
 import statistics
 import subprocess
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -32,7 +33,7 @@ from minibench.core.checkpoint import (
     read_json_object, sha256_file,
 )
 from minibench.core.rate_limit import RateGate
-from minibench.core.streaming import JournalClient, append_json, now, replay_h2_engine, safe_error
+from minibench.core.streaming import JournalClient, append_json, call_attempts, now, replay_h2_engine, safe_error
 from minibench.factory.agents import AGENT_NAMES, REASONING_AGENTS
 from minibench.agents.passthrough import PassthroughAgent
 from minibench.core.agent import ReasoningConfig
@@ -247,6 +248,19 @@ def prepare(config_path: Path, suite: Path, *, pilot_count: int | None = None):
         validate_experiment_config(config)
         spec, source, tasks = select_tasks(config, count)
         family = config["task"]["family"]
+        tree_directory = config.get("evaluation",{}).get("solution_tree_dir")
+        if family in {"xiangqi-history","xiangqi-rule-variants"} and tree_directory:
+            from minibench.datasets.xiangqi.solution_tree import TreeSession
+            directory = Path(tree_directory)
+            for task in tasks:
+                raw = asdict(task) if is_dataclass(task) else task
+                TreeSession(raw,directory)  # Reject unknown shortest before any paid request.
+                tree_file = freeze_file(directory/f"{task_id(task)}.json",suite)
+                if tree_file["path"] not in file_paths:
+                    plan["files"].append(tree_file)
+                    file_paths.add(tree_file["path"])
+            config["evaluation"]["solution_tree_dir"] = str(
+                Path("inputs")/directory.resolve().relative_to(ROOT))
         if family == "xiangqi-rule-variants":
             candidate = source.resolve().parent / "runtime_certificates.json"
             if candidate.is_file():
@@ -308,8 +322,11 @@ def prepare(config_path: Path, suite: Path, *, pilot_count: int | None = None):
             for agent_name in agents:
                 for mode in modes:
                     identity = [name, agent_name, task_id(t), mode]
-                    plan["jobs"].append({"key": fingerprint_payload(identity),
-                        "experiment": name, "agent": agent_name, "task_id": task_id(t), "mode": mode})
+                    job={"key": fingerprint_payload(identity),
+                         "experiment": name, "agent": agent_name, "task_id": task_id(t), "mode": mode}
+                    if family == "xiangqi-rule-variants":
+                        job["c2_phase"] = "standard" if t["ruleset"]=="standard" else "variant"
+                    plan["jobs"].append(job)
     plan["planned_jobs"] = len(plan["jobs"])
     plan["plan_sha256"] = fingerprint_payload(plan)
     atomic_write_json(suite / "plan.json", plan)
@@ -318,6 +335,16 @@ def prepare(config_path: Path, suite: Path, *, pilot_count: int | None = None):
     })
     return plan
 
+
+
+def c2_phase_dependencies(plan):
+    """Each architecture finishes its standard baseline before any C2 variant."""
+    baselines={}
+    for job in plan["jobs"]:
+        if job.get("c2_phase")=="standard":
+            baselines.setdefault((job["experiment"],job["agent"]),set()).add(job["key"])
+    return {job["key"]:baselines.get((job["experiment"],job["agent"]),set())
+            for job in plan["jobs"] if job.get("c2_phase")=="variant"}
 
 
 def build_agent(name, client, config):
@@ -342,13 +369,44 @@ def _manager_initializer():
 
 
 def _worker_initializer():
+    # Give the worker and its engines a private group for bounded fault cleanup.
+    if hasattr(os, "setsid"):
+        os.setsid()
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    signal.signal(signal.SIGTERM, _terminate_idle_worker)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 
-def _terminate_idle_worker(signum, frame):
-    # No job/HTTP stream is open while a worker waits on the queue.
-    os._exit(0)
+def _shutdown_pool(pool, *, failed, grace_seconds=15):
+    """Let idle workers leave through pool sentinels, not abrupt queue exits.
+
+    Active workers handle SIGTERM in execute_job and journal their partial
+    response. A watchdog kills only this pool's process groups if cooperative
+    cleanup stalls; ordinary successful shutdown has no watchdog.
+    """
+    processes = list((pool._processes or {}).values())
+    forced = []
+    def force_stop():
+        for process in processes:
+            if process.is_alive():
+                try:
+                    if hasattr(os, "killpg") and os.getpgid(process.pid) == process.pid:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
+                    forced.append(process.pid)
+                except ProcessLookupError:
+                    pass
+    watchdog = threading.Timer(grace_seconds, force_stop) if failed else None
+    if watchdog is not None:
+        watchdog.daemon = True
+        watchdog.start()
+    try:
+        pool.shutdown(wait=True, cancel_futures=True)
+    finally:
+        if watchdog is not None:
+            watchdog.cancel()
+            watchdog.join()
+    return forced
 
 
 def execute_job(suite_text, plan, job, gate):
@@ -384,6 +442,8 @@ def execute_job(suite_text, plan, job, gate):
         )
         agent = build_agent(job["agent"], client, config["agent"])
         evaluation = deepcopy(config.get("evaluation", {}))
+        if family in {"xiangqi-history","xiangqi-rule-variants"} and evaluation.get("solution_tree_dir"):
+            evaluation["solution_tree_dir"] = str(suite/evaluation["solution_tree_dir"])
         if family == "xiangqi-history":
             evaluation["history_mode"] = job["mode"]
         elif family == "xiangqi-multimodal":
@@ -505,47 +565,88 @@ def report(suite, plan, completed):
                         "p95_seconds": seconds[max(0, math.ceil(.95 * len(seconds)) - 1)]}
     # Sum each actually saved API response exactly once; replay does not rebill.
     usages = {"known_success_tokens": 0, "saved_successful_calls": 0,
-              "successful_calls_without_usage": 0, "unfinished_attempts": 0}
+              "successful_calls_without_usage": 0, "unfinished_attempts": 0,
+              "known_failed_tokens": 0, "known_total_tokens": 0,
+              "started_attempts": 0, "failed_attempts_with_usage": 0,
+              "attempts_without_usage": 0}
+    from minibench.datasets.xiangqi.resources import (
+        physical_bucket, add_physical_attempt, finish_physical_bucket, assess_attempt_usage,
+    )
+    resources = {}
     for job in plan["jobs"]:
         calls = suite / "jobs" / job["key"] / "calls"
-        for p in calls.glob("[0-9][0-9][0-9][0-9].json"):
-            response = read_json_object(p)["response"]
-            usages["saved_successful_calls"] += 1
-            u = response.get("usage")
-            tokens = u.get("total_tokens") if isinstance(u, dict) else None
-            if (isinstance(tokens, (int, float)) and not isinstance(tokens, bool)
-                    and math.isfinite(tokens) and tokens >= 0):
-                usages["known_success_tokens"] += tokens
+        for attempt in call_attempts(calls):
+            experiment = plan["experiments"][job["experiment"]]
+            if experiment["family"].startswith("xiangqi-"):
+                bucket = resources.setdefault(job["experiment"],physical_bucket())
+                pricing = experiment["configs"][job["agent"]].get("evaluation",{}).get("pricing")
+                add_physical_attempt(bucket,attempt,pricing)
+            success = attempt["status"] == "success"
+            usages["started_attempts"] += 1
+            usages["saved_successful_calls" if success else "unfinished_attempts"] += 1
+            assessment = assess_attempt_usage(attempt)
+            tokens = assessment["total_tokens"]
+            if tokens is not None:
+                usages["known_success_tokens" if success else "known_failed_tokens"] += int(tokens)
+                usages["known_total_tokens"] += int(tokens)
+                if not success:
+                    usages["failed_attempts_with_usage"] += 1
             else:
-                usages["successful_calls_without_usage"] += 1
-        for p in (calls / "attempts").glob("*/partial.json"):
-            committed = calls / (p.parent.name.split("-")[0] + ".json")
-            if read_json_object(p).get("status") != "completed" or not committed.exists():
-                usages["unfinished_attempts"] += 1
+                usages["attempts_without_usage"] += 1
+                if success:
+                    usages["successful_calls_without_usage"] += 1
+    usages["usage_complete"] = (usages["started_attempts"] > 0
+                                and usages["attempts_without_usage"] == 0)
+    usages["total_tokens"] = usages["known_total_tokens"] if usages["usage_complete"] else None
+    if usages["started_attempts"] == usages["attempts_without_usage"]:
+        for key in ("known_success_tokens", "known_failed_tokens", "known_total_tokens"):
+            usages[key] = None
     summary = {"completed_jobs": len(completed), "planned_jobs": len(plan["jobs"]),
                "by_experiment_latency": totals, "usage": usages,
+               "by_experiment_resources": {name:finish_physical_bucket(value)
+                                           for name,value in resources.items()},
                "note": "Unknown/incomplete request usage is not zero; this is not an account balance."}
     atomic_write_json(suite / "summary.json", summary)
     return summary
 
 
 def restore_accounting(suite, plan, gate):
+    from minibench.datasets.xiangqi.resources import assess_attempt_usage
     for job in plan["jobs"]:
         exp = plan["experiments"][job["experiment"]]
         group = plan["accounts"][exp["account"]]["rate_group"]
         calls = suite / "jobs" / job["key"] / "calls"
-        for p in calls.glob("[0-9][0-9][0-9][0-9].json"):
-            entry = read_json_object(p)
-            gate.restore(group, entry["response"].get("usage"), entry.get("at"))
-        for p in (calls / "attempts").glob("*/started.json"):
-            gate.restore_start(group, read_json_object(p)["at"])
-        for p in (calls / "attempts").glob("*/partial.json"):
-            partial = read_json_object(p)
-            # A completed partial without a committed response is also charged
-            # once, but not used as a successful replay entry.
-            committed = calls / (p.parent.name.split("-")[0] + ".json")
-            if partial.get("status") != "completed" or not committed.exists():
-                gate.restore(group, partial.get("usage"), partial.get("at"))
+        for attempt in call_attempts(calls):
+            if attempt.get("started_at"):
+                gate.restore_start(group, attempt["started_at"])
+            usage = attempt.get("usage") if assess_attempt_usage(attempt)["total_tokens"] is not None else None
+            gate.restore(group, usage, attempt.get("at"))
+
+
+def verify_shortest_trees(suite, plan):
+    """Preflight every tree before ANY job can issue a paid request.
+
+    The legacy depth-3 diagnostic bypass never bypasses shortest-tree checks.
+    H2 needs the same preflight as C2; checking only inside its worker is late
+    when another concurrently scheduled task has already used the account.
+    """
+    from minibench.datasets.xiangqi.schema import load_records
+    from minibench.datasets.xiangqi.solution_tree import TreeSession
+    for exp in plan['experiments'].values():
+        family=exp['family']
+        if family not in {'xiangqi-history','xiangqi-rule-variants'}:
+            continue
+        trees=next(iter(exp['configs'].values())).get('evaluation',{}).get('solution_tree_dir')
+        wanted=set(exp['task_ids'])
+        records=[r for r in load_records(suite/exp['source'],expected_family=family)
+                 if r['id'] in wanted]
+        if {r['id'] for r in records} != wanted:
+            raise ValueError('Frozen shortest-tree task selection is incomplete')
+        if not trees and any(r.get('shortest_proof') for r in records):
+            raise ValueError('Certified shortest-mate tasks require solution_tree_dir')
+        if trees:
+            for record in records:
+                TreeSession(record,suite/trees)
 
 
 def run(suite, plan, *, workers=None, allow_uncertified_c2=False):
@@ -553,11 +654,16 @@ def run(suite, plan, *, workers=None, allow_uncertified_c2=False):
     if len(completed) == len(plan["jobs"]):
         report(suite, plan, completed)
         return 0
+    verify_shortest_trees(suite,plan)
     if not allow_uncertified_c2:
         from minibench.datasets.xiangqi.variants.certification import certificate_header_valid, verify_winning_line
         from minibench.datasets.xiangqi.schema import load_records
         for exp in plan["experiments"].values():
             if exp["family"] != "xiangqi-rule-variants":
+                continue
+            trees = next(iter(exp["configs"].values())).get("evaluation",{}).get("solution_tree_dir")
+            if trees:
+                # Already checked unconditionally, including H2, above.
                 continue
             source = suite / exp["source"]
             path = source.parent / "runtime_certificates.json"
@@ -597,6 +703,7 @@ def run(suite, plan, *, workers=None, allow_uncertified_c2=False):
     if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 64:
         raise ValueError("workers must be in 1..64")
     queue = [j for j in plan["jobs"] if j["key"] not in completed]
+    dependencies=c2_phase_dependencies(plan)
     started = time.perf_counter()
     state = {"status": "running", "pid": os.getpid(), "workers": count,
              "completed_jobs": len(completed), "planned_jobs": len(plan["jobs"]),
@@ -622,8 +729,14 @@ def run(suite, plan, *, workers=None, allow_uncertified_c2=False):
         save()
         while queue or futures:
             while queue and len(futures) < count:
-                job = queue.pop(0)
+                index=next((i for i,j in enumerate(queue)
+                            if dependencies.get(j["key"],set()) <= completed.keys()),None)
+                if index is None:
+                    break
+                job = queue.pop(index)
                 futures[pool.submit(execute_job, str(suite), plan, job, gate)] = job
+            if not futures:
+                raise RuntimeError("No runnable job: unresolved C2 phase dependencies")
             done, _ = wait(futures, timeout=1, return_when=FIRST_COMPLETED)
             for future in done:
                 job = futures.pop(future)
@@ -655,9 +768,14 @@ def run(suite, plan, *, workers=None, allow_uncertified_c2=False):
              accounts=gate.snapshot() if gate is not None else {})
     finally:
         if pool is not None:
-            pool.shutdown(wait=True, cancel_futures=True)
+            forced = _shutdown_pool(pool, failed=failure is not None)
+            save(forced_worker_pids=forced)
         if gate is not None:
-            save(accounts=gate.snapshot(), active_jobs=[])
+            # Forced workers may not execute finally. Rebuild from durable
+            # physical-attempt evidence, retaining unknown usage reservations.
+            final_gate = RateGate(plan["limits"])
+            restore_accounting(suite, plan, final_gate)
+            save(accounts=final_gate.snapshot(), active_jobs=[])
         manager.shutdown()
         signal.signal(signal.SIGTERM, previous_term)
         completed = completed_jobs(suite, plan)
@@ -678,7 +796,7 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int)
     parser.add_argument("--pilot-count", type=int)
-    parser.add_argument("--allow-uncertified-c2", action="store_true")
+    parser.add_argument("--allow-uncertified-c2", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     os.chdir(ROOT)
     suite = args.output.resolve()

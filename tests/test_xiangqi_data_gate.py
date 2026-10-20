@@ -34,9 +34,10 @@ def d3_fixture():
         "d3_analysis": {"version": "d3-structural-v2", "legal_move_count": 30,
             "mate_moves_uci": ["b8b9", "b8d8"], "mate_move_count": 2,
             "non_mating_check_count": 2, "piece_count": 5, "difficulty_score": 0.0,
-            "difficulty_factors": {key: 0.0 for key in (
-                "choice_pressure", "near_miss_rate", "state_load", "choice_pressure_percentile",
-                "near_miss_rate_percentile", "state_load_percentile")}}}
+            "difficulty_factors": {
+                "choice_pressure": 28 / 30, "near_miss_rate": 0.5, "state_load": 5,
+                "choice_pressure_percentile": 0.0, "near_miss_rate_percentile": 0.0,
+                "state_load_percentile": 0.0}}}
 
 
 def h2_fixture():
@@ -231,7 +232,7 @@ class XiangqiSourceGateTests(unittest.TestCase):
             self.assertFalse(report["valid"])
             reasons = [why for item in report["records"] for why in item["reasons"]]
             self.assertIn("h2_fen_mapping_mismatch", reasons)
-            self.assertIn("h2_principal_variation_mapping_mismatch", reasons)
+            self.assertTrue(any(why.startswith("record_validation_failed:") for why in reasons))
 
     def test_unknown_or_missing_h2_source_cannot_be_certified(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -256,6 +257,11 @@ class XiangqiDataGateTests(unittest.TestCase):
         self.assertTrue(good["valid"], good)
         record["d3_analysis"]["mate_moves_uci"] = ["b8b9"]
         record["d3_analysis"]["mate_move_count"] = 1
+        # Even internally consistent difficulty metadata cannot hide a missing
+        # true mating move from the independent board enumeration.
+        factors = record["d3_analysis"]["difficulty_factors"]
+        factors["choice_pressure"] = 29 / 30
+        factors["near_miss_rate"] = 2 / 3
         bad = audit_record(record, record["family"])
         self.assertFalse(bad["valid"])
         self.assertIn("stored_mate_set_disagrees_with_independent_enumeration", bad["reasons"])

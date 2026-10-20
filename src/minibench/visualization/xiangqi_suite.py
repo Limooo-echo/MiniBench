@@ -22,6 +22,8 @@ NAMES = {"passthrough": "Passthrough", "direct": "Direct", "cot": "CoT",
          "self-consistency": "Self-Consistency"}
 METRICS = {
     "mate_rate": ("Checkmate rate (bounded run)", True),
+    "mate_within_shortest_rate": ("Checkmate within certified shortest bound", True),
+    "mate_within_shortest_plus_two_rate": ("Checkmate within shortest + 2 attacker moves", True),
     "legality_rate": ("Legal move rate (mean over tasks)", True),
     "recognition_accuracy": ("Board recognition accuracy (text: transcription control)", True),
     "mate_within_prescribed_rate": ("Checkmate rate within reference horizon", True),
@@ -61,6 +63,7 @@ def comparison_rows(suite: Path) -> list[dict]:
                 bucket = buckets.get(mode, {})
                 metrics = ["mate_rate", "legality_rate"]
                 if family in ("xiangqi-history", "xiangqi-rule-variants"):
+                    metrics = ["mate_within_shortest_rate","mate_within_shortest_plus_two_rate","legality_rate"]
                     metrics += ["avg_cp_loss" if family == "xiangqi-history" else "avg_variant_loss"]
                 if family == "xiangqi-multimodal":
                     metrics += ["recognition_accuracy"]

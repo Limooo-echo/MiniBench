@@ -116,9 +116,11 @@ def main() -> int:
     args = parser.parse_args()
     if args.in_place == (args.output is not None):
         parser.error("choose exactly one of --in-place or --output")
+    from minibench.datasets.xiangqi.provenance import require_candidate_outputs
+    destination = args.input if args.in_place else args.output
+    require_candidate_outputs(destination)
     records = [json.loads(line) for line in args.input.read_text(encoding="utf-8").splitlines() if line.strip()]
     annotate(records)
-    destination = args.input if args.in_place else args.output
     destination.write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding="utf-8")
     print(json.dumps({"total": len(records), "difficulty": {label: sum(record["difficulty"] == label for record in records) for label, _ in LABEL_COUNTS}}, ensure_ascii=False))
     return 0

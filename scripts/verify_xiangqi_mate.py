@@ -288,7 +288,12 @@ def _sort_moves(
 
 
 class _FullWidthSearch:
-    """Exact bounded AND/OR search under the explicitly selected repeat policy."""
+    """Bounded AND/OR certificate; root iterative deepening establishes exact DTM.
+
+    Inside one query a winning distance is an upper bound. An attacker can
+    stop after a proven winning continuation. Root callers exhaust each first
+    move at successive odd horizons, so shortest distance/root sets stay exact.
+    """
 
     def __init__(self, attacker: int, rules: Any, stats: SearchStats,
                  node_budget: int, deadline: float | None,
@@ -311,10 +316,13 @@ class _FullWidthSearch:
 
     def _legal(self, state: Board, turn: int) -> tuple[reference.ReferenceMove, ...]:
         # Strict checkmate, never "win by capturing the general".
-        return tuple(_sort_moves(state, [
+        moves = _sort_moves(state, [
             m for m in reference.legal_moves(state, turn, self.rules)
             if abs(state[m.tr][m.tc]) != 1
-        ]))
+        ])
+        # Ordering only; quiet moves and every legal defender reply remain.
+        return tuple(sorted(moves, key=lambda m: not reference.in_check(
+            _apply(state,m), -turn, self.rules)))
 
     def solve(self, state: Board, turn: int, remaining: int,
               history: frozenset = frozenset()) -> int | None:
@@ -343,15 +351,12 @@ class _FullWidthSearch:
         if remaining <= 0:
             return None
         if turn == self.attacker:
-            best = None
             for move in moves:
                 self.stats.moves_expanded += 1
                 sub = self.solve(_apply(state, move), -turn, remaining - 1, history)
                 if sub is not None:
-                    best = 1 + sub if best is None else min(best, 1 + sub)
-                    if best == 1:
-                        break  # The proven minimum possible distance.
-            return best
+                    return 1 + sub  # Existence at THIS bound, not heuristic pruning.
+            return None
         worst = 0
         for move in moves:
             self.stats.moves_expanded += 1
@@ -487,6 +492,8 @@ def reference_mate_in_plies(record: dict[str, Any]) -> int | None:
 
 
 def reference_line(record: dict[str, Any]) -> list[str]:
+    if "shortest_proof" in record and isinstance(record.get("shortest_line_uci"),list):
+        return list(record["shortest_line_uci"])
     for key in ("h2_analysis", "c2_analysis"):
         block = record.get(key)
         if isinstance(block, dict) and isinstance(block.get("principal_variation_uci"), list):
@@ -525,6 +532,8 @@ def _first_move_proof(board: Board, side: int, uci: str, max_plies: int,
 
 
 def _distance_kind(record: dict[str, Any]) -> str:
+    if "shortest_proof" in record:
+        return "exact"
     kind = record.get("mate_distance_kind")
     if kind is None:
         kind = ("reference" if record.get("family") in
@@ -613,6 +622,8 @@ def verify_record(
     for block_name, key in (("oracle", "mate_in_plies"),
                             ("h2_analysis", "reference_mate_plies"),
                             ("c2_analysis", "reference_mate_plies")):
+        if "shortest_proof" in record and block_name!="oracle":
+            continue  # Historical engine references may be longer than the certified minimum.
         block = record.get(block_name)
         if block is not None and not isinstance(block, dict):
             issues.append(f"{block_name}_must_be_an_object")

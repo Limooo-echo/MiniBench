@@ -25,9 +25,8 @@ from minibench.datasets.xiangqi.dataset import XiangqiTask, xiangqi_task_from_di
 from minibench.datasets.xiangqi.engines.pikafish import PikafishEngine, board_to_pikafish_fen, pikafish_fingerprint
 from minibench.datasets.xiangqi.runtime import PROTOCOL_VERSION
 from minibench.datasets.xiangqi.schema import FAMILY_PATHS, runtime_dict, validate_record
+from minibench.datasets.xiangqi.solution_tree import TreeSession
 from minibench.datasets.xiangqi.variants.board import VariantBoard
-from minibench.datasets.xiangqi.variants.mate_search import score_moves_cpe
-from minibench.datasets.xiangqi.variants.certification import certificate_header_valid
 from minibench.datasets.xiangqi.variants.rules import Rule
 from minibench.datasets.xiangqi.text_encoding import FILES, piece_symbol
 
@@ -47,15 +46,41 @@ def replay_history(board: list[list[int]], side: int, moves: list[str]) -> tuple
 
 class CorrectAgent:
     """A transparent rules oracle; it deliberately receives task data for testing."""
-    def __init__(self, engine: PikafishEngine | None = None, *, c2_witnesses=None):
+    def __init__(self, engine: PikafishEngine | None = None, *, tree_records=None, solution_tree_dirs=None):
         self.engine, self.calls, self.resets = engine, 0, 0
-        self.c2_witnesses = c2_witnesses or {}
+        self.tree_records = tree_records or {}
+        self.solution_tree_dirs = solution_tree_dirs or {}
 
     def reset(self):
         self.resets += 1
 
+    def _tree_move(self, task, moves):
+        """Replay actual history into the certified tree, never a cached PV."""
+        task_id = task.id if isinstance(task, XiangqiTask) else task["id"]
+        record = self.tree_records[task_id]
+        runtime = runtime_dict(record)
+        session = TreeSession(record, self.solution_tree_dirs[record["family"]])
+        position = VariantBoard(runtime["board"], [Rule.from_dict(rule) for rule in runtime.get("rules", [])])
+        side = 1 if record["agent_color"] == "red" else -1
+        for ply, uci in enumerate(moves):
+            legal = {move.to_uci(): move for move in position.legal_moves(side)}
+            if uci not in legal:
+                raise ValueError(f"scripted tree history contains illegal move {uci}")
+            session.advance(position.board, side, ply, uci)
+            position.apply(legal[uci])
+            side = -side
+        if side != (1 if record["agent_color"] == "red" else -1):
+            raise ValueError("scripted tree agent was called out of turn")
+        node = session._node(position.board, side, len(moves))
+        if node is None or not node["edges"]:
+            raise ValueError("scripted acceptance history left the certified shortest tree")
+        return min(node["edges"])
+
     def _answer(self, task, moves=()):
         self.calls += 1
+        task_id = task.id if isinstance(task, XiangqiTask) else task["id"]
+        if task_id in self.tree_records:
+            return json.dumps({"move": self._tree_move(task, moves)})
         if isinstance(task, XiangqiTask):
             side = 1 if task.side_to_move == "ally" else -1
             if task.family == "xiangqi-history":
@@ -67,38 +92,14 @@ class CorrectAgent:
             else:
                 uci = d3.enumerate_mate_in_one_moves(task.board, side)[0]
         elif task.get("family") == "xiangqi-rule-variants":
-            agent_side = 1 if task.get("agent_color") == "red" else -1
-            side = 1 if task.get("side_to_move") == "ally" else -1
-            position = VariantBoard(
-                task["board"],
-                [Rule.from_dict(rule) for rule in task.get("rules", [])],
-            )
-            for uci in moves:
-                legal = {move.to_uci(): move for move in position.legal_moves(side)}
-                if uci not in legal:
-                    raise ValueError(f"scripted C2 history contains illegal move {uci}")
-                position.apply(legal[uci])
-                side = -side
-            if side != agent_side:
-                raise ValueError("scripted C2 agent was called out of turn")
-            reference = self.c2_witnesses.get(task["id"], [])
-            if list(moves) == reference[: len(moves)] and len(moves) < len(reference):
-                uci = reference[len(moves)]
-            else:
-                scored = score_moves_cpe(
-                    position,
-                    side,
-                    depth=3,
-                    perspective_side=agent_side,
-                )
-                if not scored:
-                    raise ValueError("scripted C2 search returned no move")
-                uci = scored[0].move.to_uci()
+            raise ValueError("scripted C2 acceptance requires its certified shortest tree")
         else:
             uci = d3.enumerate_mate_in_one_moves(task["board"], m2._agent_side(task))[0]
-        if isinstance(task, dict) and task.get("family") == "xiangqi-multimodal":
+        if (isinstance(task, dict) and task.get("family") == "xiangqi-multimodal") or (
+                isinstance(task, XiangqiTask) and task.family == "xiangqi-mate-in-one"):
+            board = task.board if isinstance(task, XiangqiTask) else task["board"]
             pieces = {f"{FILES[c]}{9-r}": piece_symbol(p)
-                      for r, row in enumerate(task["board"]) for c, p in enumerate(row) if p}
+                      for r, row in enumerate(board) for c, p in enumerate(row) if p}
             return json.dumps({"move": uci, "pieces": pieces})
         return json.dumps({"move": uci})
 
@@ -138,14 +139,15 @@ class FixedAgent(CorrectAgent):
         return self.output
 
 
-def legal_non_mate(task: XiangqiTask, *, require_reply=False) -> str:
+def legal_non_mate(task: XiangqiTask, *, require_reply=False, exclude_moves=()) -> str:
     side = 1 if task.side_to_move == "ally" else -1
     position = VariantBoard(task.board, [])
     mates = set(d3.enumerate_mate_in_one_moves(task.board, side))
     for move in position.legal_moves(side):
         trial = position.copy()
         trial.apply(move)
-        if move.to_uci() not in mates and (not require_reply or trial.legal_moves(-side)):
+        if (move.to_uci() not in mates and move.to_uci() not in exclude_moves
+                and (not require_reply or trial.legal_moves(-side))):
             return move.to_uci()
     raise ValueError(f"{task.id} has no suitable legal non-mating move for this acceptance case")
 
@@ -177,21 +179,21 @@ def run_acceptance(output_dir: Path, engine_path: Path, families: list[str], *, 
         "protocol_version": PROTOCOL_VERSION, "kind": "scripted_offline_acceptance", "uses_language_model": False,
         "created_at": datetime.now(timezone.utc).isoformat(), "families": families,
         "scope": "one selected position per family; not full-dataset validation or model performance",
-        "engine": pikafish_fingerprint(engine_path), "depths": {"d3_m2": 8, "h2_opponent": 16, "h2_scripted_agent": 20},
+        "engine": pikafish_fingerprint(engine_path), "depths": {"d3_m2_diagnostic": 8, "h2_cp_oracle_and_fallback": 16},
+        "multi_ply_policy": "certified shortest trees for both scripted attacker and tree defender; not a historical PV or depth-3 witness",
         "sources": sources,
     }
     (output_dir / "config.json").write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     (output_dir / "selected_tasks.jsonl").write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in selected.values()), encoding="utf-8")
     (output_dir / "plan.json").write_text(json.dumps({"cases": ["correct_scripted_agent", "returned_invalid_answer", "provider_timeout", "legal_wrong_d3", "diagnostic_engine_fault_d3_m2", "required_opponent_fault_h2"], "checkpoint": "append each individual task/mode result before continuing"}, indent=2) + "\n", encoding="utf-8")
     checks, recorded = {}, []
-    c2_witnesses = {}
-    if "c2" in families:
-        certificate_path = ROOT / "data/xiangqi/rule_variants/runtime_certificates.json"
-        bundle = json.loads(certificate_path.read_text())
-        records = [json.loads(line) for line in (ROOT / FAMILY_PATHS[FAMILIES["c2"]]).read_text().splitlines() if line.strip()]
-        if not certificate_header_valid(bundle, records, sources["c2"]["sha256"]):
-            raise ValueError("C2 runtime certificates do not bind the current corpus and policy")
-        c2_witnesses = {key: entry["moves_uci"] for key, entry in bundle["tasks"].items()}
+    tree_records = {record["id"]: record for family, record in selected.items() if family in {"h2", "c2"}}
+    tree_dirs = {FAMILIES[family]: ROOT / "data/xiangqi/solution_trees" / family
+                 for family in families if family in {"h2", "c2"}}
+    for record in tree_records.values():
+        session = TreeSession(record, tree_dirs[record["family"]])
+        if not session.enabled or session.off_tree:
+            raise ValueError("Acceptance requires a complete certified shortest tree")
     checkpoint_path = output_dir / "predictions.jsonl"
     checkpoint_path.touch(exist_ok=False)
 
@@ -208,11 +210,11 @@ def run_acceptance(output_dir: Path, engine_path: Path, families: list[str], *, 
         if family == "d3":
             results = d3.evaluate_mate_in_one_tasks([xiangqi_task_from_dict(record)], agent, pikafish_path=path, pikafish_depth=8, pikafish_binary_sha256=config["engine"]["binary_sha256"], pikafish_nnue_sha256=config["engine"]["eval_file_sha256"], on_result=checkpoint)
         elif family == "h2":
-            results = h2.evaluate_history_tasks([xiangqi_task_from_dict(record)], agent, history_mode="paired", pikafish_path=path, pikafish_depth=16, pikafish_binary_sha256=config["engine"]["binary_sha256"], pikafish_nnue_sha256=config["engine"]["eval_file_sha256"], on_result=checkpoint)
+            results = h2.evaluate_history_tasks([xiangqi_task_from_dict(record)], agent, history_mode="paired", solution_tree_dir=tree_dirs[FAMILIES["h2"]], pikafish_path=path, pikafish_depth=16, pikafish_binary_sha256=config["engine"]["binary_sha256"], pikafish_nnue_sha256=config["engine"]["eval_file_sha256"], on_result=checkpoint)
         elif family == "m2":
-            results = m2.evaluate_xiangqi_multimodal_tasks([runtime_dict(record)], agent, pikafish_path=path, pikafish_depth=8, pikafish_binary_sha256=config["engine"]["binary_sha256"], pikafish_nnue_sha256=config["engine"]["eval_file_sha256"], on_result=checkpoint)
+            results = m2.evaluate_xiangqi_multimodal_tasks([runtime_dict(record)], agent, modes=["chinese-piece-image"], pikafish_path=path, pikafish_depth=8, pikafish_binary_sha256=config["engine"]["binary_sha256"], pikafish_nnue_sha256=config["engine"]["eval_file_sha256"], on_result=checkpoint)
         else:
-            results = c2.evaluate_rule_variant_tasks([runtime_dict(record)], agent, on_result=checkpoint)
+            results = c2.evaluate_rule_variant_tasks([runtime_dict(record)], agent, solution_tree_dir=tree_dirs[FAMILIES["c2"]], on_result=checkpoint)
         return [asdict(result) if is_dataclass(result) else result for result in results]
 
     try:
@@ -233,10 +235,16 @@ def run_acceptance(output_dir: Path, engine_path: Path, families: list[str], *, 
                 checks["d3_m2.all_submitted_positions_confirmed_by_pikafish"] = len(proofs) == 100
                 (output_dir / "one_move_oracles.json").write_text(json.dumps(proofs, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             for family in families:
-                results = run_case(family, "correct_scripted_agent", CorrectAgent(reference_engine, c2_witnesses=c2_witnesses))
+                results = run_case(family, "correct_scripted_agent", CorrectAgent(reference_engine, tree_records=tree_records, solution_tree_dirs=tree_dirs))
                 checks[family + ".correct"] = all(r["status"] == "ok" and r["success"] is True for r in results)
                 if family == "m2":
                     checks["m2.recognition"] = all(r["recognition_accuracy"] == 1 for r in results)
+                    checks["m2.image_only"] = len(results) == 1 and all(r["input_mode"] == "chinese-piece-image" for r in results)
+                if family in {"h2", "c2"}:
+                    checks[family + ".certified_shortest_protocol"] = all(
+                        r["protocol_version"] == "xiangqi-shortest-tree-v1"
+                        and r["mate_within_shortest_steps"] is True
+                        and r["mate_within_shortest_plus_two_steps"] is True for r in results)
                 bad = FixedAgent()
                 results = run_case(family, "returned_invalid_answer", bad)
                 checks[family + ".invalid_answer"] = all(r["status"] == "invalid" and r["success"] is False for r in results)
@@ -257,7 +265,9 @@ def run_acceptance(output_dir: Path, engine_path: Path, families: list[str], *, 
                 results = run_case("d3", "legal_wrong_answer", FixedAgent(json.dumps({"move": wrong})))
                 checks["d3.legal_wrong_fails"] = all(r["is_legal"] and r["status"] == "ok" and r["success"] is False for r in results)
             if "h2" in families:
-                move = legal_non_mate(xiangqi_task_from_dict(selected["h2"]), require_reply=True)
+                tree = TreeSession(selected["h2"], tree_dirs[FAMILIES["h2"]])
+                root_moves = tree.tree["nodes"][tree.tree["root"]]["edges"]
+                move = legal_non_mate(xiangqi_task_from_dict(selected["h2"]), require_reply=True, exclude_moves=root_moves)
                 results = run_case("h2", "required_opponent_fault", FixedAgent(json.dumps({"move": move})), path=unavailable)
                 checks["h2.required_opponent_fault_missing"] = all(r["status"] == "error" and r["success"] is None and r["error"]["stage"] == "opponent_engine" for r in results)
     except BaseException as exc:

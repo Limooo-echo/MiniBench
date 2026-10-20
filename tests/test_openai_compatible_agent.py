@@ -46,6 +46,19 @@ def make_http_error(status_code, *, retry_after=None):
 
 
 class OpenAICompatibleAgentTests(unittest.TestCase):
+    def test_explicit_omit_tokens_overrides_internal_agent_budgets(self):
+        client = OpenAICompatibleClient(
+            model="fixture",base_url="https://invalid.example/v1",api_key_env="FIXTURE_KEY",
+            omit_max_tokens=True,extra_body={"max_completion_tokens":128})
+        payload=client.build_payload("fixture",max_tokens=512)
+        self.assertNotIn("max_tokens",payload)
+        self.assertNotIn("max_completion_tokens",payload)
+        from minibench.factory.agents import make_agent_from_config
+        agent=make_agent_from_config({"name":"direct","max_tokens":512},
+            {"name":"generic","model":"fixture","base_url":"https://invalid.example/v1",
+             "api_key_env":"FIXTURE_KEY","omit_max_tokens":True})
+        self.assertTrue(agent.runtime.client.omit_max_tokens)
+
     def test_deepseek_provider_defaults(self):
         model, base_url, api_key_env = resolve_provider(
             "deepseek",

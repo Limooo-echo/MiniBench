@@ -42,4 +42,4 @@ experiments:
     config: config/experiments/xiangqi_multimodal.yaml
     account: qwen
     evaluation_overrides:
-      input_modes: [text, chinese-piece-image]
+      input_modes: [chinese-piece-image]

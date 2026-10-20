@@ -63,6 +63,8 @@ def main() -> int:
     parser.add_argument("--d3", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    from minibench.datasets.xiangqi.provenance import require_candidate_outputs
+    require_candidate_outputs(args.output)
     records = [
         json.loads(line)
         for line in args.d3.read_text(encoding="utf-8").splitlines()

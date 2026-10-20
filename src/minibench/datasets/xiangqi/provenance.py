@@ -15,6 +15,22 @@ REQUIRED_EXTERNAL_PROVENANCE = (
 )
 
 
+def require_candidate_outputs(*paths: str | Path | None) -> None:
+    """Legacy pool tools may not overwrite the certified release or its reports.
+
+    Keep their imported candidate-building functions for reproducibility, but
+    stage CLI output outside data/xiangqi and publish through the tree-aware
+    release workflow. Resolve symlinks as well as '..' before checking.
+    """
+    protected = Path(__file__).resolve().parents[4] / "data" / "xiangqi"
+    for path in paths:
+        if path is not None and Path(path).resolve().is_relative_to(protected.resolve()):
+            raise ValueError(
+                "Candidate-only tool cannot write the certified data/xiangqi release; "
+                "choose an output staging directory, then use "
+                "prepare_xiangqi_shortest_release.py and validate_xiangqi_data.py.")
+
+
 def audit_xiangqi_release(manifest_path: str | Path, *, validation_report: str | Path | None = None) -> dict[str, Any]:
     manifest_file = Path(manifest_path)
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
@@ -86,6 +102,15 @@ def audit_xiangqi_release(manifest_path: str | Path, *, validation_report: str |
     }
     gate_path = Path(validation_report) if validation_report else manifest_file.parent / "independent_validation.json"
     gate_problems = []
+    for rows in records_by_family.values():
+        for record in rows:
+            if "shortest_proof" not in record:
+                continue
+            proof=record["shortest_proof"]
+            tree_path=repository_root/proof["tree_path"]
+            if (not tree_path.is_file() or
+                    hashlib.sha256(tree_path.read_bytes()).hexdigest()!=proof["tree_sha256"]):
+                gate_problems.append(f"shortest_tree_missing_or_changed:{record['id']}")
     submitted = manifest.get("submission")
     if submitted:
         selection_path = manifest_file.parent / "submission_manifest.json"
@@ -140,11 +165,22 @@ def audit_xiangqi_release(manifest_path: str | Path, *, validation_report: str |
         if not gate.get("runtime_policy_certified"):
             runtime_policy_problems.append("c2_runtime_policy_not_certified")
         else:
-            cert_path = manifest_file.parent / "rule_variants/runtime_certificates.json"
             cert = gate.get("c2_runtime_certificates", {})
-            if (not cert.get("valid") or not cert_path.is_file()
-                    or hashlib.sha256(cert_path.read_bytes()).hexdigest() != cert.get("sha256")):
-                runtime_policy_problems.append("c2_runtime_certificate_missing_or_changed")
+            c2_rows = records_by_family.get("xiangqi-rule-variants", [])
+            if c2_rows and all("shortest_proof" in r for r in c2_rows):
+                if not cert.get("valid"):
+                    runtime_policy_problems.append("c2_shortest_certification_failed")
+                for record in c2_rows:
+                    proof = record["shortest_proof"]
+                    tree_path = repository_root / proof["tree_path"]
+                    if (not tree_path.is_file() or
+                            hashlib.sha256(tree_path.read_bytes()).hexdigest() != proof["tree_sha256"]):
+                        runtime_policy_problems.append(f"c2_shortest_tree_missing_or_changed:{record['id']}")
+            else:
+                cert_path = manifest_file.parent / "rule_variants/runtime_certificates.json"
+                if (not cert.get("valid") or not cert_path.is_file()
+                        or hashlib.sha256(cert_path.read_bytes()).hexdigest() != cert.get("sha256")):
+                    runtime_policy_problems.append("c2_runtime_certificate_missing_or_changed")
     else:
         gate_problems.append("independent_validation_missing")
         runtime_policy_problems.append("independent_validation_missing")

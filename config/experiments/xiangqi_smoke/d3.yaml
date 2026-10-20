@@ -1,5 +1,5 @@
 task:
-  prompt_version: xiangqi-reasoning-v2
+  prompt_version: xiangqi-paired-one-move-v3
   family: xiangqi-mate-in-one
   path: data/xiangqi/mate_in_one/tasks.jsonl
   selection:
@@ -7,21 +7,24 @@ task:
     sha256: 6ececbfce6d4655e6adbe2ff9db3b5abce3bfce7dbc5cca5f18c8ad4256db5b8
 agent:
   name: direct
-  max_tokens: 1024
+  max_format_repairs: 0
 provider:
   name: qwen
   model: qwen3.8-max
   api_key_env: DASHSCOPE_API_KEY
-  json_mode: true
+  omit_max_tokens: true
+  timeout: 900
+  max_retries: 0
+  json_mode: false
   extra_body:
-    enable_thinking: false
-  max_retries: 3
-  timeout: 300
+    enable_thinking: true
 evaluation:
+  final_move_timeout_seconds: 900
   pikafish_depth: 8
   pikafish_timeout: 60.0
   pikafish_binary_sha256: 0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3
   pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
+  pricing: null
 run:
   output_dir: runs
   run_name: xiangqi_d3_direct_smoke_r1

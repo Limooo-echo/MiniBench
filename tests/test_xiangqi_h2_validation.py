@@ -131,7 +131,8 @@ class H2ValidationTests(unittest.TestCase):
         self.assertEqual({item['id'] for item in validations}, current_ids)
         self.assertTrue(all(item['valid'] for item in validations))
         for record in records:
-            self.assertIsInstance(record.get('replaces_id'), str)
+            self.assertTrue(record["shortest_proof"]["tree_complete"])
+            self.assertEqual(len(record["shortest_line_uci"]),2*record["shortest_mate_moves"]-1)
             runs = record['h2_analysis']['validation_runs']
             self.assertEqual({run['requested_depth'] for run in runs}, {16, 20})
             self.assertEqual(build_h2.assess_depth_pair(record['fen'], runs), [])

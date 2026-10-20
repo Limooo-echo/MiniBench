@@ -86,7 +86,9 @@ class XiangqiV2DataTests(unittest.TestCase):
         self.assertFalse(report["release_ready"])
         self.assertEqual(report["unresolved_external_provenance"], ["source_license"])
         self.assertEqual(report["expected_d3_m2_overlap_count"], 100)
-        self.assertEqual(report["expected_h2_c2_overlap_count"], 20)
+        expected_overlap=len({r["fen"] for r in self.by_family["xiangqi-history"]}
+                             &{r["fen"] for r in self.by_family["xiangqi-rule-variants"]})
+        self.assertEqual(report["expected_h2_c2_overlap_count"],expected_overlap)
         self.assertEqual(report["unexpected_cross_family_overlap_count"], 0)
         c2_audit = report["per_family"]["xiangqi-rule-variants"]
         self.assertEqual(c2_audit["unique_fen_count"], 50)
@@ -305,7 +307,7 @@ class XiangqiV2DataTests(unittest.TestCase):
         )
         self.assertEqual(
             {difficulty: sum(r["difficulty"] == difficulty for r in history) for difficulty in ("short", "medium", "long")},
-            {"short": 4, "medium": 3, "long": 3},
+            {"short": 5, "medium": 5, "long": 0},
         )
         multimodal = sample_records(
             self.by_family["xiangqi-multimodal"], count=10, seed=42
@@ -342,8 +344,8 @@ class XiangqiV2DataTests(unittest.TestCase):
                 "xiangqi-rule-variants": "c2", "xiangqi-multimodal": "m2"}
         for family, config_path in CONFIG_PATHS.items():
             config = load_experiment_config(config_path)
-            expected_prompt = ("xiangqi-m2-recognition-v1" if family == "xiangqi-multimodal"
-                               else "xiangqi-reasoning-v2")
+            expected_prompt = ("xiangqi-paired-one-move-v3" if family in {"xiangqi-multimodal","xiangqi-mate-in-one"}
+                               else "xiangqi-shortest-tree-v1")
             self.assertEqual(config["task"]["prompt_version"], expected_prompt)
             self.assertNotIn("sampling", config["task"])
             self.assertNotIn("selection", config["task"])
@@ -357,7 +359,7 @@ class XiangqiV2DataTests(unittest.TestCase):
                 self.assertEqual(config["evaluation"]["search_depth"], 3)
                 self.assertEqual(
                     config["evaluation"]["horizon_policy"],
-                    "reference_mate_plies_plus_4",
+                    "shortest_plus_two_attacker_moves",
                 )
                 self.assertEqual(
                     config["evaluation"]["loss_unit"],
@@ -366,10 +368,11 @@ class XiangqiV2DataTests(unittest.TestCase):
             if family == "xiangqi-multimodal":
                 self.assertNotIn("max_plies", config["evaluation"])
                 self.assertTrue(config["evaluation"]["verify_with_pikafish"])
-                self.assertEqual(config["evaluation"]["input_modes"], ["text", "chinese-piece-image"])
+                self.assertEqual(config["evaluation"]["input_modes"], ["chinese-piece-image"])
             self.assertEqual(config["agent"]["name"], "direct")
             self.assertEqual(config["provider"]["name"], "qwen")
-            self.assertFalse(config["provider"]["extra_body"]["enable_thinking"])
+            self.assertTrue(config["provider"]["extra_body"]["enable_thinking"])
+            self.assertTrue(config["provider"]["omit_max_tokens"])
 
     def test_four_yaml_configs_load_through_factory_without_network(self):
         with tempfile.TemporaryDirectory() as directory:

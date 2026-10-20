@@ -238,7 +238,7 @@ class RuntimeErrorsTests(unittest.TestCase):
         agent = FixedAgent("first invalid answer")
         received = []
         with patch.object(m2, "render_board_png", return_value=b"image"):
-            results = m2.evaluate_xiangqi_multimodal_tasks([dict_fixture()], agent, verify_with_pikafish=False, on_result=received.append)
+            results = m2.evaluate_xiangqi_multimodal_tasks([dict_fixture()], agent, modes=["text","chinese-piece-image"], verify_with_pikafish=False, on_result=received.append)
         self.assertEqual(agent.calls, 2)
         self.assertEqual(agent.resets, 2)
         self.assertEqual(received, results)
@@ -258,7 +258,7 @@ class RuntimeErrorsTests(unittest.TestCase):
         with no_engine(d3):
             direct = d3.evaluate_mate_in_one_tasks([task], FixedAgent(raw))[0]
         self.assertTrue(direct.success)
-        self.assertIn("Black must CHECKMATE Red", d3._build_mate_in_one_prompt(task, VariantBoard(black_board, [])))
+        self.assertIn("checkmate Red in exactly this one Black move", d3._build_mate_in_one_prompt(task, VariantBoard(black_board, [])))
         with patch.object(m2, "render_board_png", return_value=b"image"):
             results = m2.evaluate_xiangqi_multimodal_tasks([dict_fixture(board=black_board, agent_color="black", side_to_move="enemy")], FixedAgent(raw), verify_with_pikafish=False)
         self.assertTrue(all(result["success"] for result in results))
@@ -385,7 +385,7 @@ class RuntimeErrorsTests(unittest.TestCase):
         client = ResponseClient(['{"move":"a8d8"}'] * 3)
         agent = DirectAgent(client)
         with patch.object(m2, "render_board_png", return_value=b"image"):
-            results = m2.evaluate_xiangqi_multimodal_tasks([dict_fixture()], agent, verify_with_pikafish=False)
+            results = m2.evaluate_xiangqi_multimodal_tasks([dict_fixture()], agent, modes=["text","chinese-piece-image"], verify_with_pikafish=False)
         self.assertTrue(all(r["success"] for r in results))
         self.assertEqual(len(client.options), 2)
         for key in ("temperature", "max_tokens", "json_mode"):

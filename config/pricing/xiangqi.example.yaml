@@ -1,0 +1,11 @@
+# Copy this mapping into evaluation.pricing or cloud evaluation_overrides.pricing.
+# Fill from the OFFICIAL tariff for the exact provider/model/region and date.
+# Null is unknown, not free. No current/future market price is assumed here.
+currency: CNY
+model: null
+input_per_million: null
+output_per_million: null
+cached_input_per_million: null
+source: null
+as_of: null
+# Completion usage normally includes reasoning tokens; never add them again.

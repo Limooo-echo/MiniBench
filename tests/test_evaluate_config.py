@@ -26,7 +26,7 @@ class EvaluateConfigTests(unittest.TestCase):
                 self.assertEqual(config["provider"]["model"], "qwen3.8-max")
                 self.assertEqual(
                     config["provider"]["extra_body"],
-                    {"enable_thinking": False},
+                    {"enable_thinking": filename == "xiangqi_multimodal.yaml"},
                 )
 
     def test_run_config_writes_run_artifacts(self):

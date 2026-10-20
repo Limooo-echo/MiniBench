@@ -1,0 +1,180 @@
+{
+  "attacker": 1,
+  "complete": true,
+  "deepest_mate_attacker_moves": 3,
+  "defender_coverage": "all_optimal",
+  "extension_attacker_moves": 2,
+  "forced_mate": true,
+  "initial_fen": "2bak4/C1n1a2N1/9/p7R/1r7/P3p4/5c3/4B4/4A4/2BAK4 w - - 0 1",
+  "max_attacker_moves": 3,
+  "nodes": {
+    "1a26b1967beb9467ce27bbd8b795e2ec": {
+      "dtm_plies": 2,
+      "edges": {
+        "e8f9": "b05d56dfccc7440a360ee392419b3250"
+      },
+      "fen": "2bakR3/C1n1a2N1/9/p8/1r7/P3p4/9/4B4/4A4/2BAK4 b - - 0 1",
+      "legal_moves": [
+        "e8f9"
+      ],
+      "longest_mate_plies": 2,
+      "remaining_plies": 2,
+      "terminal": false,
+      "turn": -1
+    },
+    "2b92c06fa2556eddfee2cc1690d7f3c6": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "2baka3/C1n6/5N3/p8/1r7/P3p4/9/4B4/4A4/2BAK4 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "990fc12ea08ab0051f8ce01173e20b5b": {
+      "dtm_plies": 3,
+      "edges": {
+        "i9f9": "1a26b1967beb9467ce27bbd8b795e2ec"
+      },
+      "fen": "2bakc2R/C1n1a2N1/9/p8/1r7/P3p4/9/4B4/4A4/2BAK4 w - - 0 1",
+      "legal_moves": [
+        "i9f9",
+        "h8f7",
+        "a8e8",
+        "h8f9",
+        "a4a5",
+        "a8a7",
+        "a8a9",
+        "a8b8",
+        "c0a2",
+        "e0f0",
+        "e1d2",
+        "e1f0",
+        "e1f2",
+        "e2c4",
+        "e2g0",
+        "e2g4",
+        "h8g6",
+        "h8i6",
+        "i9g9",
+        "i9h9",
+        "i9i0",
+        "i9i1",
+        "i9i2",
+        "i9i3",
+        "i9i4",
+        "i9i5",
+        "i9i6",
+        "i9i7",
+        "i9i8"
+      ],
+      "longest_mate_plies": 3,
+      "remaining_plies": 3,
+      "terminal": false,
+      "turn": 1
+    },
+    "b05d56dfccc7440a360ee392419b3250": {
+      "dtm_plies": 1,
+      "edges": {
+        "h8f7": "2b92c06fa2556eddfee2cc1690d7f3c6"
+      },
+      "fen": "2baka3/C1n4N1/9/p8/1r7/P3p4/9/4B4/4A4/2BAK4 w - - 0 1",
+      "legal_moves": [
+        "h8f7",
+        "h8f9",
+        "a4a5",
+        "a8a7",
+        "a8a9",
+        "a8b8",
+        "c0a2",
+        "e0f0",
+        "e1d2",
+        "e1f0",
+        "e1f2",
+        "e2c4",
+        "e2g0",
+        "e2g4",
+        "h8g6",
+        "h8i6"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "c86164c2621af099b7d8a21f1ca667d5": {
+      "dtm_plies": 4,
+      "edges": {
+        "f3f9": "990fc12ea08ab0051f8ce01173e20b5b"
+      },
+      "fen": "2bak3R/C1n1a2N1/9/p8/1r7/P3p4/5c3/4B4/4A4/2BAK4 b - - 0 1",
+      "legal_moves": [
+        "f3f9",
+        "e8f9"
+      ],
+      "longest_mate_plies": 4,
+      "remaining_plies": 4,
+      "terminal": false,
+      "turn": -1
+    },
+    "f48aea42153f7037dae85e9637b294f3": {
+      "dtm_plies": 5,
+      "edges": {
+        "i6i9": "c86164c2621af099b7d8a21f1ca667d5"
+      },
+      "fen": "2bak4/C1n1a2N1/9/p7R/1r7/P3p4/5c3/4B4/4A4/2BAK4 w - - 0 1",
+      "legal_moves": [
+        "i6i9",
+        "h8f7",
+        "a8e8",
+        "i6a6",
+        "a4a5",
+        "a8a7",
+        "a8a9",
+        "a8b8",
+        "c0a2",
+        "e0f0",
+        "e1d2",
+        "e1f0",
+        "e1f2",
+        "e2c4",
+        "e2g0",
+        "h8f9",
+        "h8g6",
+        "i6b6",
+        "i6c6",
+        "i6d6",
+        "i6e6",
+        "i6f6",
+        "i6g6",
+        "i6h6",
+        "i6i0",
+        "i6i1",
+        "i6i2",
+        "i6i3",
+        "i6i4",
+        "i6i5",
+        "i6i7",
+        "i6i8"
+      ],
+      "longest_mate_plies": 5,
+      "remaining_plies": 5,
+      "terminal": false,
+      "turn": 1
+    }
+  },
+  "proof_defender_coverage": "all_legal",
+  "record_key": "929138b301532a0b07b6628d69e205946b0777301d7f546d8d88100f924e127e",
+  "requested_max_attacker_moves": 5,
+  "root": "f48aea42153f7037dae85e9637b294f3",
+  "ruleset": "standard",
+  "scope": "bounded legal play; no official long-check/chase adjudication",
+  "seconds": 15.666545,
+  "shortest_attacker_moves": 3,
+  "shortest_certified": true,
+  "solution_set": "all locally shortest forced-mate attacker choices",
+  "task_id": "xiangqi-history-r1-revised-0080-6b986382ab",
+  "version": "xiangqi-shortest-solution-dag-v2",
+  "visits": 16863
+}

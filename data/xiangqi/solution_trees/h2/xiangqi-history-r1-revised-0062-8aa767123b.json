@@ -1,0 +1,172 @@
+{
+  "attacker": -1,
+  "complete": true,
+  "deepest_mate_attacker_moves": 3,
+  "defender_coverage": "all_optimal",
+  "extension_attacker_moves": 2,
+  "forced_mate": true,
+  "initial_fen": "4kab2/2R6/3a5/9/1r7/9/6n2/3ABK3/4C4/c4AB2 b - - 0 1",
+  "max_attacker_moves": 3,
+  "nodes": {
+    "1e3a3e4f845de63a0ae22ced87343860": {
+      "dtm_plies": 4,
+      "edges": {
+        "e1e4": "e5cf80871f081d05ac5bdbc37182f80f"
+      },
+      "fen": "4kab2/2R6/3a5/9/1r7/4n4/9/3ABK3/4C4/c4AB2 w - - 0 1",
+      "legal_moves": [
+        "e1e4",
+        "f2f1"
+      ],
+      "longest_mate_plies": 4,
+      "remaining_plies": 4,
+      "terminal": false,
+      "turn": 1
+    },
+    "3ef2b97db6d51b09871db42ce65fb3f8": {
+      "dtm_plies": 5,
+      "edges": {
+        "g3e4": "1e3a3e4f845de63a0ae22ced87343860"
+      },
+      "fen": "4kab2/2R6/3a5/9/1r7/9/6n2/3ABK3/4C4/c4AB2 b - - 0 1",
+      "legal_moves": [
+        "g3e4",
+        "b5e5",
+        "d7e8",
+        "e9d9",
+        "f9e8",
+        "g9e7"
+      ],
+      "longest_mate_plies": 5,
+      "remaining_plies": 5,
+      "terminal": false,
+      "turn": -1
+    },
+    "8e4e6715a22cfd3c30ea5596ffc0c925": {
+      "dtm_plies": 1,
+      "edges": {
+        "f5f4": "c6f1f8c69a750f5f1e19ebe78d070808"
+      },
+      "fen": "4kab2/2R6/3a5/9/5r3/5C3/9/3ABK3/9/c4AB2 b - - 0 1",
+      "legal_moves": [
+        "f5f4",
+        "a0g0",
+        "a0a1",
+        "a0a2",
+        "a0a3",
+        "a0a4",
+        "a0a5",
+        "a0a6",
+        "a0a7",
+        "a0a8",
+        "a0a9",
+        "a0b0",
+        "a0c0",
+        "a0d0",
+        "a0e0",
+        "d7e8",
+        "e9d9",
+        "f5a5",
+        "f5b5",
+        "f5c5",
+        "f5d5",
+        "f5e5",
+        "f5f6",
+        "f5f7",
+        "f5f8",
+        "f5g5",
+        "f5h5",
+        "f5i5",
+        "f9e8",
+        "g9e7",
+        "g9i7"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": -1
+    },
+    "9f341b681872e2563d68093660b6f807": {
+      "dtm_plies": 2,
+      "edges": {
+        "e4f4": "8e4e6715a22cfd3c30ea5596ffc0c925"
+      },
+      "fen": "4kab2/2R6/3a5/9/5r3/4C4/9/3ABK3/9/c4AB2 w - - 0 1",
+      "legal_moves": [
+        "e4f4"
+      ],
+      "longest_mate_plies": 2,
+      "remaining_plies": 2,
+      "terminal": false,
+      "turn": 1
+    },
+    "c6f1f8c69a750f5f1e19ebe78d070808": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "4kab2/2R6/3a5/9/9/5r3/9/3ABK3/9/c4AB2 w - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": 1
+    },
+    "e5cf80871f081d05ac5bdbc37182f80f": {
+      "dtm_plies": 3,
+      "edges": {
+        "b5f5": "9f341b681872e2563d68093660b6f807"
+      },
+      "fen": "4kab2/2R6/3a5/9/1r7/4C4/9/3ABK3/9/c4AB2 b - - 0 1",
+      "legal_moves": [
+        "b5f5",
+        "a0g0",
+        "a0a1",
+        "a0a2",
+        "a0a3",
+        "a0a4",
+        "a0a5",
+        "a0a6",
+        "a0a7",
+        "a0a8",
+        "a0a9",
+        "a0b0",
+        "a0c0",
+        "a0d0",
+        "a0e0",
+        "b5a5",
+        "b5b0",
+        "b5b1",
+        "b5b2",
+        "b5b3",
+        "b5b4",
+        "b5b6",
+        "b5b7",
+        "b5b8",
+        "b5b9",
+        "b5c5",
+        "b5d5",
+        "b5g5",
+        "b5h5",
+        "b5i5",
+        "e9d9",
+        "g9i7"
+      ],
+      "longest_mate_plies": 3,
+      "remaining_plies": 3,
+      "terminal": false,
+      "turn": -1
+    }
+  },
+  "proof_defender_coverage": "all_legal",
+  "record_key": "9d02d063df5b6a97eaea344b3556c3dc99e324ebb14cf8f7425eb13c1307d0bd",
+  "requested_max_attacker_moves": 5,
+  "root": "3ef2b97db6d51b09871db42ce65fb3f8",
+  "ruleset": "standard",
+  "scope": "bounded legal play; no official long-check/chase adjudication",
+  "seconds": 0.15859,
+  "shortest_attacker_moves": 3,
+  "shortest_certified": true,
+  "solution_set": "all locally shortest forced-mate attacker choices",
+  "task_id": "xiangqi-history-r1-revised-0062-8aa767123b",
+  "version": "xiangqi-shortest-solution-dag-v2",
+  "visits": 296
+}

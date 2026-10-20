@@ -1,23 +1,28 @@
 task:
-  prompt_version: xiangqi-reasoning-v2
+  prompt_version: xiangqi-shortest-tree-v1
   family: xiangqi-rule-variants
   path: data/xiangqi/rule_variants/tasks.jsonl
   limit: 100
 agent:
   name: direct
-  max_tokens: 512
+  max_format_repairs: 0
 provider:
   name: qwen
   model: qwen3.8-max
   api_key_env: DASHSCOPE_API_KEY
-  max_retries: 3
-  json_mode: true
+  omit_max_tokens: true
+  timeout: 900
+  max_retries: 0
+  json_mode: false
   extra_body:
-    enable_thinking: false
+    enable_thinking: true
 evaluation:
+  final_move_timeout_seconds: 900
   search_depth: 3
-  horizon_policy: reference_mate_plies_plus_4
+  horizon_policy: shortest_plus_two_attacker_moves
   loss_unit: rule-aware-centipawn-equivalent-not-pikafish
+  pricing: null
+  solution_tree_dir: data/xiangqi/solution_trees/c2
 run:
   output_dir: runs
   run_name: xiangqi_c2_direct_submitted100_r1

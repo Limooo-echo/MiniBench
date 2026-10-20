@@ -11,55 +11,55 @@
       "record_count": 100,
       "unique_fen_count": 50,
       "expected_paired_duplicate_fens": [
-        "1C2k1b2/9/4Pa3/p2N1c3/6b2/3C2B2/4N4/7nB/4p3c/3K5 w - - 0 1",
-        "1Cbaka3/4c4/4R4/9/2P2n3/2C1N1p1P/9/9/4K1n2/1r1A1A3 b - - 0 1",
-        "1Cbaka3/9/4N4/4p1n1p/9/p2n5/4P3P/3AB4/9/1cBAK4 w - - 0 1",
-        "1P2ka3/9/b4a3/5R3/9/2B6/4r4/5K3/3p5/9 b - - 0 1",
-        "1n1a5/4akN2/1c2b4/p2cp3p/6b2/P5C2/2N1P3P/4B4/7C1/2BAKA3 w - - 0 1",
+        "1R3a3/3ka4/3cb4/2pNC3p/6br1/2P4N1/P3P3P/3C5/4A4/2B1KAB2 w - - 0 1",
+        "1R7/4a4/C3k4/p4N2p/4p4/5p3/P7P/3Ac4/9/4Kr3 w - - 0 1",
         "1n1k2b2/4a4/3abN3/p1p1C4/3N5/2P6/P6pP/4r3B/4A4/3AK4 w - - 0 1",
-        "1r2k4/4nP3/b3b4/3R5/1r7/p2p5/9/4B4/4A4/2B1KA3 w - - 0 1",
-        "2P2ab2/3ka4/8c/3N4p/1R2C1p2/4P4/3n2P1P/9/5K3/r2A1AB2 w - - 0 1",
-        "2b1ka1R1/3Ra1C1n/4b4/4pc2p/p1p6/5nP1P/8N/3A1A3/r8/2B2K3 b - - 0 1",
+        "1r1nka3/4a4/4b1C2/3P4p/2b6/C3R1p2/P7P/2N6/5r3/2BAKAB2 w - - 0 1",
+        "2R2a3/3ka4/3c5/2pNC3p/6br1/2P4N1/P3P3P/3C5/4A4/2B1KAB2 w - - 0 1",
+        "2b1k4/9/3Rb4/p6Np/5N3/2P3B2/P7P/3K5/1r2p1c2/2B2A3 w - - 0 1",
         "2b1ka3/1r2a4/3c5/p2NR3p/6b2/4P4/P1P2p2P/3C3RB/3nA4/c3KA3 b - - 0 1",
-        "2b1ka3/3Ran3/4bN3/p4C3/9/9/P1p5P/4C1n2/9/1cBAKAr2 w - - 0 1",
-        "2b1kab2/4a4/9/2C1P2N1/2p5p/5nR2/5r3/9/9/2B1KAB1c b - - 0 1",
-        "2b1kabN1/4a4/4c4/p7p/6N2/2n1R4/P3c1PCP/3p3R1/1r7/2BAKAB2 b - - 0 1",
-        "2ba1ab2/3knR3/4N4/p1p3C2/1P7/6pC1/P7P/cc1ABKN2/7r1/3A2B2 w - - 0 1",
-        "2ba1k3/9/2N1ba3/9/3N5/8P/9/2n1B4/2p1A4/c2K1AB2 b - - 0 1",
-        "2baka1NC/9/2c1c4/p4C3/9/4P3P/2n6/9/4A4/2BA1K3 w - - 0 1",
-        "2bakc3/4a4/4b4/4C4/4P3p/6R2/3r3CP/4B4/2n1A4/3A1K3 w - - 0 1",
-        "2c2abC1/4k4/1Rn1Na3/p3p1NP1/2r6/6C2/P4r2p/4B4/9/3AKAB2 w - - 0 1",
-        "2nakc3/4a4/4P4/p7p/1r1N3n1/P2R2B2/2R3c1P/4CrN2/9/2BAKA3 w - - 0 1",
-        "3R5/1C3k3/9/3N4r/9/9/1p3r3/4B4/9/2BAKA3 w - - 0 1",
-        "3a1Rb2/4k4/4Na1n1/p7p/5P3/2B2C3/P8/3A5/4K4/c4rB2 w - - 0 1",
-        "3a2P2/4a4/5k1N1/2Nn5/8P/2B6/9/B3KA3/5p3/9 w - - 0 1",
-        "3a2n2/n3k1C2/3N3C1/4p1P1p/9/2N6/P7P/9/4AK3/c2A3c1 w - - 0 1",
+        "2b1kab2/4a4/9/2C1P2Np/2p6/5nR2/9/9/4K4/2B2rB1c b - - 0 1",
+        "2ba1ab2/3knR3/9/p5C2/1P2N4/6pC1/P7P/cc1ABKN2/7r1/3A2B2 w - - 0 1",
+        "2ba1ab2/4nR3/3k1N3/p5C2/1P7/6pC1/P7P/cc1ABKN2/7r1/3A2B2 w - - 0 1",
+        "2ba1k3/4a1C2/4c3b/p1p5p/9/1R2P1P2/P1P5P/C1n2R3/3rAr3/2BAK1B2 b - - 0 1",
+        "2bak1b2/4a4/9/p1NP4p/9/2r6/4p4/5RC2/3KA4/5Ac2 b - - 0 1",
+        "2bak2r1/3R2P2/2R6/9/p1p6/9/P3c4/B3n4/4A4/3AKC3 w - - 0 1",
+        "2bak4/1c2a4/4b1n2/1N2p4/9/6R2/4P4/4B4/4A4/r1C1KAB2 w - - 0 1",
+        "2cakab2/9/C3b4/1N6p/3R5/P8/2P1P3P/6p2/4A4/3K1A3 w - - 0 1",
+        "3N1kb2/5n3/5R3/p7p/5P3/2B2C3/P8/3A5/5K3/4c1B2 w - - 0 1",
+        "3a1ab2/4nR3/3kbNC2/p8/1P7/6pC1/P7P/cc1ABKN2/7r1/3A2B2 w - - 0 1",
+        "3a1kb2/4a4/9/2p1c3p/2b6/2Pnc4/P7P/4R3B/4Nr3/2BAKA1R1 b - - 0 1",
         "3a5/4k4/3a4P/9/9/9/5pn2/1N1A5/3pA4/5K3 b - - 0 1",
         "3a5/4k4/4bN3/9/6b2/4C1B1P/9/B2p5/1cn6/3K1A3 b - - 0 1",
-        "3ak1b2/4a4/4b4/5R3/p2P4p/7N1/P3C3P/2p1B1r2/3KA4/cc3AB2 b - - 0 1",
         "3ak1b2/4a4/b1n6/6PNp/4P4/2c6/2nR4P/c2K1C3/4A4/2r2AB2 b - - 0 1",
-        "3ak1b2/r8/4b4/2P5p/9/PR7/4p2nP/4B4/4A4/4KAB2 b - - 0 1",
-        "3ak4/4a4/4b4/3PR4/9/9/4r4/9/3pA1p2/4KA3 b - - 0 1",
-        "3akab2/3n5/1r2b4/p1RN5/3PN1p2/9/P7P/4B4/4A4/1c2KAB2 w - - 0 1",
-        "3akc1RC/4aN3/b1n1b4/p8/4r3p/2P2R2P/P5r2/4B4/4A4/4KA3 w - - 0 1",
-        "3k1a3/9/r2a5/6pC1/n2N4p/2P3P2/4P3P/3C5/4A4/c1BAK4 w - - 0 1",
-        "3k1ab2/4a4/4b4/p7p/4N1p2/3nc4/2P4RP/9/1CCr5/2B1KAB2 b - - 0 1",
-        "3k1c3/4R4/9/p7p/2p3b2/1N7/P3n1r2/9/3C5/2BAKAB2 w - - 0 1",
+        "3ak4/4a4/4P4/9/9/P3R4/8r/2n6/9/5K3 b - - 0 1",
+        "3aka3/9/b3c3b/p4R3/9/5nB2/P8/3CnK3/N5r2/2BA1R3 b - - 0 1",
+        "3k1a3/4a4/2P6/1P1P5/4P1N2/3c5/4p4/9/2nKA4/5A3 b - - 0 1",
+        "3k5/9/9/8r/2b1R1P2/2B2c3/3C5/4C4/1n2AK3/2BA5 w - - 0 1",
+        "3kc1b2/9/4b4/8p/p2P5/9/P7P/9/4r4/1N3K3 b - - 0 1",
         "3rkab2/4aR3/4b4/9/p8/7nr/P1C6/N4A3/9/1R3K3 b - - 0 1",
+        "3rkabr1/4aR3/1cC6/p3p3p/2P4n1/P8/2N1P3P/4C1p1B/4A4/2B1KA3 w - - 0 1",
         "4C1b2/3P5/5kN2/6P2/5r3/9/5p2P/8B/4A4/4KA3 w - - 0 1",
         "4c4/3kaP3/3r5/2P1P4/9/9/7R1/4B4/2p1A4/2B1KA3 w - - 0 1",
-        "4kab2/4a4/6N2/p5c1C/2b1P4/9/P6nP/4BA3/3NK4/5A1c1 b - - 0 1",
+        "4k1CRC/4a4/3a5/4p4/3n2b2/2p3p1P/p8/9/4r4/2B1KA3 w - - 0 1",
+        "4k4/4a4/4ba1P1/4C4/2b6/9/2N6/4Bp3/3pA1p2/c1BA1K3 b - - 0 1",
+        "4ka3/3Pa4/6c2/9/6C2/9/9/4KA3/9/2BA5 w - - 0 1",
+        "4kab2/1R1Pa4/4b4/p7p/6p2/4p4/P2c2P1P/C2K5/1R3r3/4r1B2 b - - 0 1",
+        "4kab2/3Na4/4b4/p8/4p3p/4n4/P2n2r2/2R6/4AC3/2BAK1BNc b - - 0 1",
         "4kab2/4a4/8b/1r2N4/5R3/3NP1B2/P8/4B4/3pA2r1/3AK4 b - - 0 1",
-        "5k3/3R5/5a3/3C5/9/9/c1n3P1P/3KCr3/9/3A2B2 b - - 0 1",
-        "5kb2/4P4/9/C2N5/6n2/9/9/5A3/4A4/2BK3n1 w - - 0 1",
-        "5kb2/c3a4/4ba3/9/9/2N6/9/1R2BA3/1p1K5/1r3A3 b - - 0 1",
-        "6b2/5k3/3c2N2/R5P1p/9/2P6/P2r5/C8/4K4/2B2Ac2 w - - 0 1",
+        "4kab2/4a4/b7c/p1R1P3p/4c4/2C3P2/P4r2P/3nBNN2/9/2RK1AB2 b - - 0 1",
+        "4kabr1/4c4/2N6/p1p5p/9/2P6/PR6P/4B4/9/3AKA3 w - - 0 1",
+        "4kabr1/6c2/2N6/p1p5p/9/2P6/PR6P/4r4/9/3AKAB2 w - - 0 1",
+        "5ab2/2N1a1P2/5k3/3P5/6b2/3p5/6c2/3An4/4A4/4KC3 w - - 0 1",
+        "5ab2/3ka4/9/3PP3p/9/P7P/9/2R6/1cCrAp3/4K4 b - - 0 1",
+        "5k3/3P2R2/4b4/4rc3/2b5p/9/8P/4B4/4A4/2BA1K3 w - - 0 1",
         "7RC/3ka4/9/5P3/P5C2/5rB2/4p4/5An2/2n2K3/3A5 w - - 0 1",
-        "9/2R1ak3/4P4/7P1/9/2B1p4/4p2nP/9/5r3/2BAKA3 w - - 0 1",
-        "9/2ck5/2N6/4C4/2b3b2/6B2/9/3A5/9/4K4 w - - 0 1",
-        "9/4k4/5a3/9/p7P/3n5/P4R3/4p4/3KA4/5C3 b - - 0 1",
-        "C1bak4/3Na4/4b4/7R1/6r1p/2B6/P3P3P/1c2Kn3/4A4/1n3AB2 b - - 0 1",
-        "C3kab2/9/5a3/2p5p/P1b1P4/2P2np2/1C1R5/4B3n/1r2A4/2BK5 w - - 0 1",
+        "C4ab2/3R5/4ka3/2p5p/P1b1P4/2P2np2/1C7/4B3n/1r2A4/2BK5 w - - 0 1",
+        "C4k3/9/4b4/4c4/9/9/5n3/4K4/2p1A4/2B2rB2 b - - 0 1",
+        "C4k3/9/4b4/9/9/2B6/4cn3/3K5/2p1A4/2B2r3 b - - 0 1",
+        "C4k3/9/4b4/9/9/9/4cn3/3K5/2p1A4/2B2rB2 b - - 0 1",
+        "CNR2ab2/4k4/3a5/p1p5p/6p2/3c5/Pr1n2P1P/3AB4/3K5/2B2A3 b - - 0 1",
+        "R2a1k3/4a4/4R4/9/1P6p/3N2P2/9/9/5r3/cr1AKAB2 w - - 0 1",
         "r1b1k1b2/3R1R3/2n6/p3p3p/2p6/7N1/P3P3P/B2C1A3/2c6/1c2KNr2 b - - 0 1"
       ],
       "unexpected_duplicate_fens_within_family": []
@@ -77,7 +77,7 @@
       "unexpected_duplicate_fens_within_family": []
     }
   },
-  "cross_family_exact_fen_overlap_count": 120,
+  "cross_family_exact_fen_overlap_count": 129,
   "cross_family_exact_fen_overlaps": {
     "5k3/9/7N1/9/7C1/9/2R1P3P/9/4K4/9 w - - 0 1": [
       "xiangqi-mate-in-one",
@@ -479,39 +479,27 @@
       "xiangqi-mate-in-one",
       "xiangqi-multimodal"
     ],
-    "2ba1ab2/3knR3/4N4/p1p3C2/1P7/6pC1/P7P/cc1ABKN2/7r1/3A2B2 w - - 0 1": [
+    "3ak1b2/4a4/b1n6/6PNp/4P4/2c6/2nR4P/c2K1C3/4A4/2r2AB2 b - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
-    "2baka1NC/9/2c1c4/p4C3/9/4P3P/2n6/9/4A4/2BA1K3 w - - 0 1": [
-      "xiangqi-history",
-      "xiangqi-rule-variants"
-    ],
-    "3a2n2/n3k1C2/3N3C1/4p1P1p/9/2N6/P7P/9/4AK3/c2A3c1 w - - 0 1": [
-      "xiangqi-history",
-      "xiangqi-rule-variants"
-    ],
-    "3a5/4k4/3a4P/9/9/9/5pn2/1N1A5/3pA4/5K3 b - - 0 1": [
-      "xiangqi-history",
-      "xiangqi-rule-variants"
-    ],
-    "1C2k1b2/9/4Pa3/p2N1c3/6b2/3C2B2/4N4/7nB/4p3c/3K5 w - - 0 1": [
-      "xiangqi-history",
-      "xiangqi-rule-variants"
-    ],
-    "C1bak4/3Na4/4b4/7R1/6r1p/2B6/P3P3P/1c2Kn3/4A4/1n3AB2 b - - 0 1": [
-      "xiangqi-history",
-      "xiangqi-rule-variants"
-    ],
-    "3akab2/3n5/1r2b4/p1RN5/3PN1p2/9/P7P/4B4/4A4/1c2KAB2 w - - 0 1": [
-      "xiangqi-history",
-      "xiangqi-rule-variants"
-    ],
-    "2c2abC1/4k4/1Rn1Na3/p3p1NP1/2r6/6C2/P4r2p/4B4/9/3AKAB2 w - - 0 1": [
+    "4kab2/3Na4/4b4/p8/4p3p/4n4/P2n2r2/2R6/4AC3/2BAK1BNc b - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
     "4C1b2/3P5/5kN2/6P2/5r3/9/5p2P/8B/4A4/4KA3 w - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "3rkab2/4aR3/4b4/9/p8/7nr/P1C6/N4A3/9/1R3K3 b - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "4kab2/4a4/8b/1r2N4/5R3/3NP1B2/P8/4B4/3pA2r1/3AK4 b - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "2b1k4/9/3Rb4/p6Np/5N3/2P3B2/P7P/3K5/1r2p1c2/2B2A3 w - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
@@ -523,45 +511,93 @@
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
-    "1r2k4/4nP3/b3b4/3R5/1r7/p2p5/9/4B4/4A4/2B1KA3 w - - 0 1": [
+    "5k3/3P2R2/4b4/4rc3/2b5p/9/8P/4B4/4A4/2BA1K3 w - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
-    "5kb2/c3a4/4ba3/9/9/2N6/9/1R2BA3/1p1K5/1r3A3 b - - 0 1": [
+    "2bak2r1/3R2P2/2R6/9/p1p6/9/P3c4/B3n4/4A4/3AKC3 w - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
-    "1P2ka3/9/b4a3/5R3/9/2B6/4r4/5K3/3p5/9 b - - 0 1": [
+    "4kab2/1R1Pa4/4b4/p7p/6p2/4p4/P2c2P1P/C2K5/1R3r3/4r1B2 b - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
-    "3a1Rb2/4k4/4Na1n1/p7p/5P3/2B2C3/P8/3A5/4K4/c4rB2 w - - 0 1": [
+    "4c4/3kaP3/3r5/2P1P4/9/9/7R1/4B4/2p1A4/2B1KA3 w - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
-    "C3kab2/9/5a3/2p5p/P1b1P4/2P2np2/1C1R5/4B3n/1r2A4/2BK5 w - - 0 1": [
+    "3k5/9/9/8r/2b1R1P2/2B2c3/3C5/4C4/1n2AK3/2BA5 w - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
-    "3ak1b2/4a4/4b4/5R3/p2P4p/7N1/P3C3P/2p1B1r2/3KA4/cc3AB2 b - - 0 1": [
+    "5ab2/3ka4/9/3PP3p/9/P7P/9/2R6/1cCrAp3/4K4 b - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
-    "3ak4/4a4/4b4/3PR4/9/9/4r4/9/3pA1p2/4KA3 b - - 0 1": [
+    "3ak4/4a4/4P4/9/9/P3R4/8r/2n6/9/5K3 b - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
-    "6b2/5k3/3c2N2/R5P1p/9/2P6/P2r5/C8/4K4/2B2Ac2 w - - 0 1": [
+    "2ba1ab2/3knR3/9/p5C2/1P2N4/6pC1/P7P/cc1ABKN2/7r1/3A2B2 w - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ],
-    "2ba1k3/9/2N1ba3/9/3N5/8P/9/2n1B4/2p1A4/c2K1AB2 b - - 0 1": [
+    "7RC/3ka4/9/5P3/P5C2/5rB2/4p4/5An2/2n2K3/3A5 w - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "R2a1k3/4a4/4R4/9/1P6p/3N2P2/9/9/5r3/cr1AKAB2 w - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "3a5/4k4/3a4P/9/9/9/5pn2/1N1A5/3pA4/5K3 b - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "5ab2/2N1a1P2/5k3/3P5/6b2/3p5/6c2/3An4/4A4/4KC3 w - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "3k1a3/4a4/2P6/1P1P5/4P1N2/3c5/4p4/9/2nKA4/5A3 b - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "4ka3/3Pa4/6c2/9/6C2/9/9/4KA3/9/2BA5 w - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "4kabr1/6c2/2N6/p1p5p/9/2P6/PR6P/4r4/9/3AKAB2 w - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "4k4/4a4/4ba1P1/4C4/2b6/9/2N6/4Bp3/3pA1p2/c1BA1K3 b - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "2bak1b2/4a4/9/p1NP4p/9/2r6/4p4/5RC2/3KA4/5Ac2 b - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "3kc1b2/9/4b4/8p/p2P5/9/P7P/9/4r4/1N3K3 b - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "4k1CRC/4a4/3a5/4p4/3n2b2/2p3p1P/p8/9/4r4/2B1KA3 w - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "4kabr1/4c4/2N6/p1p5p/9/2P6/PR6P/4B4/9/3AKA3 w - - 0 1": [
+      "xiangqi-history",
+      "xiangqi-rule-variants"
+    ],
+    "CNR2ab2/4k4/3a5/p1p5p/6p2/3c5/Pr1n2P1P/3AB4/3K5/2B2A3 b - - 0 1": [
       "xiangqi-history",
       "xiangqi-rule-variants"
     ]
   },
   "expected_d3_m2_overlap_count": 100,
-  "expected_h2_c2_overlap_count": 20,
+  "expected_h2_c2_overlap_count": 29,
   "unexpected_cross_family_overlap_count": 0,
   "unexpected_cross_family_overlaps": {},
   "unresolved_external_provenance": [

@@ -28,6 +28,8 @@ class XiangqiTask:
     agent_color: str
     difficulty: str
     oracle: dict[str, Any]
+    shortest_mate_moves: int | None = None
+    shortest_proof: dict[str, Any] | None = None
 
 
 def default_xiangqi_tasks_path() -> Path:
@@ -44,6 +46,7 @@ def xiangqi_task_from_dict(raw: dict[str, Any]) -> XiangqiTask:
         schema_version=record["schema_version"], family=record["family"],
         fen=record["fen"], agent_color=record["agent_color"],
         difficulty=record["difficulty"], oracle=dict(record["oracle"]),
+        shortest_proof=dict(record["shortest_proof"]) if "shortest_proof" in record else None,
     )
 
 

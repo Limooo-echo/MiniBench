@@ -8,14 +8,18 @@ opponent move and centipawn oracle.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import json
 from pathlib import Path
 from time import strftime
 from typing import Any, Callable, Sequence
 
 from minibench.core.agent import Agent, ChatMessage
-from minibench.core.metrics import start_task_metrics, finish_task_metrics, summarize_metrics
+from minibench.datasets.xiangqi.resources import start_task_metrics, finish_task_metrics, summarize_metrics
+from minibench.datasets.xiangqi.deadline import (
+    FINAL_MOVE_TIMEOUT_SECONDS, FinalMoveTimeout, call_agent_move, validate_move_timeout,
+)
+from minibench.datasets.xiangqi.solution_tree import TreeSession, summarize_tree_metrics
 from minibench.datasets.xiangqi.runtime import (
     validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, error_detail, extract_strict_uci_move, reset_agent, mean_or_none, rounded, status_counts, display,
 )
@@ -61,6 +65,9 @@ class HistoryResult:
     metrics: dict[str, Any] = field(default_factory=dict)
     termination_reason: str = ""
     protocol_version: str = PROTOCOL_VERSION
+    mate_within_shortest_steps: bool | None = None
+    mate_within_shortest_plus_two_steps: bool | None = None
+    solution_tree_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 MATE_SCORE_CP = 100_000
@@ -129,6 +136,15 @@ def _pikafish_analysis(
 
 def _task_objective_hint(task: XiangqiTask) -> str:
     """State the fixed-opponent objective without claiming a proved forced mate."""
+    if task.shortest_mate_moves is not None:
+        n = task.shortest_mate_moves
+        return (
+            f"This position has a certified shortest forced mate in {n} of YOUR moves. "
+            f"Your primary objective is to checkmate within those {n} moves, against "
+            "the opponent's strongest legal replies. Do not settle for a longer mating line. "
+            f"If you leave the certified strategy, continue trying within a hard limit of {n+2} "
+            "of YOUR moves, including all moves already played. Stalemate is not checkmate."
+        )
     reference_plies = (task.oracle or {}).get("mate_in_plies")
     if not isinstance(reference_plies, int) or reference_plies < 1:
         reference_plies = task.max_steps
@@ -247,12 +263,18 @@ def evaluate_history_tasks(
     pikafish_binary_sha256: str | None = None,
     pikafish_nnue_sha256: str | None = None,
     on_result: Callable[[HistoryResult], None] | None = None,
+    solution_tree_dir: str | Path | None = None,
+    pricing: dict | None = None,
+    final_move_timeout_seconds: float = FINAL_MOVE_TIMEOUT_SECONDS,
 ) -> list[HistoryResult]:
+    final_move_timeout_seconds = validate_move_timeout(final_move_timeout_seconds)
     if history_mode == "paired":
         return [result for mode in ("full-state", "move-history-only")
                 for result in evaluate_history_tasks(tasks, agent, history_mode=mode,
                     pikafish_path=pikafish_path, pikafish_depth=pikafish_depth,
                     pikafish_timeout=pikafish_timeout, on_result=on_result,
+                    solution_tree_dir=solution_tree_dir, pricing=pricing,
+                    final_move_timeout_seconds=final_move_timeout_seconds,
                     pikafish_binary_sha256=pikafish_binary_sha256, pikafish_nnue_sha256=pikafish_nnue_sha256)]
     if history_mode not in {"full-state", "move-history-only"}:
         raise ValueError("history_mode must be paired, full-state, or move-history-only")
@@ -270,7 +292,14 @@ def evaluate_history_tasks(
     results = []
     try:
         for task in tasks:
-            start = start_task_metrics(agent)
+            start = start_task_metrics(agent, pricing=pricing)
+            start["_xiangqi_final_move_timeout_seconds"] = final_move_timeout_seconds
+            session = TreeSession({"id": task.id, "fen": task.fen,
+                                   "oracle": task.oracle, "max_plies":task.max_steps,
+                                   "shortest_proof":task.shortest_proof}, solution_tree_dir)
+            if session.shortest is not None:
+                task = replace(task, shortest_mate_moves=session.shortest,
+                               max_steps=session.max_plies)
             steps, reasons = [], []
             diagnostics = [startup_error] if startup_error else []
             status, error, mate_success = "ok", None, False
@@ -289,7 +318,11 @@ def evaluate_history_tasks(
                 initial_board = board_state_text(board.board)
                 messages = None
                 last_agent_uci = None
-                for step_index in range(task.max_steps):
+                limit = session.max_plies if session.enabled else task.max_steps
+                for step_index in range(limit):
+                    if session.enabled and step_index >= 2*session.cap-1 and not session.off_tree:
+                        reasons.append("tree_horizon_reached")
+                        break
                     stage = "judge"
                     legal_moves = board.legal_moves(side)
                     if not legal_moves:
@@ -316,9 +349,12 @@ def evaluate_history_tasks(
                             if messages is None:
                                 opening = steps[-1]["uci"] if steps and steps[-1]["actor"] == "pikafish" else None
                                 messages = _initial_move_history_messages(task, initial_board, opening_opponent_uci=opening)
-                            raw, history_transport = _generate_history_turn(agent, messages, task)
+                            raw, history_transport = call_agent_move(
+                                _generate_history_turn, agent, messages, task,
+                                timeout_seconds=final_move_timeout_seconds)
                         else:
-                            raw = agent.generate(_full_state_prompt(task, board, steps), task)
+                            raw = call_agent_move(agent.generate, _full_state_prompt(task, board, steps), task,
+                                                  timeout_seconds=final_move_timeout_seconds)
                         stage = "judge"
                         generated_uci = _extract_history_uci(raw)
                         move = _move_by_uci(legal_moves, generated_uci)
@@ -333,17 +369,19 @@ def evaluate_history_tasks(
                             break
                     else:
                         stage = "opponent_engine"
-                        if analysis_error is not None:
+                        tree_uci = session.opponent_move(board.board, side, step_index)
+                        if analysis_error is not None and tree_uci is None:
                             raise analysis_error
-                        move = _move_by_uci(legal_moves, optimal_uci)
+                        move = _move_by_uci(legal_moves, tree_uci or optimal_uci)
                         if move is None:
                             raise RuntimeError(f"Pikafish returned no legal opponent move: {optimal_uci!r}")
-                        step = {"step_idx": step_index, "actor": "pikafish", "raw_output": "", "action": None,
-                                "uci": move.to_uci(), "is_legal": True, "is_optimal": True,
+                        step = {"step_idx": step_index, "actor": "pikafish", "opponent_source": "certified-tree" if tree_uci else "pikafish-fallback", "raw_output": "", "action": None,
+                                "uci": move.to_uci(), "is_legal": True, "is_optimal": optimal_uci==move.to_uci(),
                                 "optimal_uci": optimal_uci, "cp_before": rounded(cp_before), "cp_after": None, "cp_loss": None}
                         steps.append(step)
                     stage = "judge"
                     uci = move.to_uci()
+                    session.advance(board.board, side, step_index, uci)
                     board.apply(move)
                     next_side = -side
                     terminal = False
@@ -382,16 +420,18 @@ def evaluate_history_tasks(
                     side = next_side
                 if not reasons:
                     reasons.append("max_steps_reached")
-            except Exception as exc:
+            except (Exception, FinalMoveTimeout) as exc:
                 malformed = stage == "model" and isinstance(exc, StrictJSONObjectError)
-                status, mate_success = ("invalid", False) if malformed else ("error", None)
-                if malformed:
-                    stage = "format"
-                    steps.append({"step_idx": len(steps), "actor": "agent", "raw_output": exc.raw_output or "",
-                                  "uci": "PARSE_FAIL", "is_legal": False, "is_optimal": False,
+                timed_out = isinstance(exc, FinalMoveTimeout)
+                status, mate_success = ("invalid", False) if malformed or timed_out else ("error", None)
+                if malformed or timed_out:
+                    stage = "timeout" if timed_out else "format"
+                    steps.append({"step_idx": len(steps), "actor": "agent",
+                                  "raw_output": "" if timed_out else exc.raw_output or "",
+                                  "uci": "TIMEOUT" if timed_out else "PARSE_FAIL", "is_legal": False, "is_optimal": False,
                                   "cp_before": None, "cp_after": None, "cp_loss": None})
                 error = error_detail(stage, exc)
-                reasons.append(stage + "_error")
+                reasons.append("final_move_timeout" if timed_out else stage + "_error")
             agent_steps = [step for step in steps if step["actor"] == "agent"]
             losses = [step["cp_loss"] for step in agent_steps if step.get("cp_loss") is not None]
             avg_cp = mean_or_none(losses, 1)
@@ -416,6 +456,8 @@ def evaluate_history_tasks(
                 normalized_score=None, tags=list(task.tags), reasons=reasons,
                 mate_in_plies=(task.oracle or {}).get("mate_in_plies"), status=status, error=error,
                 diagnostics=diagnostics, metrics=finish_task_metrics(agent, start), termination_reason=reasons[-1],
+                protocol_version="xiangqi-shortest-tree-v1" if session.enabled else PROTOCOL_VERSION,
+                **session.scores(mate_success, checkmate_ply),
             )
             results.append(result)
             if on_result is not None:
@@ -438,6 +480,11 @@ def _paired_history_comparison(results: list[HistoryResult]) -> dict[str, Any]:
                      if p["full-state"].legality_rate is not None and p["move-history-only"].legality_rate is not None]
     return {
         "paired_total": len(pairs), "comparison": "full-state minus move-history-only",
+        **{key.removesuffix("_steps") + "_rate_gap": mean_or_none(
+            float(getattr(p["full-state"], key)) - float(getattr(p["move-history-only"], key))
+            for p in pairs if getattr(p["full-state"], key) is not None
+            and getattr(p["move-history-only"], key) is not None)
+            for key in ("mate_within_shortest_steps", "mate_within_shortest_plus_two_steps")},
         "mate_rate_gap": mean_or_none(
             float(p["full-state"].success) - float(p["move-history-only"].success)
             for p in pairs if p["full-state"].success is not None
@@ -465,6 +512,7 @@ def summarize_history(results: list[HistoryResult]) -> dict[str, Any]:
             ),
             "avg_cp_loss": mean_or_none((r.avg_cp_loss for r in valid), 1),
             "legality_rate": mean_or_none((r.legality_rate for r in valid), 3),
+            **summarize_tree_metrics(valid),
         }
     summary = bucket(results)
     by_diff = {difficulty: bucket([r for r in results if r.difficulty == difficulty]) for difficulty in sorted({r.difficulty for r in results})}
@@ -474,9 +522,9 @@ def summarize_history(results: list[HistoryResult]) -> dict[str, Any]:
             horizons[str(r.mate_in_plies)] = horizons.get(str(r.mate_in_plies), 0) + 1
     return {
         **summary, "unique_tasks": len({r.task_id for r in results}),
-        "primary_metric": "checkmate_rate_within_bounded_run",
-        "secondary_metric": "checkmate_rate_within_prescribed_reference_horizon",
-        "opponent_policy": "fixed Pikafish opponent; reference distance is not a proved shortest mate",
+        "primary_metric": "mate_within_shortest_rate",
+        "secondary_metric": "mate_within_shortest_plus_two_rate",
+        "opponent_policy": "shortest strategy DAG when enabled; Pikafish fallback and CP oracle",
         "cp_loss_unit": "Pikafish centipawns from the agent perspective; mate scores use a distance-aware 100,000 scale",
         "paired_comparison": _paired_history_comparison(results),
         "by_mode": {mode: bucket([r for r in results if r.history_mode == mode]) for mode in sorted({r.history_mode for r in results})},
@@ -495,16 +543,18 @@ def write_history_run(results, output_dir="runs", run_name=None, *, write_predic
     summary = summarize_history(results)
     (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     lines = ["Xiangqi History Evaluation", f"Total: {summary['total']} Missing: {summary['missing']}",
-             f"Checkmate within bounded run: {display(summary['mate_rate'], '.1%')}",
-             f"Checkmate within prescribed horizon: {display(summary['mate_within_prescribed_rate'], '.1%')}",
+             f"Mate within shortest: {display(summary['mate_within_shortest_rate'], '.1%')}",
+             f"Mate within shortest+2: {display(summary['mate_within_shortest_plus_two_rate'], '.1%')}",
              f"Legality: {display(summary['legality_rate'], '.1%')}",
              f"Average CP loss: {display(summary['avg_cp_loss'])}"]
     for mode, values in summary["by_mode"].items():
         lines.append(
-            f"{mode}: mate={display(values['mate_rate'], '.1%')} "
-            f"within_prescribed={display(values['mate_within_prescribed_rate'], '.1%')} "
+            f"{mode}: mate_shortest={display(values['mate_within_shortest_rate'], '.1%')} "
+            f"shortest_plus2={display(values['mate_within_shortest_plus_two_rate'], '.1%')} "
             f"legal={display(values['legality_rate'], '.1%')} "
             f"cp_loss={display(values['avg_cp_loss'])} missing={values['missing']}"
         )
+    from minibench.datasets.xiangqi.resources import resource_summary_lines
+    lines.extend(resource_summary_lines(summary["metrics"]))
     (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return run_dir

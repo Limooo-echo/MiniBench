@@ -1,6 +1,6 @@
 {
   "contamination_policy": "CCPD is public. Exact training-data contamination cannot be established locally; disclose this limitation and the provider policy for every model.",
-  "corpus_name": "MiniBench Xiangqi submitted stratified 100 per task, 2026-10-10",
+  "corpus_name": "MiniBench shortest paired100 release 2026-10-19",
   "engine": {
     "Hash_MB": 128,
     "Threads": 1,
@@ -20,14 +20,15 @@
     "release_tag": "Pikafish-2026-09-06"
   },
   "generation_command": {
-    "c2": "python scripts/build_xiangqi_c2.py --history data/xiangqi/history/tasks.jsonl --output data/xiangqi/rule_variants/tasks.jsonl",
+    "c2": "python scripts/prepare_xiangqi_shortest_release.py --parent <immutable-parent-pool> --out <reviewed-candidate-work-dir> --publish --pikafish-path <engine>",
     "c2_source_policy": "50 certified standard/focus pairs, all three focus rules; exclude active-rule mate-in-one and uncertified sources.",
-    "d3": "python scripts/annotate_xiangqi_d3.py --in-place",
+    "d3": "Structural annotation inherited from the immutable 250-row parent pool; certified 100-row stratified selection is recorded in submission_manifest.json. Candidate annotation cannot overwrite the submitted release.",
     "freeze_selection": "python scripts/freeze_xiangqi_evaluation.py",
-    "h2": "python scripts/build_xiangqi_h2.py (see history/validation_report.json for inputs and engine hashes)",
+    "h2": "python scripts/prepare_xiangqi_shortest_release.py --parent <immutable-parent-pool> --out <reviewed-candidate-work-dir> --publish --pikafish-path <engine>",
     "independent_validation": "python scripts/validate_xiangqi_data.py --workers 4 --output data/xiangqi/independent_validation.json",
-    "m2": "python scripts/build_xiangqi_m2_from_d3.py --d3 data/xiangqi/mate_in_one/tasks.jsonl --output data/xiangqi/multimodal/tasks.jsonl",
-    "submitted_selection": "python scripts/select_xiangqi_release.py --parent-pool <immutable-250-row-parent-pool> --replace --seed 42"
+    "m2": "Derived from the same selected D3 positions with build_xiangqi_m2_from_d3.build; source IDs and same-FEN pairs are recorded in submission_manifest.json.",
+    "submitted_selection": "prepare_xiangqi_shortest_release.publish, seed=42; complete shortest trees required; see submission_manifest.json",
+    "shortest_tree": "python scripts/build_xiangqi_solution_trees.py --data <candidate-jsonl> --out-dir <staging-tree-dir> --max-moves 5 --seconds <budget> --workers <workers>"
   },
   "generator_seed": {
     "c2": "deterministic ordering over the fixed H2 release",
@@ -37,13 +38,14 @@
   },
   "intentional_overlap": {
     "C2": "50 standard/focus pairs from H2 parent sources; sources not selected into H2 are retained as minimal source evidence, not benchmark tasks.",
-    "D3_M2": "All 100 submitted FENs shared to isolate modality."
+    "D3_M2": "100 identical positions; D3 text versus M2 Chinese images; same output schema."
   },
   "interpretation": {
-    "c2": "bounded multi-ply strict checkmate against a fixed depth-3 rule-aware opponent; stored lines are reference mates, not shortest-mate or all-defence proofs",
-    "h2": "strict mate against the fixed opponent; two reference lines are not an all-defence or shortest-mate proof",
-    "h2_horizon": "2 * reference_mate_moves + 3 half-moves (reference line plus four half-moves)",
-    "history_visual_gaps": "Task gaps are not direct memory evidence; M2 separately scores explicit initial-board transcription."
+    "c2": "Same-FEN standard/focus pairs, each certified under its own active rules",
+    "h2": "Certified shortest forced mate; 50 short / 50 medium",
+    "h2_horizon": "2*certified_shortest_attacker_moves+3 half-moves",
+    "history_visual_gaps": "Task gaps are not direct memory evidence; M2 separately scores explicit initial-board transcription.",
+    "shortest_oracle": "oracle and shortest_line_uci are certified shortest; h2/c2_analysis preserves historical reference evidence"
   },
   "model_service_snapshot": "Evaluation configuration records model name, thinking flag and provider settings per run; no API key is persisted.",
   "previous_release": {
@@ -52,7 +54,7 @@
     "migration_policy": "Legacy ID mapping targets only the immutable legacy archive; no old answers are attached to replaced boards.",
     "revision": "xiangqi-corpus-rebuild-2026-08-31"
   },
-  "protocol_version": "xiangqi-reasoning-v2",
+  "protocol_version": "xiangqi-shortest-tree-v1",
   "release_id": "xiangqi-2026-09-19-r1",
   "schema_version": 2,
   "source_license": {
@@ -74,13 +76,12 @@
   },
   "submission": {
     "manifest": "submission_manifest.json",
-    "sha256": "b412092aeb72ef9eb7be8d678e0d7504d40e21495564a3496f467d1604251d69"
+    "sha256": "66b3a386d5c6accc6cf1a91dc5276bd093576a11d86d8bae3eefcefbd407d65d"
   },
   "validation": {
     "publish_on_disagreement": false,
-    "repair_manifest": "repair_manifest.json",
     "report": "independent_validation.json",
     "standard": "cchess==1.25.5 after hand-specified calibration",
-    "variants": "Independent legal/terminal replay plus exact depth-3 opponent choices on a winning witness for every submitted C2 row."
+    "variants": "Every current C2 row has a complete bounded shortest-mate AND/OR proof; all legal defensive replies are covered in proof search. Exported DAGs retain locally shortest attacks and optimal delaying defences. Independent rules and terminal replay are also required. CPE depth-3 search is a metric/fallback, not this proof."
   }
 }

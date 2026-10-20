@@ -246,8 +246,8 @@ def _print_item_result(key: str, record: dict[str, Any]) -> None:
         fields.append(f"mode={mode}")
     if key == "h2":
         fields.extend([
-            f"mate={_display(record.get('success'))}",
-            f"mate_within_prescribed={_display(record.get('mate_within_prescribed_steps'))}",
+            f"mate_shortest={_display(record.get('mate_within_shortest_steps'))}",
+            f"mate_shortest_plus2={_display(record.get('mate_within_shortest_plus_two_steps'))}",
             f"legal={_display(legal, percent=True)}",
             f"cp_loss={_display(record.get('avg_cp_loss'))}",
         ])
@@ -258,8 +258,8 @@ def _print_item_result(key: str, record: dict[str, Any]) -> None:
         ])
     elif key == "c2":
         fields.extend([
-            f"mate={_display(record.get('success'))}",
-            f"mate_within_prescribed={_display(record.get('mate_within_prescribed_steps'))}",
+            f"mate_shortest={_display(record.get('mate_within_shortest_steps'))}",
+            f"mate_shortest_plus2={_display(record.get('mate_within_shortest_plus_two_steps'))}",
             f"legal={_display(legal, percent=True)}",
             f"variant_loss={_display(record.get('avg_variant_loss'))}",
         ])
@@ -268,6 +268,8 @@ def _print_item_result(key: str, record: dict[str, Any]) -> None:
             f"mate={_display(record.get('success'))}",
             f"legal={_display(legal, percent=True)}",
         ])
+    if key == "m2":
+        fields.append(f"recognition={_display(record.get('recognition_accuracy'), percent=True)}")
     fields.append(f"moves={_move_trace(record)}")
     print(" ".join(fields), flush=True)
 
@@ -283,8 +285,8 @@ def _print_family_summary(key: str, summary: dict[str, Any]) -> None:
     elif key == "h2":
         print(
             "SUMMARY H2 "
-            f"mate={_display(summary.get('mate_rate'), percent=True)} "
-            f"mate_within_prescribed={_display(summary.get('mate_within_prescribed_rate'), percent=True)} "
+            f"mate_shortest={_display(summary.get('mate_within_shortest_rate'), percent=True)} "
+            f"mate_shortest_plus2={_display(summary.get('mate_within_shortest_plus_two_rate'), percent=True)} "
             f"legal={_display(summary.get('legality_rate'), percent=True)} "
             f"cp_loss={_display(summary.get('avg_cp_loss'))}",
             flush=True,
@@ -292,8 +294,8 @@ def _print_family_summary(key: str, summary: dict[str, Any]) -> None:
     elif key == "c2":
         print(
             "SUMMARY C2 "
-            f"mate={_display(summary.get('mate_rate'), percent=True)} "
-            f"mate_within_prescribed={_display(summary.get('mate_within_prescribed_rate'), percent=True)} "
+            f"mate_shortest={_display(summary.get('mate_within_shortest_rate'), percent=True)} "
+            f"mate_shortest_plus2={_display(summary.get('mate_within_shortest_plus_two_rate'), percent=True)} "
             f"legal={_display(summary.get('legality_rate'), percent=True)} "
             f"variant_loss={_display(summary.get('avg_variant_loss'))}",
             flush=True,
@@ -303,7 +305,8 @@ def _print_family_summary(key: str, summary: dict[str, Any]) -> None:
             print(
                 f"SUMMARY M2 mode={mode} "
                 f"mate={_display(values.get('mate_rate'), percent=True)} "
-                f"legal={_display(values.get('legality_rate'), percent=True)}",
+                f"legal={_display(values.get('legality_rate'), percent=True)} "
+                f"recognition={_display(values.get('recognition_accuracy'), percent=True)}",
                 flush=True,
             )
 

@@ -23,6 +23,7 @@ _DIAGNOSTICS = (
     "cp_loss", "avg_cp_loss", "variant_loss", "avg_variant_loss",
     "recognition_accuracy", "recognition_exact", "recognition_status",
     "extended_mate_success", "mate_within_prescribed_steps", "checkmate_ply", "reference_mate_plies",
+    "mate_within_shortest_steps", "mate_within_shortest_plus_two_steps", "solution_tree_metadata",
     "first_move_optimal", "answer_correct", "action_errors",
     "move_average_score", "move_median_score", "draws", "discards", "win_score",
 )
@@ -306,6 +307,16 @@ def score_record(family: str, dimension: str, record: dict, task: dict | None, *
     """
     if not isinstance(record, dict):
         return _unavailable({}, "result_record_is_not_an_object")
+    # An explicit Xiangqi decision deadline is an observed benchmark failure,
+    # unlike HTTP/auth/engine outages. Keep other task families unchanged.
+    error_info = record.get("error") or {}
+    if (family in {"xiangqi_mate_in_one", "xiangqi_history", "xiangqi_rule_variants", "xiangqi_multimodal"}
+            and record.get("status") == "invalid"
+            and record.get("termination_reason") == "final_move_timeout"
+            and isinstance(error_info, dict) and error_info.get("stage") == "timeout"
+            and error_info.get("type") == "FinalMoveTimeout"):
+        return _result(record, 0.0, 0.0, status="invalid", reasons=["final_move_timeout"],
+                       evidence={"method":"final_move_deadline", "deadline_seconds":error_info.get("deadline_seconds")})
     error = _error_reason(record)
     if error is not None:
         return _unavailable(record, "evaluation_unavailable:" + error)
@@ -318,6 +329,11 @@ def score_record(family: str, dimension: str, record: dict, task: dict | None, *
             result = _mahjong(record, task, dimension)
         elif family in {"mahjong_solo", "mahjong_rule_variants"}:
             result = _mahjong_episode(record, task, family)
+        elif family in {"xiangqi_history","xiangqi_rule_variants"} and record.get("protocol_version")=="xiangqi-shortest-tree-v1":
+            y = _outcome(record,"mate_within_shortest_steps")
+            result = _result(record,y,0.0,status="ok" if y is not None else "missing",
+                reasons=[] if y is not None else ["missing_shortest_mate_outcome"],
+                evidence={"method":"binary_certified_shortest_goal","outcome_field":"mate_within_shortest_steps"})
         elif family in {"xiangqi_mate_in_one", "xiangqi_history"}:
             y = _outcome(record, "goal_achieved")
             result = _result(record, y, 0.0, status="ok" if y is not None else "missing",

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime, timezone
-from math import isfinite
 import threading
 import time
 from typing import Any
+
+from minibench.core.token_usage import known_total_tokens
 
 
 class RateGate:
@@ -42,6 +43,7 @@ class RateGate:
                     raise ValueError(f"{key}.{field} is below one request reservation")
             self.states[key] = dict(config=config, starts=deque(), usage=deque(),
                                     active=0, spent=0, unknown=0, calls=0,
+                                    known_spent=0, known_calls=0,
                                     overshoots=0)
 
     def cancel(self):
@@ -87,19 +89,54 @@ class RateGate:
             state = self.states[key]
             if state["active"] < 1:
                 raise RuntimeError("Unbalanced account reservation release")
-            tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
-            if (isinstance(tokens, bool) or not isinstance(tokens, (int, float))
-                or not isfinite(tokens) or tokens < 0):
+            tokens = known_total_tokens(usage)
+            if tokens is None:
                 tokens = state["config"]["reserve_tokens"]
                 state["unknown"] += 1
             else:
                 tokens = int(tokens)
+                state["known_spent"] += tokens
+                state["known_calls"] += 1
                 if tokens > state["config"]["reserve_tokens"]:
                     state["overshoots"] += 1
             state["spent"] += tokens
             state["usage"].append((time.monotonic(), tokens))
             state["active"] -= 1
             self.condition.notify_all()
+
+    def try_acquire(self, key: str) -> bool:
+        """One nonblocking reservation attempt for interruptible cloud clients.
+
+        Never leave a blocking manager RPC that could grant a slot after the
+        caller's decision has already expired. The existing acquire API remains
+        unchanged for other callers.
+        """
+        with self.condition:
+            if self.cancelled:
+                raise RuntimeError("Cloud run stopped; no new API calls permitted")
+            state = self.states[key]
+            cfg = state["config"]
+            now = time.monotonic()
+            for queue in ("starts", "usage"):
+                while state[queue] and (state[queue][0] if queue == "starts" else state[queue][0][0]) <= now-self.window:
+                    state[queue].popleft()
+            reserve = cfg["reserve_tokens"]
+            pending = state["active"]*reserve
+            budget = cfg.get("total_token_budget")
+            if budget is not None and state["spent"]+pending+reserve > budget:
+                if state["active"] == 0:
+                    raise RuntimeError(f"Local token budget exhausted for account {key}")
+                return False
+            rpm, tpm = cfg.get("requests_per_minute"), cfg.get("tokens_per_minute")
+            rolling = sum(tokens for _, tokens in state["usage"])+pending
+            if (state["active"] >= cfg["max_in_flight"]
+                    or (rpm is not None and len(state["starts"]) >= rpm)
+                    or (tpm is not None and rolling+reserve > tpm)):
+                return False
+            state["starts"].append(now)
+            state["active"] += 1
+            state["calls"] += 1
+            return True
 
     def snapshot(self) -> dict:
         with self.condition:
@@ -108,6 +145,11 @@ class RateGate:
                 "accounted_or_reserved_tokens": state["spent"],
                 "unknown_usage_calls": state["unknown"],
                 "reservation_overshoots": state["overshoots"],
+                "known_total_tokens": state["known_spent"] if state["known_calls"] else None,
+                "total_tokens": (state["known_spent"] if state["calls"] > 0
+                                 and state["unknown"] == 0 and state["active"] == 0 else None),
+                "usage_complete": state["calls"] > 0 and state["unknown"] == 0 and state["active"] == 0,
+                "active_reserved_tokens": state["active"]*state["config"]["reserve_tokens"],
             } for key, state in self.states.items()}
 
     def _recent_time(self, at):
@@ -129,10 +171,13 @@ class RateGate:
         """Restore quota accounting and recent completions, not active calls."""
         with self.condition:
             state = self.states[key]
-            tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
-            if isinstance(tokens, bool) or not isinstance(tokens, (int, float)) or not isfinite(tokens) or tokens < 0:
+            tokens = known_total_tokens(usage)
+            if tokens is None:
                 tokens = state["config"]["reserve_tokens"]
                 state["unknown"] += 1
+            else:
+                state["known_spent"] += tokens
+                state["known_calls"] += 1
             state["spent"] += int(tokens)
             state["calls"] += 1
             recent = self._recent_time(at)

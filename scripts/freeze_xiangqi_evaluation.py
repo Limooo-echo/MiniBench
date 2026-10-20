@@ -13,7 +13,7 @@ from minibench.datasets.xiangqi.schema import load_records, sample_records
 TASKS = {"d3":("mate_in_one","xiangqi-direct"), "c2":("rule_variants","xiangqi-rule"),
          "h2":("history","xiangqi-history"), "m2":("multimodal","xiangqi-visual")}
 RELEASE_ID = "xiangqi-2026-09-19-r1"
-PROTOCOL_VERSION = "xiangqi-reasoning-v2"
+PROTOCOL_VERSION = "xiangqi-shortest-tree-v1"
 
 def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -35,10 +35,12 @@ def main():
     provenance=json.loads((ROOT/"data/xiangqi/provenance.json").read_text(encoding="utf-8"))
     engine=provenance["engine"]
     manifest={"release_id":RELEASE_ID,"protocol_version":PROTOCOL_VERSION,"samples":{}}
-    for size,seed,count,c2count in (("smoke",20260909,6,3),("formal",42,30,10)):
+    for size,seed,count,c2count in (("smoke",20260909,6,3),("formal",42,100,50)):
         selected={"d3":sample_records(datasets["d3"],count=count,seed=seed,strategy="stratified"),
                   "h2":sample_records(datasets["h2"],count=count,seed=seed,strategy="stratified"),
                   "c2":sample_records(datasets["c2"],count=c2count,seed=seed,strategy="paired-stratified")}
+        if size=="formal":
+            selected={key:list(datasets[key]) for key in ("d3","h2","c2")}
         m2_by_source={r["source_task_id"]:r for r in datasets["m2"]}
         selected["m2"]=[m2_by_source[r["id"]] for r in selected["d3"]]
         sample={"seed":seed,"tasks":{}}
@@ -56,7 +58,11 @@ def main():
                 config["evaluation"]["pikafish_nnue_sha256"]=engine["nnue_sha256"]
             config["task"].pop("sampling", None)
             config["task"]["selection"]={k:sample["tasks"][key][k] for k in ("path","sha256")}
-            config["task"]["prompt_version"]="xiangqi-m2-recognition-v1" if key=="m2" else PROTOCOL_VERSION
+            config["task"]["prompt_version"]=(
+                "xiangqi-paired-one-move-v3" if key in {"d3","m2"} else PROTOCOL_VERSION)
+            config["evaluation"].setdefault("pricing",None)
+            if key in {"h2","c2"}:
+                config["evaluation"]["solution_tree_dir"]=f"data/xiangqi/solution_trees/{key}"
             config["task"].pop("task_ids",None)
             config["task"].pop("limit",None)
             if size == "formal":
@@ -65,7 +71,7 @@ def main():
                 config["task"].pop("selection", None)
                 config["task"]["limit"] = 100
             if key == "m2":
-                config["evaluation"]["input_modes"] = ["text", "chinese-piece-image"]
+                config["evaluation"]["input_modes"] = ["chinese-piece-image"]
             config["run"]["run_name"]=f"xiangqi_{key}_direct_{'submitted100' if size == 'formal' else size}_r1"
             config["run"]["on_existing"]="error"
             destination=config_path if size=="formal" else ROOT/f"config/experiments/xiangqi_smoke/{key}.yaml"

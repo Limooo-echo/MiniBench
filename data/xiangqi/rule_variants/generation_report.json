@@ -1,24 +1,18 @@
 {
+  "certification": "shortest full-width AND/OR, all legal defences",
+  "derived_sources": 18,
   "difficulty_counts": {
-    "long": 4,
-    "medium": 38,
-    "short": 58
+    "medium": 50,
+    "short": 50
   },
   "record_count": 100,
-  "rule_sensitive_scenarios": {
-    "chariot-no-center": 4,
-    "horse-no-leg-block": 17,
-    "soldier-free-retreat": 16
-  },
   "ruleset_counts": {
     "chariot-no-center": 17,
     "horse-no-leg-block": 17,
     "soldier-free-retreat": 16,
     "standard": 50
   },
-  "runtime_certified_count": 100,
   "scenario_count": 50,
-  "selection_manifest": "submission_manifest.json",
-  "version": "xiangqi-submitted-stratified100-v1",
-  "within_five_moves": 96
+  "stored_defences": "optimal replies only, unless header says all_legal",
+  "version": "xiangqi-shortest-paired100-v2"
 }

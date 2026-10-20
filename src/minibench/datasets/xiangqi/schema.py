@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 import random
 import re
@@ -132,7 +133,8 @@ def validate_record(record: dict[str, Any], *, expected_family: str | None = Non
         raise ValueError(f"{task_id}: unsupported Xiangqi family {family!r}")
     if expected_family is not None and family != expected_family:
         raise ValueError(f"{task_id}: expected family {expected_family}, got {family}")
-    if not isinstance(task_id, str) or not task_id.startswith(f"{family}-"):
+    if (not isinstance(task_id, str) or not task_id.startswith(f"{family}-")
+            or re.fullmatch(r"[A-Za-z0-9_-]+",task_id) is None):
         raise ValueError(f"{task_id!r}: id must begin with {family}-")
     fen = record.get("fen")
     if not isinstance(fen, str):
@@ -193,7 +195,57 @@ def validate_record(record: dict[str, Any], *, expected_family: str | None = Non
         _validate_history_record(record)
     elif family == "xiangqi-multimodal":
         _validate_multimodal_record(record)
+    if "shortest_mate_moves" in record or "shortest_proof" in record:
+        _validate_shortest_metadata(record)
+    derivation=record.get("source",{}).get("derivation")
+    if derivation:
+        parent_fen=derivation.get("parent_fen")
+        moves=derivation.get("moves_uci")
+        if (not isinstance(parent_fen,str) or not isinstance(moves,list) or not moves
+                or not str(derivation.get("parent_task_id","")).startswith("xiangqi-history-")):
+            raise ValueError(f"{task_id}: incomplete derived-position provenance")
+        state,color=fen_to_board(parent_fen)
+        turn=1 if color=="red" else -1
+        from minibench.datasets.xiangqi import reference
+        for uci in moves:
+            legal={m.to_uci():m for m in reference.legal_moves(state,turn,"standard")}
+            if uci not in legal:
+                raise ValueError(f"{task_id}: illegal source derivation move")
+            state=reference.apply_move(state,legal[uci])
+            turn=-turn
+        if board_to_fen(state,active_color="red" if turn==1 else "black")!=record["fen"]:
+            raise ValueError(f"{task_id}: derived-position path does not reach its FEN")
     return record
+
+
+def _validate_shortest_metadata(record: dict[str, Any]) -> None:
+    """Metadata is not a proof; bind it to a separately checked artifact."""
+    task_id = record["id"]
+    n = record.get("shortest_mate_moves")
+    proof = record.get("shortest_proof")
+    if record["family"] not in {"xiangqi-history", "xiangqi-rule-variants"}:
+        raise ValueError(f"{task_id}: shortest metadata only applies to multi-move tasks")
+    if isinstance(n, bool) or not isinstance(n, int) or not 2 <= n <= 5:
+        raise ValueError(f"{task_id}: certified release requires shortest mate in 2..5 moves")
+    fields = {"version", "record_key", "tree_path", "tree_sha256",
+              "shortest_attacker_moves", "tree_complete"}
+    if not isinstance(proof, dict) or set(proof) != fields:
+        raise ValueError(f"{task_id}: missing or invalid shortest_proof metadata")
+    from minibench.datasets.xiangqi.solution_tree import VERSION, record_key
+    if (proof["version"] != VERSION or proof["record_key"] != record_key(record)
+            or proof["shortest_attacker_moves"] != n
+            or proof["tree_complete"] is not True
+            or not isinstance(proof["tree_sha256"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", proof["tree_sha256"]) is None):
+        raise ValueError(f"{task_id}: inconsistent shortest proof identity")
+    folder = "h2" if record["family"] == "xiangqi-history" else "c2"
+    if proof["tree_path"] != f"data/xiangqi/solution_trees/{folder}/{task_id}.json":
+        raise ValueError(f"{task_id}: invalid shortest proof path")
+    line=record.get("shortest_line_uci")
+    if (not isinstance(line,list) or len(line)!=2*n-1
+            or any(not isinstance(m,str) or re.fullmatch(r"[a-i][0-9][a-i][0-9]",m) is None for m in line)
+            or record["oracle"]["best_move_uci"]!=line[0] or record["oracle"]["mate_in_plies"]!=2*n-1):
+        raise ValueError(f"{task_id}: shortest strategy/oracle mismatch")
 
 
 def _validate_mate_in_one_record(record: dict[str, Any]) -> None:
@@ -208,7 +260,7 @@ def _validate_mate_in_one_record(record: dict[str, Any]) -> None:
     if set(analysis) != expected or analysis.get("version") != "d3-structural-v2":
         raise ValueError(f"{record['id']}: invalid d3_analysis schema")
     for key in ("legal_move_count", "mate_move_count", "non_mating_check_count", "piece_count"):
-        if not isinstance(analysis[key], int) or analysis[key] < 0:
+        if isinstance(analysis[key], bool) or not isinstance(analysis[key], int) or analysis[key] < 0:
             raise ValueError(f"{record['id']}: invalid d3_analysis.{key}")
     moves = analysis["mate_moves_uci"]
     if (not isinstance(moves, list) or not moves or moves != sorted(set(moves))
@@ -220,7 +272,14 @@ def _validate_mate_in_one_record(record: dict[str, Any]) -> None:
         raise ValueError(f"{record['id']}: D3 requires an exact one-ply mate horizon")
     if record["oracle"]["best_move_uci"] not in moves:
         raise ValueError(f"{record['id']}: D3 oracle move is not in the complete mate set")
-    if not isinstance(analysis["difficulty_score"], (int, float)):
+    legal = analysis["legal_move_count"]
+    mates = analysis["mate_move_count"]
+    near_misses = analysis["non_mating_check_count"]
+    if legal < 1 or mates < 1 or mates > legal or near_misses > legal - mates:
+        raise ValueError(f"{record['id']}: inconsistent D3 legal/mate/check counts")
+    score = analysis["difficulty_score"]
+    if (isinstance(score, bool) or not isinstance(score, (int, float))
+            or not 0 <= score <= 1 or not math.isfinite(score)):
         raise ValueError(f"{record['id']}: invalid d3_analysis.difficulty_score")
     factors = analysis["difficulty_factors"]
     factor_keys = {
@@ -230,8 +289,32 @@ def _validate_mate_in_one_record(record: dict[str, Any]) -> None:
     }
     if not isinstance(factors, dict) or set(factors) != factor_keys:
         raise ValueError(f"{record['id']}: invalid d3_analysis.difficulty_factors")
-    if any(not isinstance(factors[key], (int, float)) for key in factor_keys):
-        raise ValueError(f"{record['id']}: non-numeric D3 difficulty factor")
+    for key in factor_keys - {"state_load"}:
+        value = factors[key]
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not 0 <= value <= 1 or not math.isfinite(value)):
+            raise ValueError(f"{record['id']}: invalid D3 difficulty factor {key}")
+    load = factors["state_load"]
+    if (isinstance(load, bool) or not isinstance(load, int)
+            or load != record["piece_count"]):
+        raise ValueError(f"{record['id']}: D3 state_load must equal the piece count")
+    expected_rates = {
+        "choice_pressure": (legal - mates) / legal,
+        "near_miss_rate": near_misses / (near_misses + mates),
+    }
+    for key, expected in expected_rates.items():
+        if not math.isclose(factors[key], expected, rel_tol=0, abs_tol=1e-12):
+            raise ValueError(f"{record['id']}: D3 {key} disagrees with move counts")
+    expected_score = round(math.fsum((
+        0.50 * factors["choice_pressure_percentile"],
+        0.30 * factors["near_miss_rate_percentile"],
+        0.20 * factors["state_load_percentile"],
+    )), 6)
+    # Persisted six-decimal scores can differ in their last decimal place at a
+    # binary floating-point tie across Python versions. This tolerance admits
+    # that rounding only; it does not permit a different weighting formula.
+    if not math.isclose(score, expected_score, rel_tol=0, abs_tol=1.1e-6):
+        raise ValueError(f"{record['id']}: D3 difficulty score disagrees with its weighted factors")
 
 
 def _validate_rule_record(record: dict[str, Any]) -> None:
@@ -285,19 +368,24 @@ def _validate_rule_record(record: dict[str, Any]) -> None:
     if not isinstance(mate_moves, int) or isinstance(mate_moves, bool) or not 2 <= mate_moves <= 12:
         raise ValueError(f"{task_id}: C2 requires a 2..12 move multi-ply mate")
     reference_plies = 2 * mate_moves - 1
-    expected_band = "short" if mate_moves <= 3 else "medium" if mate_moves <= 5 else "long"
+    stratification_moves = record.get("shortest_mate_moves",mate_moves)
+    if (isinstance(stratification_moves,bool) or not isinstance(stratification_moves,int)
+            or not 2<=stratification_moves<=12):
+        raise ValueError(f"{task_id}: invalid shortest/reference stratum")
+    expected_band = "short" if stratification_moves <= 3 else "medium" if stratification_moves <= 5 else "long"
     if record["difficulty"] != expected_band:
         raise ValueError(f"{task_id}: C2 difficulty does not match mate distance")
     if (analysis.get("reference_mate_plies") != reference_plies
-            or record["oracle"].get("mate_in_plies") != reference_plies):
+            or ("shortest_proof" not in record and record["oracle"].get("mate_in_plies") != reference_plies)):
         raise ValueError(f"{task_id}: inconsistent C2 reference mate distance")
-    if analysis.get("max_plies_extension") != 4 or record["max_plies"] != reference_plies + 4:
+    horizon_plies = 2*stratification_moves-1
+    if analysis.get("max_plies_extension") != 4 or record["max_plies"] != horizon_plies + 4:
         raise ValueError(f"{task_id}: C2 bounded horizon must add four half-moves")
     pv = analysis.get("principal_variation_uci")
     if (not isinstance(pv, list) or len(pv) != reference_plies
             or any(not isinstance(move, str) or re.fullmatch(r"[a-i][0-9][a-i][0-9]", move) is None for move in pv)):
         raise ValueError(f"{task_id}: invalid C2 principal variation")
-    if record["oracle"].get("best_move_uci") != pv[0]:
+    if "shortest_proof" not in record and record["oracle"].get("best_move_uci") != pv[0]:
         raise ValueError(f"{task_id}: C2 oracle move does not match the reference line")
     if analysis.get("search_depth") != 3:
         raise ValueError(f"{task_id}: C2 release requires rule-aware search depth 3")
@@ -357,12 +445,17 @@ def _validate_history_record(record: dict[str, Any]) -> None:
     if not isinstance(mate_moves, int) or isinstance(mate_moves, bool) or not 2 <= mate_moves <= 12:
         raise ValueError(f"{task_id}: H2 reference mate distance must be 2..12 moves")
     reference_plies = 2 * mate_moves - 1
-    expected_band = "short" if mate_moves <= 3 else "medium" if mate_moves <= 5 else "long"
-    if analysis.get("reference_mate_plies") != reference_plies or record["oracle"]["mate_in_plies"] != reference_plies:
+    stratification_moves = record.get("shortest_mate_moves",mate_moves)
+    if (isinstance(stratification_moves,bool) or not isinstance(stratification_moves,int)
+            or not 2<=stratification_moves<=12):
+        raise ValueError(f"{task_id}: invalid shortest/reference stratum")
+    expected_band = "short" if stratification_moves <= 3 else "medium" if stratification_moves <= 5 else "long"
+    if (analysis.get("reference_mate_plies") != reference_plies
+            or ("shortest_proof" not in record and record["oracle"]["mate_in_plies"] != reference_plies)):
         raise ValueError(f"{task_id}: inconsistent H2 reference distance")
     if record["difficulty"] != expected_band:
         raise ValueError(f"{task_id}: H2 difficulty does not match reference distance")
-    if record["max_plies"] != reference_plies + 4:
+    if record["max_plies"] != 2*stratification_moves-1 + 4:
         raise ValueError(f"{task_id}: H2 extended horizon must add four half-moves")
     if analysis.get("requested_depths") != [16, 20] or analysis.get("source_reused") is not False:
         raise ValueError(f"{task_id}: invalid H2 verification metadata")
@@ -373,7 +466,7 @@ def _validate_history_record(record: dict[str, Any]) -> None:
     if (not isinstance(pv, list) or len(pv) != reference_plies
             or any(not isinstance(move, str) or re.fullmatch(r"[a-i][0-9][a-i][0-9]", move) is None for move in pv)):
         raise ValueError(f"{task_id}: invalid H2 principal variation")
-    if record["oracle"]["best_move_uci"] != pv[0]:
+    if "shortest_proof" not in record and record["oracle"]["best_move_uci"] != pv[0]:
         raise ValueError(f"{task_id}: H2 oracle move does not match the primary PV")
 
 

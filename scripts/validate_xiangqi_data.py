@@ -114,12 +114,14 @@ def _h2_details(record, reasons):
         reasons.append("invalid_reference_mate_moves")
         return {}
     plies = 2 * moves - 1
-    expected_band = "short" if moves <= 3 else "medium" if moves <= 5 else "long"
+    shortest = record.get("shortest_mate_moves", moves)
+    expected_band = "short" if shortest <= 3 else "medium" if shortest <= 5 else "long"
     if record.get("difficulty") != expected_band:
         reasons.append("reference_distance_band_mismatch")
-    if analysis.get("reference_mate_plies") != plies or record["oracle"].get("mate_in_plies") != plies:
+    if (analysis.get("reference_mate_plies") != plies
+            or ("shortest_proof" not in record and record["oracle"].get("mate_in_plies") != plies)):
         reasons.append("reference_mate_plies_mismatch")
-    if record.get("max_plies") != plies + 4:
+    if record.get("max_plies") != 2*shortest+3:
         reasons.append("h2_horizon_mismatch")
     if analysis.get("source_reused") is not False:
         reasons.append("source_reuse_must_be_false")
@@ -171,7 +173,7 @@ def _h2_details(record, reasons):
     if isinstance(runs[-1], dict):
         if analysis.get("principal_variation_uci") != runs[-1].get("principal_variation_uci"):
             reasons.append("primary_pv_is_not_depth_20_pv")
-        if record["oracle"].get("best_move_uci") != runs[-1].get("best_move_uci"):
+        if "shortest_proof" not in record and record["oracle"].get("best_move_uci") != runs[-1].get("best_move_uci"):
             reasons.append("oracle_is_not_depth_20_bestmove")
     return {"reference_mate_plies": plies, "runs": results,
             "claim_limit": "Two complete engine reference PVs; not a proof over every defence or a shortest-mate proof."}
@@ -196,13 +198,15 @@ def _c2_details(record, board, side, reasons, skip_search):
             break
     analysis = record.get("c2_analysis", {})
     pv = analysis.get("principal_variation_uci", [])
-    reference_plies = record.get("oracle", {}).get("mate_in_plies")
+    reference_plies = analysis.get("reference_mate_plies")
     if analysis.get("search_depth") != 3:
         reasons.append("c2_requires_registered_depth_three_policy")
+    expected_horizon = (2*record["shortest_mate_moves"]+3
+                        if "shortest_mate_moves" in record else reference_plies+4)
     if (not isinstance(reference_plies, int) or reference_plies < 3
-            or record.get("max_plies") != reference_plies + 4):
+            or record.get("max_plies") != expected_horizon):
         reasons.append("c2_invalid_multi_ply_horizon")
-    if not pv or record["oracle"].get("best_move_uci") != pv[0]:
+    if not pv or ("shortest_proof" not in record and record["oracle"].get("best_move_uci") != pv[0]):
         reasons.append("c2_oracle_reference_line_mismatch")
 
     from minibench.datasets.xiangqi.variants.mate_search import replay_strict_mate_line
@@ -347,7 +351,10 @@ def audit_collection(family: str, records: Sequence[dict]) -> list[str]:
         reasons.append("duplicate_fens_within_family")
     counts = Counter(record.get("difficulty") for record in records)
     if len(records) == 100:
-        expected = {"short": 34, "medium": 33, "long": 33} if family == "xiangqi-history" else {"easy": 34, "medium": 33, "hard": 33}
+        new_shortest = family == "xiangqi-history" and all("shortest_proof" in r for r in records)
+        expected = ({"short":50,"medium":50} if new_shortest else
+                    {"short":34,"medium":33,"long":33} if family == "xiangqi-history" else
+                    {"easy":34,"medium":33,"hard":33})
     else:
         expected = {"short": 80, "medium": 80, "long": 90} if family == "xiangqi-history" else {"easy": 80, "medium": 85, "hard": 85}
     if family != "xiangqi-rule-variants" and dict(counts) != expected:
@@ -512,6 +519,10 @@ def audit_c2_sources(records: Sequence[dict], data_root: Path) -> dict[str, Any]
         result = {"id": record.get("id"), "valid": False, "reasons": []}
         report["records"].append(result)
         reasons = result["reasons"]
+        try:
+            validate_record(record,expected_family="xiangqi-rule-variants")
+        except (ValueError,TypeError,KeyError) as exc:
+            reasons.append(f"record_validation_failed:{type(exc).__name__}:{exc}")
         source_task_id = record.get("source_task_id")
         source = history.get(source_task_id)
         if source is None:
@@ -520,14 +531,17 @@ def audit_c2_sources(records: Sequence[dict], data_root: Path) -> dict[str, Any]
             scenarios_by_source[source_task_id].add(record.get("scenario_id"))
             expected_pv = source.get("h2_analysis", {}).get("principal_variation_uci")
             analysis = record.get("c2_analysis", {})
-            for key in ("fen", "agent_color", "difficulty", "piece_count", "source", "source_id"):
+            mapped_keys = ("fen", "agent_color", "piece_count", "source", "source_id")
+            if "shortest_proof" not in record:
+                mapped_keys += ("difficulty",)
+            for key in mapped_keys:
                 if record.get(key) != source.get(key):
                     reasons.append(f"h2_{key}_mapping_mismatch")
-            if analysis.get("principal_variation_uci") != expected_pv:
+            if "shortest_proof" not in record and analysis.get("principal_variation_uci") != expected_pv:
                 reasons.append("h2_principal_variation_mapping_mismatch")
-            if record.get("oracle", {}).get("best_move_uci") != source.get("oracle", {}).get("best_move_uci"):
+            if "shortest_proof" not in record and record.get("oracle", {}).get("best_move_uci") != source.get("oracle", {}).get("best_move_uci"):
                 reasons.append("h2_bestmove_mapping_mismatch")
-            if record.get("oracle", {}).get("mate_in_plies") != source.get("oracle", {}).get("mate_in_plies"):
+            if "shortest_proof" not in record and record.get("oracle", {}).get("mate_in_plies") != source.get("oracle", {}).get("mate_in_plies"):
                 reasons.append("h2_reference_distance_mapping_mismatch")
         result["valid"] = not reasons
         report["reasons"].extend(f"{record.get('id')}:{why}" for why in reasons)
@@ -567,12 +581,14 @@ def audit_frozen_samples(data_root: Path, datasets: dict[str, Sequence[dict]], i
         manifest = json.loads(raw)
         if manifest.get("release_id") != RELEASE_ID:
             reasons.append("frozen_release_id_mismatch")
-        if manifest.get("protocol_version") != "xiangqi-reasoning-v2":
+        if manifest.get("protocol_version") not in {"xiangqi-reasoning-v2", "xiangqi-shortest-tree-v1"}:
             reasons.append("frozen_protocol_version_mismatch")
         if set(manifest.get("samples", {})) != {"smoke", "formal"}:
             reasons.append("frozen_requires_smoke_and_formal_samples")
         sources = {family: {record["id"]: record for record in rows} for family, rows in datasets.items()}
-        for size, seed, count, c2count in (("smoke", 20260909, 6, 3), ("formal", 42, 30, 10)):
+        formal_new = manifest.get("protocol_version")=="xiangqi-shortest-tree-v1"
+        for size, seed, count, c2count in (("smoke",20260909,6,3),
+                                          ("formal",42,100 if formal_new else 30,50 if formal_new else 10)):
             sample = manifest.get("samples", {}).get(size, {})
             current = {"valid": False, "reasons": [], "tasks": {}}
             report["samples"][size] = current
@@ -584,6 +600,8 @@ def audit_frozen_samples(data_root: Path, datasets: dict[str, Sequence[dict]], i
             expected = {key: sample_records(datasets[ALIASES[key]], count=c2count if key == "c2" else count,
                                            seed=seed, strategy="paired-stratified" if key == "c2" else "stratified")
                         for key in ("d3", "c2", "h2")}
+            if size=="formal" and formal_new:
+                expected={key:list(datasets[ALIASES[key]]) for key in ("d3","c2","h2")}
             m2_sources = {row.get("source_task_id"): row for row in datasets[ALIASES["m2"]]}
             expected["m2"] = [m2_sources[row["id"]] for row in expected["d3"]]
             selected = {}
@@ -694,6 +712,8 @@ def audit_release(
             ROOT / "src/minibench/datasets/xiangqi/variants/board.py", ROOT / "src/minibench/datasets/xiangqi/variants/search.py",
             ROOT / "src/minibench/datasets/xiangqi/variants/mate_search.py",
             ROOT / "src/minibench/datasets/xiangqi/variants/certification.py",
+            ROOT / "src/minibench/datasets/xiangqi/solution_tree.py",
+            ROOT / "scripts/verify_xiangqi_mate.py",
             ROOT / "src/minibench/datasets/xiangqi/rule_variants.py")},
         "limitations": ["PV checks validate the supplied lines, not all possible defences or shortest mate distance.",
                         "Structural position constraints do not independently prove game-history reachability."]}
@@ -770,6 +790,14 @@ def audit_release(
             result["reasons"].append(f"{family}:input_disappeared_during_audit")
     result["valid"] = not result["reasons"] and all(item["valid"] for item in result["families"].values())
     result["static_data_ready"] = result["valid"] and result["full"]
+    if "xiangqi-history" in families:
+        history_records=[r for _,r in rows["xiangqi-history"]]
+        if history_records and all("shortest_proof" in r for r in history_records):
+            checked=audit_shortest_certificates(data_root,history_records,"h2")
+            result["h2_shortest_certificates"]=checked
+            if not checked["valid"]:
+                result["reasons"].append("h2_shortest_certification_failed")
+                result["valid"]=result["static_data_ready"]=False
     if "xiangqi-rule-variants" in families:
         certificate = audit_runtime_certificates(data_root, [r for _, r in rows["xiangqi-rule-variants"]], workers=workers)
         result["c2_runtime_certificates"] = certificate
@@ -790,7 +818,26 @@ def _certificate_payload(payload):
     return record["id"], verify_winning_line(record, line)
 
 
+def audit_shortest_certificates(data_root,records,folder):
+    from minibench.datasets.xiangqi.solution_tree import validate_tree_record
+    report={"valid":False,"reasons":[],"record_count":len(records),"records":{},
+            "policy":"complete shortest tree; finite-depth fallback is not a proof"}
+    for record in records:
+        path=data_root/"solution_trees"/folder/f"{record['id']}.json"
+        try:
+            checked=validate_tree_record(record,path)
+        except (OSError,ValueError,KeyError,TypeError) as exc:
+            checked={"valid":False,"reasons":[type(exc).__name__+":"+str(exc)]}
+        report["records"][record["id"]]=checked
+        if not checked["valid"]:
+            report["reasons"].append(f"{record['id']}:tree_certificate_failed")
+    report["valid"]=not report["reasons"]
+    return report
+
+
 def audit_runtime_certificates(data_root, records, *, workers=4):
+    if records and all("shortest_proof" in r for r in records):
+        return audit_shortest_certificates(data_root,records,"c2")
     from minibench.datasets.xiangqi.variants.certification import certificate_header_valid
     path = data_root / "rule_variants/runtime_certificates.json"
     report = {"valid": False, "reasons": [], "record_count": len(records), "records": {}}

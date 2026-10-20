@@ -17,6 +17,7 @@ import warnings
 
 from minibench.core.agent import Agent, ChatMessage, CompletionResult, MessagePhase
 from minibench.core.metrics import empty_token_usage, extract_token_usage
+from minibench.core.token_usage import assess_token_usage
 from minibench.core.multimodal import ImageAttachment
 from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT
 
@@ -100,6 +101,7 @@ class OpenAICompatibleClient:
         api_key_env: str,
         temperature: float = 0.0,
         max_tokens: int = 64,
+        omit_max_tokens: bool = False,
         timeout: int = 60,
         json_mode: bool = False,
         extra_body: dict[str, object] | None = None,
@@ -119,6 +121,9 @@ class OpenAICompatibleClient:
                 "retry_max_backoff_seconds must be greater than or equal to "
                 "retry_initial_backoff_seconds"
             )
+        if not isinstance(omit_max_tokens, bool):
+            raise ValueError("omit_max_tokens must be a boolean")
+        self.omit_max_tokens = omit_max_tokens
         self.model = model
         self.base_url = base_url
         self.api_key_env = api_key_env
@@ -211,6 +216,11 @@ class OpenAICompatibleClient:
         if use_json_mode:
             payload["response_format"] = {"type": "json_object"}
         payload.update(self.extra_body)
+        if self.omit_max_tokens:
+            # Apply after extra_body too: an Agent's internal stage budget must
+            # not silently restore an explicitly disabled request token cap.
+            for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
+                payload.pop(key, None)
         return payload
 
     def _system_prompt(self, phase_prompt: str | None = None) -> str:
@@ -344,6 +354,7 @@ class OpenAICompatibleClient:
         started_at = perf_counter()
         elapsed_seconds: float | None = None
         usage: object = None
+        usage_validation = None
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read().decode("utf-8")
@@ -369,6 +380,9 @@ class OpenAICompatibleClient:
             )
             if not isinstance(content, str):
                 raise RuntimeError(f"Unexpected message content in response: {raw}")
+            usage_validation = assess_token_usage(
+                usage, reasoning_chars=len(_message_reasoning(message) or ""),
+                content_chars=len(content))
 
             if self._completion_traces is not None:
                 request_payload = json.loads(request.data or b"{}")
@@ -376,6 +390,7 @@ class OpenAICompatibleClient:
                     "content": message.get("content"),
                     "finish_reason": choice.get("finish_reason"),
                     "usage": usage,
+                    "usage_validation": usage_validation,
                     "max_tokens": request_payload.get("max_tokens"),
                     "model_elapsed_seconds": round(perf_counter() - started_at, 6),
                 }
@@ -411,11 +426,13 @@ class OpenAICompatibleClient:
                 model=model if isinstance(model, str) else None,
                 response_id=response_id if isinstance(response_id, str) else None,
                 elapsed_seconds=elapsed_seconds,
+                metadata={"usage_validation": usage_validation},
             )
         finally:
             if elapsed_seconds is None:
                 elapsed_seconds = perf_counter() - started_at
-            self._record_completion_metrics(elapsed_seconds, usage)
+            self._record_completion_metrics(
+                elapsed_seconds, usage if not usage_validation or usage_validation["status"] != "invalid" else None)
 
     def _sleep_before_retry(
         self,

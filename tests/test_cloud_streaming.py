@@ -13,6 +13,7 @@ from minibench.core import streaming as runner
 from minibench.core.agent import CompletionResult
 from minibench.datasets.xiangqi.mate_in_one import MateInOneResult
 from minibench.factory.providers import OpenAICompatibleClient
+from minibench.core.rate_limit import RateGate
 
 
 class ResumableXiangqiTests(unittest.TestCase):
@@ -210,6 +211,64 @@ class XiangqiStreamingTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "silent transport fallback"):
                         self.client(Path(temporary)).complete_result("fixture")
                     self.assertEqual(network.call_count, 1)
+
+    def test_failed_answer_keeps_received_usage_and_manual_retry_counts_both(self):
+        failed = self.body([
+            self.chunk({"reasoning_content": "unfinished thought"}, finish="stop"),
+            self.chunk(usage={"total_tokens": 10944}),
+        ])
+        success = self.body([
+            self.chunk({"content": "answer"}, finish="stop"),
+            self.chunk(usage={"total_tokens": 7}),
+        ])
+        with tempfile.TemporaryDirectory() as temporary:
+            journal = Path(temporary)
+            gate = RateGate({"default": {"reserve_tokens": 32768}})
+            with patch.dict(os.environ, {"UNIT_TEST_TRANSIENT_KEY": "fixture"}):
+                client = self.client(journal)
+                client.gate = gate
+                with patch("urllib.request.urlopen", return_value=StreamingResponse(failed)):
+                    with self.assertRaisesRegex(RuntimeError, "no final answer"):
+                        client.complete_result("fixture")
+                self.assertEqual(gate.snapshot()["default"]["accounted_or_reserved_tokens"], 10944)
+                self.assertEqual(gate.snapshot()["default"]["unknown_usage_calls"], 0)
+                client = self.client(journal)
+                client.gate = gate
+                with patch("urllib.request.urlopen", return_value=StreamingResponse(success)):
+                    client.complete_result("fixture")
+                with patch("urllib.request.urlopen", side_effect=AssertionError("replay is offline")):
+                    self.client(journal).complete_result("fixture")
+            attempts = list(runner.call_attempts(journal))
+            self.assertEqual([a["status"] for a in attempts], ["failed", "success"])
+            self.assertEqual(sum(a["usage"]["total_tokens"] for a in attempts), 10951)
+            self.assertEqual(gate.snapshot()["default"]["network_calls"], 2)
+
+    def test_started_without_partial_is_unknown_and_queued_is_not_a_call(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            journal = Path(temporary)
+            started = journal / "attempts/0000-0000"
+            queued = journal / "attempts/0001-0000"
+            started.mkdir(parents=True)
+            queued.mkdir()
+            runner.atomic_write_json(started / "started.json", {"at": runner.now()})
+            runner.atomic_write_json(queued / "request.json", {"messages": []})
+            attempts = list(runner.call_attempts(journal))
+            self.assertEqual(len(attempts), 1)
+            self.assertIsNone(attempts[0]["usage"])
+
+    def test_usage_arriving_before_malformed_chunk_is_still_accounted(self):
+        body = self.body([self.chunk(usage={"total_tokens": 19})], done=False)
+        body += b'data: not-json\n\n'
+        with tempfile.TemporaryDirectory() as temporary:
+            journal = Path(temporary)
+            client = self.client(journal)
+            client.gate = RateGate({"default": {}})
+            with patch.dict(os.environ, {"UNIT_TEST_TRANSIENT_KEY": "fixture"}):
+                with patch("urllib.request.urlopen", return_value=StreamingResponse(body)):
+                    with self.assertRaises(json.JSONDecodeError):
+                        client.complete_result("fixture")
+            self.assertEqual(client.gate.snapshot()["default"]["accounted_or_reserved_tokens"], 19)
+            self.assertEqual(list(runner.call_attempts(journal))[0]["usage"]["total_tokens"], 19)
 
 
 if __name__ == "__main__":

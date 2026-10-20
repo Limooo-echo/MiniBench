@@ -122,6 +122,7 @@ def _xiangqi_history_spec() -> TaskFamilySpec:
 
 
 def _xiangqi_multimodal_spec() -> TaskFamilySpec:
+    from minibench.datasets.xiangqi.mate_in_one import MATE_IN_ONE_SYSTEM_PROMPT
     from minibench.datasets.xiangqi.multimodal import (
         evaluate_xiangqi_multimodal_tasks,
         summarize_xiangqi_multimodal,
@@ -135,6 +136,7 @@ def _xiangqi_multimodal_spec() -> TaskFamilySpec:
         evaluate_tasks=evaluate_xiangqi_multimodal_tasks,
         summarize=summarize_xiangqi_multimodal,
         write_run=write_xiangqi_multimodal_run,
+        system_prompt=MATE_IN_ONE_SYSTEM_PROMPT,
     )
 
 
@@ -488,6 +490,7 @@ def _write_xiangqi_run_metadata(
 ) -> None:
     from minibench.datasets.xiangqi.multimodal import M2_PROTOCOL_VERSION, XIANGQI_RENDERER_VERSION
     from minibench.datasets.xiangqi.schema import SCHEMA_VERSION
+    from minibench.datasets.xiangqi.runtime import PROTOCOL_VERSION
 
     data_bytes = data_path.read_bytes()
     dependencies: dict[str, str] = {}
@@ -504,7 +507,7 @@ def _write_xiangqi_run_metadata(
     ).encode("utf-8")
     metadata = {
         "family": family,
-        "protocol": {"version": M2_PROTOCOL_VERSION if family == "xiangqi-multimodal" else "xiangqi-reasoning-v2",
+        "protocol": {"version": config["task"].get("prompt_version", M2_PROTOCOL_VERSION if family == "xiangqi-multimodal" else PROTOCOL_VERSION),
                      "evaluation": _plain_config(config.get("evaluation") or {})},
         "schema_version": SCHEMA_VERSION,
         "renderer_version": XIANGQI_RENDERER_VERSION,
@@ -642,6 +645,7 @@ def _model_request_metadata(provider: dict[str, Any]) -> dict[str, Any]:
             "base_url",
             "api_version",
             "json_mode",
+            "omit_max_tokens",
             "extra_body",
         )
         if key in provider
@@ -738,15 +742,18 @@ def _evaluate(
         from minibench.datasets.xiangqi.runtime import validate_evaluation_config
 
         validate_evaluation_config(family, evaluation_config)
+        move_timeout = evaluation_config.get("final_move_timeout_seconds", 900.0)
     if family == "xiangqi-mate-in-one":
         return spec.evaluate_tasks(
             tasks,
             agent,
             on_result=on_result,
+            final_move_timeout_seconds=move_timeout,
             pikafish_path=evaluation_config.get("pikafish_path"),
             pikafish_binary_sha256=evaluation_config.get("pikafish_binary_sha256"),
             pikafish_nnue_sha256=evaluation_config.get("pikafish_nnue_sha256"),
             pikafish_depth=evaluation_config.get("pikafish_depth", 8),
+            pricing=evaluation_config.get("pricing"),
             pikafish_timeout=evaluation_config.get("pikafish_timeout", 60.0),
         )
     if family == "xiangqi-rule-variants":
@@ -754,14 +761,20 @@ def _evaluate(
             tasks,
             agent,
             on_result=on_result,
+            final_move_timeout_seconds=move_timeout,
             search_depth=int(evaluation_config.get("search_depth", 3)),
+            solution_tree_dir=evaluation_config.get("solution_tree_dir"),
+            pricing=evaluation_config.get("pricing"),
         )
     if family == "xiangqi-history":
         return spec.evaluate_tasks(
             tasks,
             agent,
             on_result=on_result,
+            final_move_timeout_seconds=move_timeout,
             history_mode=evaluation_config.get("history_mode", "move-history-only"),
+            solution_tree_dir=evaluation_config.get("solution_tree_dir"),
+            pricing=evaluation_config.get("pricing"),
             pikafish_path=evaluation_config.get("pikafish_path"),
             pikafish_binary_sha256=evaluation_config.get("pikafish_binary_sha256"),
             pikafish_nnue_sha256=evaluation_config.get("pikafish_nnue_sha256"),
@@ -771,13 +784,15 @@ def _evaluate(
     if family == "xiangqi-multimodal":
         modes = evaluation_config.get(
             "input_modes",
-            ("text", "chinese-piece-image"),
+            ("chinese-piece-image",),
         )
         return spec.evaluate_tasks(
             tasks,
             agent,
             on_result=on_result,
+            final_move_timeout_seconds=move_timeout,
             modes=tuple(modes),
+            pricing=evaluation_config.get("pricing"),
             pikafish_path=evaluation_config.get("pikafish_path"),
             pikafish_binary_sha256=evaluation_config.get("pikafish_binary_sha256"),
             pikafish_nnue_sha256=evaluation_config.get("pikafish_nnue_sha256"),

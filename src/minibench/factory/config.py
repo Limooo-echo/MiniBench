@@ -270,6 +270,8 @@ def validate_experiment_config(
     provider = raw["provider"]
     if "name" not in provider:
         provider["name"] = "generic"
+    if "omit_max_tokens" in provider and not isinstance(provider["omit_max_tokens"], bool):
+        raise ValueError(f"{source}: provider.omit_max_tokens must be boolean")
     max_retries = provider.get("max_retries")
     if max_retries is not None and (
         isinstance(max_retries, bool)

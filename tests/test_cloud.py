@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 from copy import deepcopy
 from dataclasses import asdict
 import io
+import multiprocessing as mp
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,43 @@ import yaml
 from minibench import cloud
 from minibench.core.checkpoint import atomic_write_json, fingerprint_payload
 from minibench.core.rate_limit import RateGate
+
+
+class ShortestPreflightTests(unittest.TestCase):
+    def test_shortest_preflight_cannot_be_bypassed_and_precedes_credentials(self):
+        for family in ('xiangqi-history','xiangqi-rule-variants'):
+            record={'id':'fixture','shortest_proof':{'tree_complete':True}}
+            exp={'family':family,'source':'inputs/tasks.jsonl','task_ids':['fixture'],
+                 'configs':{'direct':{'evaluation':{'solution_tree_dir':'trees'}}}}
+            plan={'jobs':[{'key':'not-completed'}],'experiments':{'fixture':exp}}
+            with self.subTest(family=family),tempfile.TemporaryDirectory() as temporary,\
+                    patch.object(cloud,'completed_jobs',return_value={}),\
+                    patch('minibench.datasets.xiangqi.schema.load_records',return_value=[record]),\
+                    patch('minibench.datasets.xiangqi.solution_tree.TreeSession',
+                          side_effect=ValueError('invalid complete tree')):
+                with self.assertRaisesRegex(ValueError,'invalid complete tree'):
+                    cloud.run(Path(temporary),plan,allow_uncertified_c2=True)
+                exp['configs']['direct']['evaluation']={}
+                with self.assertRaisesRegex(ValueError,'require solution_tree_dir'):
+                    cloud.run(Path(temporary),plan,allow_uncertified_c2=True)
+
+
+class PoolCleanupTests(unittest.TestCase):
+    def test_stalled_worker_has_bounded_cleanup(self):
+        from concurrent.futures import ProcessPoolExecutor
+        pool = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"),
+                                   initializer=cloud._worker_initializer)
+        future = pool.submit(time.sleep, 60)
+        # Ensure the real worker is running before exercising the watchdog.
+        deadline = time.monotonic() + 5
+        while not future.running() and time.monotonic() < deadline:
+            time.sleep(.01)
+        processes = list(pool._processes.values())
+        started = time.monotonic()
+        forced = cloud._shutdown_pool(pool, failed=True, grace_seconds=.25)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(len(forced), 1)
+        self.assertTrue(all(not p.is_alive() for p in processes))
 
 
 class RateLimitTests(unittest.TestCase):
@@ -109,11 +147,11 @@ class CloudPlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             suite, plan = self.fixture(root)
-            self.assertEqual(plan["planned_jobs"], 36)  # 6*(D3+H2x2+C2+M2x2)
+            self.assertEqual(plan["planned_jobs"], 30)  # 6*(D3+H2x2+C2+M2-image)
             self.assertEqual(cloud.verify_plan(suite), plan)
             self.assertTrue(all(len(e["task_ids"]) == 6 for e in plan["experiments"].values()))
             self.assertEqual({j["mode"] for j in plan["jobs"] if j["experiment"] == "m2"},
-                             {"text", "chinese-piece-image"})
+                             {"chinese-piece-image"})
             selected = json.loads((suite / "samples/c2.json").read_text())
             groups = {}
             for row in selected:
@@ -142,6 +180,37 @@ class CloudPlanTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid completed checkpoint"):
                 cloud.completed_jobs(suite, plan)
 
+    def test_report_and_resume_include_failed_usage_and_missing_started_attempt(self):
+        from minibench.core.streaming import now
+        with tempfile.TemporaryDirectory() as tmp:
+            suite, plan = self.fixture(Path(tmp))
+            job = plan['jobs'][0]
+            calls = suite / 'jobs' / job['key'] / 'calls'
+            failed = calls / 'attempts/0000-0000'
+            good = calls / 'attempts/0000-0001'
+            lost = calls / 'attempts/0001-0000'
+            for directory in (failed, good, lost):
+                atomic_write_json(directory / 'started.json', {'at': now()})
+            atomic_write_json(failed / 'partial.json', {'at': now(), 'status': 'interrupted',
+                                                       'usage': {'total_tokens': 10944}})
+            atomic_write_json(calls / '0000.json', {'at': now(), 'response': {
+                'usage': {'total_tokens': 7}, 'metadata': {'attempt_dir': str(good)},
+            }})
+            # An unstarted queued attempt must not become an unknown charge.
+            atomic_write_json(calls / 'attempts/0002-0000/request.json', {'messages': []})
+            usage = cloud.report(suite, plan, {})['usage']
+            self.assertEqual(usage['started_attempts'], 3)
+            self.assertEqual(usage['saved_successful_calls'], 1)
+            self.assertEqual(usage['known_failed_tokens'], 10944)
+            self.assertEqual(usage['known_total_tokens'], 10951)
+            self.assertEqual(usage['attempts_without_usage'], 1)
+            gate = RateGate(plan['limits'])
+            cloud.restore_accounting(suite, plan, gate)
+            account = next(iter(gate.snapshot().values()))
+            self.assertEqual(account['network_calls'], 3)
+            self.assertEqual(account['unknown_usage_calls'], 1)
+            self.assertEqual(account['accounted_or_reserved_tokens'], 10951 + 32768)
+
     def test_code_or_plan_change_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             suite, plan = self.fixture(Path(tmp))
@@ -164,7 +233,7 @@ class CloudPlanTests(unittest.TestCase):
             self.assertEqual({r["mode"] for r in c2},
                              {"all", "standard", "horse-no-leg-block", "chariot-no-center", "soldier-free-retreat"})
             self.assertTrue(all(r["metric"] != "avg_cp_loss" for r in c2))
-            self.assertEqual(sum(r["planned"] for r in c2 if r["metric"] == "mate_rate" and r["mode"] != "all"), 6)
+            self.assertEqual(sum(r["planned"] for r in c2 if r["metric"] == "mate_within_shortest_rate" and r["mode"] != "all"), 6)
 
     def test_credentials_are_rejected_before_preparation(self):
         for value in ({"api_key": "private"}, {"extra_body": {"headers": {}}},
@@ -192,12 +261,11 @@ class CloudPlanTests(unittest.TestCase):
     def test_c2_unverified_policy_is_explicitly_blocked_without_paid_calls(self):
         with tempfile.TemporaryDirectory() as tmp:
             suite, plan = self.fixture(Path(tmp))
-            # Remove the frozen certificate deliberately. A real certified
-            # corpus must run without the old exploratory bypass flag.
-            certificate = suite / 'inputs/data/xiangqi/rule_variants/runtime_certificates.json'
-            if certificate.exists():
-                certificate.unlink()
-            with self.assertRaisesRegex(ValueError, "runtime-policy certificate"), patch.object(cloud, "execute_job") as execute:
+            config=plan["experiments"]["c2"]["configs"]["direct"]
+            directory=suite/config["evaluation"]["solution_tree_dir"]
+            certificate=directory/f"{plan['experiments']['c2']['task_ids'][0]}.json"
+            certificate.write_text(certificate.read_text()+"\n")
+            with self.assertRaisesRegex(ValueError, "hash"), patch.object(cloud, "execute_job") as execute:
                 cloud.run(suite, plan)
             execute.assert_not_called()
 
@@ -209,7 +277,7 @@ class CloudPlanTests(unittest.TestCase):
             cfg = root / "formal.yaml"
             cfg.write_text(yaml.safe_dump(raw))
             plan = cloud.prepare(cfg, root / "formal")
-            self.assertEqual(plan["planned_jobs"], 5400)
+            self.assertEqual(plan["planned_jobs"], 4500)
             self.assertEqual(len(plan["agents"]), 9)
             raw["agents"] = ["direct"]
             raw["pilot_count"] = 1
@@ -343,6 +411,29 @@ class CloudHTTPIntegrationTests(unittest.TestCase):
             summary = cloud.report(failed_suite, failed_plan, cloud.completed_jobs(failed_suite, failed_plan))
             self.assertEqual(summary["usage"]["saved_successful_calls"], 6)
             self.assertEqual(summary["usage"]["unfinished_attempts"], 1)
+
+            # Parallel failure with active AND idle workers must exit promptly,
+            # with no manager/pool child left behind or failed job scored done.
+            raw["workers"] = 8
+            cfg.write_text(yaml.safe_dump(raw))
+            parallel_suite = root / "parallel-failure"
+            parallel_plan = cloud.prepare(cfg, parallel_suite)
+            children_before = {p.pid for p in mp.active_children()}
+            fail_on.add(len(calls) + 2)
+            started = time.monotonic()
+            with redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+                cloud.run(parallel_suite, parallel_plan, allow_uncertified_c2=True)
+            self.assertLess(time.monotonic() - started, 20)
+            state = json.loads((parallel_suite / "state.json").read_text())
+            self.assertEqual(state["status"], "error")
+            self.assertEqual(state["active_jobs"], [])
+            self.assertTrue(all(a["active_calls"] == 0 for a in state["accounts"].values()))
+            self.assertEqual(state["forced_worker_pids"], [])
+            self.assertEqual({p.pid for p in mp.active_children()}, children_before)
+            summary = json.loads((parallel_suite / "summary.json").read_text())
+            self.assertEqual(summary["usage"]["known_total_tokens"],
+                             summary["usage"]["known_success_tokens"] + summary["usage"]["known_failed_tokens"])
+            self.assertGreaterEqual(summary["usage"]["attempts_without_usage"], 1)
 
 
 if __name__ == "__main__":
