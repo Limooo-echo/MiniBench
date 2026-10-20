@@ -7,7 +7,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from minibench.cli import build_parser, _xiangqi_config_with_overrides
+from minibench.cli import build_parser
+from minibench.commands.xiangqi import _xiangqi_config_with_overrides
 from minibench.datasets.xiangqi.dataset import load_xiangqi_tasks, xiangqi_task_from_dict
 from minibench.datasets.xiangqi.runtime import validate_evaluation_config
 from minibench.datasets.xiangqi.schema import FAMILY_PATHS, load_records, runtime_dict

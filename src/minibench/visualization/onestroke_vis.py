@@ -3,6 +3,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import json
 import os
+from pathlib import Path
 
 def draw_one_stroke_task(task_data, save_path):
     vertices = task_data.get("vertices", [])
@@ -31,7 +32,7 @@ def draw_one_stroke_task(task_data, save_path):
     nx.draw(G, pos, with_labels=True, node_color=node_colors, node_size=1200, font_size=14, font_weight='bold', edge_color='gray', width=3)
     plt.title(f"One-Stroke Task: {task_data.get('id')}")
     
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path)
     plt.close()
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from minibench.factory.config import load_experiment_config, validate_experiment_config
-from minibench.factory.experiments import run_family_experiment
+from minibench.experiments.runner import run_family_experiment
 
 
 def run_config(path: str | Path) -> dict[str, Any]:

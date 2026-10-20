@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-10-20 — integrated release branch
+
+- Merge the latest Mahjong 100-item groups and the current main branch's
+  one-stroke/Zebra releases and modular command/experiment layout.
+- Preserve the certified Xiangqi 100-item corpora and complete shortest-mate
+  trees, paired C2 conditions, shared D3/M2 positions, and Chinese-image M2 input.
+- Wire the Xiangqi decision deadline, resource accounting, tree configuration
+  and uncapped request setting through the new orchestration modules. Add
+  regression tests for these module boundaries; do not retain the removed
+  `factory.experiments` compatibility module.
+- Experimental outputs, credentials and local environments are not submitted.
+
+## Unreleased — project organization
+
+- Split CLI handlers into `commands/` and experiment orchestration into
+  `experiments/`. Removed `factory.experiments`; use the new modules directly.
+- Removed the deprecated `openai-compatible` agent name and
+  `OpenAICompatibleAgent`. Use `passthrough`, or compose `OpenAICompatibleClient`
+  with an existing Agent. Transport and reasoning algorithms are unchanged.
+- Removed duplicate `one_stroke.yaml`; use `one_stroke_direct.yaml`.
+  Task data, experimental settings, prompt versions and prompt text are unchanged.
+- Run fingerprints include the extracted orchestration modules. Existing
+  results remain readable, but resume requires the same source fingerprint.
+  Zebra uses only its current sidecar lock; obsolete `.run.lock` entries are
+  treated as unexpected files, never silently reused or removed.
+- Removed hand-written old folder/agent aliases from result plots. Visualization
+  helpers scope their font settings locally, close their figures and accept
+  filename-only output paths.
+
 ## 0.2.0 — 2026-08-19
 
 Breaking Xiangqi schema and interface release.

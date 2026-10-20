@@ -5,9 +5,9 @@ from unittest.mock import patch
 import unittest
 import urllib.error
 
+from minibench.agents.passthrough import PassthroughAgent
 from minibench.core.agent import CompletionResult
 from minibench.factory.providers import (
-    OpenAICompatibleAgent,
     OpenAICompatibleClient,
     resolve_provider,
 )
@@ -45,7 +45,7 @@ def make_http_error(status_code, *, retry_after=None):
     )
 
 
-class OpenAICompatibleAgentTests(unittest.TestCase):
+class OpenAICompatibleClientTests(unittest.TestCase):
     def test_explicit_omit_tokens_overrides_internal_agent_budgets(self):
         client = OpenAICompatibleClient(
             model="fixture",base_url="https://invalid.example/v1",api_key_env="FIXTURE_KEY",
@@ -107,7 +107,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(api_key_env, "SILICONFLOW_API_KEY")
 
     def test_endpoint_appends_chat_completions(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -116,7 +116,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(agent.endpoint, "https://example.com/v1/chat/completions")
 
     def test_endpoint_accepts_full_chat_completions_url(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1/chat/completions",
             api_key_env="TEST_KEY",
@@ -125,7 +125,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(agent.endpoint, "https://example.com/v1/chat/completions")
 
     def test_payload_uses_chat_completions_shape(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -141,7 +141,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(payload["reasoning_effort"], "high")
 
     def test_payload_combines_default_and_phase_system_prompts(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -158,7 +158,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertIn("Finalize as JSON.", system_content)
 
     def test_messages_payload_preserves_explicit_role_order(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -176,7 +176,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(payload["messages"], messages)
 
     def test_messages_payload_prepends_default_system_when_missing(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -192,7 +192,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(payload["messages"][0]["content"], "Shared task rules.")
 
     def test_complete_messages_sends_real_chat_history(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -310,7 +310,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertGreaterEqual(result.elapsed_seconds, 0.0)
 
     def test_complete_records_usage_metrics(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -344,7 +344,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertGreaterEqual(metrics["model_elapsed_seconds"], 0.0)
 
     def test_complete_records_missing_usage_metrics(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -365,7 +365,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(metrics["token_usage"]["total_tokens"], 0)
 
     def test_retries_transient_failures_with_exponential_backoff_and_metrics(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -408,7 +408,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         response = {"choices": [{"message": {"content": '{"ok":true}'}}]}
         for status_code in (408, 429, 500, 599):
             with self.subTest(status_code=status_code):
-                agent = OpenAICompatibleAgent(
+                agent = OpenAICompatibleClient(
                     model="test-model",
                     base_url="https://example.com/v1",
                     api_key_env="TEST_KEY",
@@ -427,7 +427,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
                 self.assertEqual(urlopen.call_count, 2)
 
     def test_retry_after_is_respected_and_capped(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -450,7 +450,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         retry_sleep.assert_called_once_with(5.0)
 
     def test_max_retries_are_in_addition_to_the_initial_attempt(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -476,7 +476,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(metrics["usage_missing_calls"], 4)
 
     def test_non_retryable_http_error_is_not_retried(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -498,7 +498,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(metrics["usage_missing_calls"], 1)
 
     def test_empty_content_is_not_retried(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -517,7 +517,7 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(agent.metrics_snapshot()["llm_calls"], 1)
 
     def test_invalid_json_is_not_retried_but_counts_the_attempt(self):
-        agent = OpenAICompatibleAgent(
+        agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
@@ -538,11 +538,12 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         self.assertEqual(metrics["usage_missing_calls"], 1)
 
     def test_generate_messages_for_phase_delegates_to_message_generation(self):
-        agent = OpenAICompatibleAgent(
+        client = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
         )
+        agent = PassthroughAgent(client)
         messages = [{"role": "user", "content": "Clue 1"}]
 
         with patch.object(
@@ -566,11 +567,12 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
         )
 
     def test_generate_messages_for_phase_rejects_unknown_phase(self):
-        agent = OpenAICompatibleAgent(
+        client = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",
         )
+        agent = PassthroughAgent(client)
 
         with patch.object(agent, "generate_messages") as generate_messages:
             with self.assertRaisesRegex(ValueError, "Unsupported message phase"):

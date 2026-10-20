@@ -2,7 +2,9 @@
 from dataclasses import asdict
 import json
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from minibench.agents import (
     CoTAgent, CriticRefineAgent, DirectAgent, PlanThenSolveAgent, TreeOfThoughtAgent,
@@ -16,7 +18,9 @@ from minibench.datasets.mahjong_solo.evaluation import (
     evaluate_mahjong_solo_task, summarize_mahjong_solo,
 )
 from minibench.factory.config import load_experiment_config
+from minibench.experiments.runner import run_family_experiment
 from minibench.scoring.adapters import score_record
+from scripts.summarize_mahjong_solo_traces import summarize_run
 from tests.test_mahjong_rule_variants import make_task
 from tests.test_mahjong_solo import delayed_tsumo_task, tsumo_task
 from tests.test_reasoning_agents import FakeClient
@@ -47,6 +51,43 @@ class MahjongMergeCompatibilityTests(unittest.TestCase):
                 config = load_experiment_config(path)
                 self.assertEqual(config["agent"]["prompt_version"], "v1")
                 self.assertNotIn("samples", config["agent"])
+
+    def test_extracted_runner_runs_solo_and_selected_rule_channels(self):
+        channels = [RED_DRAGON_WILDCARD,
+                    "red_dragon_wildcard+cyclic_one_tile_substitution"]
+        for family in ("mahjong_solo", "mahjong_rule_variants"):
+            with self.subTest(family=family), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = tsumo_task()
+                path = root / "tasks.jsonl"
+                path.write_text(json.dumps(asdict(source)) + "\n", encoding="utf-8")
+                evaluation = {"observation_mode": "history-only"}
+                if family == "mahjong_rule_variants":
+                    evaluation["rule_channels"] = channels
+                config = {
+                    "task": {"family": family, "path": str(path), "limit": 1},
+                    "agent": {"name": "cot"},
+                    "provider": {},
+                    "evaluation": evaluation,
+                    "run": {"output_dir": str(root), "run_name": "runner-merge"},
+                }
+                agent = CoTAgent(FakeClient(["complete hand", '{"action":"tsumo"}'] * 6),
+                                 ReasoningConfig(prompt_version="v1"))
+                with patch("minibench.experiments.runner.make_agent_from_config",
+                           return_value=agent):
+                    run_dir, summary = run_family_experiment(config)
+                expected_total = len(channels) if family == "mahjong_rule_variants" else 1
+                self.assertEqual(summary["total"], expected_total)
+                self.assertEqual(summary["planned_total"], expected_total)
+                self.assertEqual(summary["run_status"], "completed")
+                records = [json.loads(line) for line in
+                           (run_dir / "predictions.jsonl").read_text(
+                               encoding="utf-8").splitlines()]
+                self.assertEqual(len(records), expected_total)
+                self.assertTrue(all(record["observation_mode"] == "history-only"
+                                    for record in records))
+                if family == "mahjong_rule_variants":
+                    self.assertEqual({record["channel"] for record in records}, set(channels))
 
     def test_all_architectures_keep_stage_outputs_in_both_evaluation_entrypoints(self):
         final = '{"action":"tsumo"}'
@@ -124,6 +165,32 @@ class MahjongMergeCompatibilityTests(unittest.TestCase):
                     self.assertIsNone(offline["y"])
                     self.assertIsNone(offline["p"])
                     self.assertIsNone(agent.runtime.active_span_id)
+
+    def test_trace_summary_uses_current_runtime_stages_including_tot(self):
+        record = {
+            "success": True,
+            "agent_actions": [{"action": "tsumo"}],
+            "reasoning_traces": [{
+                "architecture": "tot",
+                "stages": [
+                    {"stage_name": "tot.propose.depth1.n0001", "output": "candidate",
+                     "token_usage": {"completion_tokens": 12}},
+                    {"stage_name": "tot.evaluate.depth1", "output": "evaluation",
+                     "token_usage": {"completion_tokens": 8}},
+                    {"stage_name": "tot.final", "output": '{"action":"tsumo"}',
+                     "token_usage": {"completion_tokens": 6}},
+                ],
+            }],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "predictions.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            summary = summarize_run(root)
+        self.assertEqual(set(summary["stages"]),
+                         {"tot.propose.depth1.n0001", "tot.evaluate.depth1", "tot.final"})
+        self.assertEqual(sum(stage["completion_tokens"] for stage in
+                             summary["stages"].values()), 26)
+        self.assertEqual(summary["saved_reasoning_traces"], 1)
 
     def test_legacy_cot_history_keeps_current_turn_and_conversation_instructions(self):
         client = FakeClient(["discard 9s", '{"action":"discard","tile":"9s"}',

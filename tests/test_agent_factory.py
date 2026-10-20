@@ -35,12 +35,9 @@ class AgentFactoryTests(unittest.TestCase):
         self.assertIsInstance(agent, PassthroughAgent)
         self.assertIsInstance(agent.client, OpenAICompatibleClient)
 
-    def test_openai_compatible_name_is_a_deprecated_passthrough_alias(self):
-        with self.assertWarnsRegex(FutureWarning, "passthrough"):
-            agent = make_agent("openai-compatible", provider="deepseek")
-
-        self.assertIsInstance(agent, PassthroughAgent)
-        self.assertIsInstance(agent.client, OpenAICompatibleClient)
+    def test_removed_agent_alias_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "unknown agent"):
+            make_agent("openai-compatible", provider="deepseek")
 
     def test_public_agent_names_are_exact_and_exclude_deprecated_alias(self):
         self.assertEqual(AGENT_NAMES, EXPECTED_AGENT_NAMES)

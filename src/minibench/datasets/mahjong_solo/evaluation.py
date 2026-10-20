@@ -99,7 +99,7 @@ def generate_mahjong_history_action(
     raise ValueError(
         "Mahjong history-only evaluation requires an agent with "
         "generate_messages_for_phase() or generate_messages(); use "
-        "openai-compatible, direct, cot, or a message-aware test agent"
+        "direct, cot, or a message-aware test agent"
     )
 
 

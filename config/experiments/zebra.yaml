@@ -26,4 +26,5 @@ evaluation:
 
 run:
   output_dir: runs
-  run_name:  zebra_cot_v4_flash_no_thinking
+  run_name: zebra-direct-100-20261013
+  on_existing: error

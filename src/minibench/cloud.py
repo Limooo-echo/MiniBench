@@ -38,10 +38,16 @@ from minibench.factory.agents import AGENT_NAMES, REASONING_AGENTS
 from minibench.agents.passthrough import PassthroughAgent
 from minibench.core.agent import ReasoningConfig
 from minibench.factory.config import load_experiment_config, validate_experiment_config
-from minibench.factory.experiments import (
-    _evaluate, _sample_xiangqi_tasks, _select_tasks, _select_frozen_xiangqi_tasks,
-    _select_mahjong_rule_configuration, get_task_family_spec,
+from minibench.experiments.dispatch import _evaluate
+from minibench.experiments.xiangqi import (
+    _sample_xiangqi_tasks,
+    _select_frozen_xiangqi_tasks,
 )
+from minibench.experiments.selection import (
+    _select_tasks,
+    _select_mahjong_rule_configuration,
+)
+from minibench.experiments.registry import get_task_family_spec
 from minibench.factory.providers import resolve_provider
 
 ROOT = Path(__file__).resolve().parents[2]

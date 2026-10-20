@@ -52,10 +52,10 @@ python3.10 -m venv ~/.venvs/minibench
 source ~/.venvs/minibench/bin/activate
 
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -c constraints/ci-py310.txt -e ".[xiangqi-generation]"
+python -m pip install -c constraints/ci-py310.txt -e ".[xiangqi-generation,zebra-generation]"
 ```
 
-完整测试需要 `xiangqi-generation` 中固定版本的独立象棋裁判 `cchess`；只安装基础包不足以运行全套生成器与数据验证测试。
+完整测试需要 `xiangqi-generation` 中固定版本的独立象棋裁判 `cchess`，以及 `zebra-generation` 中固定版本的独立约束求解器 Z3。普通模型评测不调用 Z3；它用于构建和重新验收 Zebra 题库。
 
 验证安装：
 
@@ -245,17 +245,33 @@ minibench run-config config/experiments/<name>.yaml
 
 | 配置 | 内容 |
 | --- | --- |
-| `zebra.yaml` | 正式逻辑网格推理，默认 CoT + DeepSeek V4 |
-| `zebra_rule_codebook.yaml` | 临时规则/代码本变体 |
-| `zebra_history.yaml` | 多轮历史记忆协议 |
+| `zebra.yaml` | 100 道直接推理题，默认 CoT + DeepSeek V4 |
+| `zebra_rule_codebook.yaml` | 100 道 Codebook，逐题复用直接题及答案 |
+| `zebra_rule_counterfactual.yaml` | 100 道唯一可解且答案改变的 Counterfactual |
+| `zebra_rules.yaml` | 合并两种规则模式，200 道分别计分 |
+| `zebra_history.yaml` | 100 道共享源题，两个历史模式共 200 个实例 |
+
+各独立题集按 easy/medium/hard 分为 34/33/33 道。Codebook、历史与直接题共用 100 个源 ID；Counterfactual 优先配对，共有 69 个同源 ID，另外 31 个从同一官方题库补入。原题和改规则题均由独立 Z3 求解并证明唯一解，Counterfactual 使用新答案。两种规则的四维评分各占 Zebra 规则模块 50%，同时报告各自分数和覆盖率；比较规则变化的逐题影响时使用真正同源的配对子集。来源、证明和重建方式见 [Zebra 数据说明](data/zebra/README.md)。
 
 ```bash
 minibench run-config config/experiments/zebra.yaml
 minibench run-config config/experiments/zebra_rule_codebook.yaml
+minibench run-config config/experiments/zebra_rule_counterfactual.yaml
+minibench run-config config/experiments/zebra_rules.yaml
 minibench run-config config/experiments/zebra_history.yaml
 ```
 
-`zebra_history.yaml` 默认使用 `agent.name: passthrough`；所有实现 phase-aware 消息接口的推理 Agent 也可运行该多轮评测。
+`zebra_history.yaml` 默认使用 `agent.name: passthrough`，分别运行 `incremental_state` 和 `deferred_reasoning`。前者在每条线索后记录候选状态，后者仅确认收到并在最后推理；两种模式使用相同题目、线索顺序和最终答案。所有实现 phase-aware 消息接口的推理 Agent 也可运行该多轮评测。
+
+Zebra 与一笔画的正式模式合计 900 个评测实例，可在不调用模型的情况下重新验收题量、唯一解、官方来源、图像配对及历史剩余图：
+
+```bash
+python scripts/audit_reasoning_release.py \
+  --source-parquet ../Dataset/ZebraLogic/grid_mode/test-00000-of-00001.parquet \
+  --output outputs/reasoning-release-audit.json
+```
+
+随题库保存的 [整体验收记录](data/reasoning_release_20261013.json) 记录各文件哈希、模式题量与配对来源。正式文件统一使用 LF 换行；旧版数据按原始字节留档，便于复现旧结果的数据指纹。
 
 ### 4.2 象棋 schema v2
 
@@ -367,13 +383,14 @@ minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 ### 4.3 一笔画
 
 正式数据为 `data/one_stroke/direct.jsonl`、`history.jsonl` 和 `multimodal.jsonl`，
-任务 ID 分别使用 `direct-`、`history-`、`multimodal-` 前缀。每组保留 easy/medium/hard 各 10 题；
-多模态每题只有一张清晰图片，主实验 30 项，text/image 配对消融 60 项。
+任务 ID 分别使用 `direct-`、`history-`、`multimodal-` 前缀。每个模块 100 道，easy/medium/hard 分别为 34/33/33 道；
+直接题与图片题逐题配对，均为 70 道可解、30 道无解判断题。多模态每题只有一张清晰图片，主实验 100 项，text/image 配对消融 200 项。
+
+历史源题均可完成，同一套 100 道分别运行 `incremental_state` 与 `step_history_only`，共 200 个实例。原始 30 条历史数据留档，其中完全重复的 `history-easy-09` 从新版正式集退役，保留 29 道并新增 71 道。每道图和历史末状态都经过生产加载器与独立 NetworkX 欧拉路径交叉检查；新增图还进行同构去重和图像节点／连线间距检查。来源、证明和重建方式见 [一笔画数据说明](data/one_stroke/README.md)。
 
 | 配置 | 内容 |
 | --- | --- |
 | `one_stroke_direct.yaml` | 直接求解，无欧拉定理提示 |
-| `one_stroke.yaml` | 与正式 direct 相同的兼容入口；通常不必与 direct 重复运行 |
 | `one_stroke_history.yaml` | 历史记忆：增量状态与仅历史对照 |
 | `one_stroke_multimodal.yaml` | 多模态图片，默认 Qwen |
 | `one_stroke_multimodal_ablation.yaml` | 多模态 text/image 配对消融 |
@@ -383,7 +400,6 @@ minibench build-xiangqi-gallery --output output/xiangqi-gallery.html
 
 ```bash
 minibench run-config config/experiments/one_stroke_direct.yaml
-minibench run-config config/experiments/one_stroke.yaml
 minibench run-config config/experiments/one_stroke_history.yaml
 minibench run-config config/experiments/one_stroke_multimodal.yaml
 minibench run-config config/experiments/one_stroke_multimodal_ablation.yaml
@@ -408,11 +424,11 @@ main 的新 ToT 是 beam/BFS 搜索，使用 `prompt_version: v2` 及 `max_depth
 | --- | --- |
 | `mahjong.yaml` | 静态牌型文本推理 |
 | `mahjong_solo.yaml` | 标准规则下的 full-hand 单人摸弃决策 |
-| `mahjong_rule_variants.yaml` | 全手牌规则适应，默认扩展全部规则通道 |
+| `mahjong_rule_variants.yaml` | 全手牌规则适应，默认运行两种规则叠加的通道；可通过 evaluation.rule_channels 选择通道 |
 | `mahjong_history_only.yaml` | 标准规则下的在线多轮 history-only 决策 |
 | `mahjong_multimodal.yaml` | 静态 600 题的一一对应图片版本，仅运行 image，默认 Qwen |
 
-当前静态麻将六个子题组各 100 道（共 600 道），多模态逐题镜像。Solo、history-only 和改规则共用 100 道摸打源题，每个改规则通道各 100 道。原有静态 90 道、摸打 15 道的题目和 ID 均保留；新增题使用现有生成器，随机种子为 `20261011`。摸打仍使用 50 轮上限，初始向听不超过 2、初始进张至少 12、参考策略 18 轮内胡牌，并要求 10 次并列弃牌随机模拟的胡牌率至少 0.8。题目筛选、提示词和评分逻辑不变。
+当前静态麻将六个子题组各 100 道（共 600 道），多模态逐题镜像。Solo、history-only 和改规则共用 100 道摸打源题，每个选定的改规则通道各 100 道。原有静态 90 道、摸打 15 道的题目和 ID 均保留；新增题使用现有生成器，随机种子为 `20261011`。摸打仍使用 50 轮上限，初始向听不超过 2、初始进张至少 12、参考策略 18 轮内胡牌，并要求 10 次并列弃牌随机模拟的胡牌率至少 0.8。题目筛选、提示词和评分逻辑不变。实验配置使用新的运行名称，避免与旧题库的结果混用。
 
 ```bash
 minibench run-config config/experiments/mahjong.yaml
@@ -470,7 +486,10 @@ critic-refine
 least-to-most
 ```
 
-未显式填写名称时 factory 默认使用 `direct`。旧 YAML 名称 `openai-compatible` 已从公开列表移除，但仍会在发出 `FutureWarning` 后解析为 `passthrough`，完整保留 raw baseline 语义；它绝不会静默映射为 `direct`。旧代码直接导入的 `OpenAICompatibleAgent` 也只作为兼容包装保留。
+未显式填写名称时 factory 默认使用 `direct`。原样转发基线统一使用 `passthrough`。
+旧名称 `openai-compatible` 和混合 transport/agent 类 `OpenAICompatibleAgent` 已移除，
+不会静默转成其他架构。Python 代码使用 `OpenAICompatibleClient` 加现有 Agent 组合；
+模型请求、prompt 和推理流程不因这次整理而改变。
 
 ### 5.2 各架构的算法与调用数
 
@@ -816,11 +835,31 @@ Windows 的 `D:\AAALimoWork\CS\Seminar\MiniBench` 在 WSL 中是：
 ```text
 config/experiments/       # 可执行 YAML，是非敏感实验配置的唯一来源
 data/                     # JSONL 任务数据
+src/minibench/cli.py      # 命令注册与分发入口
+src/minibench/commands/   # 按任务分组的 CLI 参数与处理函数
+src/minibench/factory/    # 配置校验、agent 装配、provider 传输
+src/minibench/experiments/ # 任务注册、选题、运行与断点续跑
 src/minibench/agents/     # agent 推理架构
-src/minibench/factory/    # config、agent、provider、experiment 装配
-src/minibench/datasets/   # 各任务加载、prompt、评测、渲染与引擎
+src/minibench/core/       # prompt 注册、调用预算、消息/图片、通用检查点
+src/minibench/datasets/   # 各任务加载、prompt、出题、评测、渲染与引擎
+src/minibench/scoring/    # 离线四维评分与报告
+src/minibench/visualization/ # 任务展示与结果图表
 tests/                    # 单元、数据、CLI 与图片回归测试
 runs/                     # 运行输出，Git 忽略
 ```
+
+读代码从 `cli.py` → `evaluate.py` → `experiments/runner.py` 开始：
+
+- 命令参数与处理函数在 `commands/{static,mahjong,xiangqi,scoring}.py`；共同参数在 `common.py`。
+- `experiments/registry.py` 是十类任务的唯一注册表；`selection.py` 管选题和输入模式，
+  `dispatch.py` 只转发各任务支持的评测参数，`metadata.py` 管不含凭据的复现信息。
+- `experiments/{one_stroke,zebra,xiangqi,mahjong}.py` 分别管理各任务的运行状态；
+  算法、题目规则和 prompt 留在原来的 `datasets/`、`agents/` 和 `core/prompts.py`。
+
+不保留 `factory.experiments` 导入转发层；调用代码直接使用上述模块。
+重复的 `one_stroke.yaml` 已删除，直接解题统一用 `one_stroke_direct.yaml`。
+`prompt_version: v1/v2` 是仍支持的显式 prompt 选项，本次没有删除或修改。
+题库与历史结果保留；运行代码指纹会因源码整理而变化，旧运行目录不跨源码版本续跑。
+辅助绘图不再在导入时改写全局字体，单张图的设置在绘图结束后恢复。
 
 版本破坏性变更见 [`CHANGELOG.md`](CHANGELOG.md)，任务编写规范见 [`docs/task-authoring.md`](docs/task-authoring.md)。

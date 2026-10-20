@@ -10,9 +10,8 @@ from minibench.factory.agents import (
     AGENT_NAMES,
     SAMPLED_AGENTS,
     V2_ONLY_AGENTS,
-    canonical_agent_name,
 )
-from minibench.factory.experiments import TASK_FAMILIES
+from minibench.experiments.registry import TASK_FAMILIES
 
 
 REQUIRED_SECTIONS = ("task", "agent", "provider", "run")
@@ -210,7 +209,7 @@ def validate_experiment_config(
         validate_evaluation_config(family, raw.get("evaluation", {}))
 
     if family == "one_stroke":
-        from minibench.factory.experiments import _one_stroke_selected_modes
+        from minibench.experiments.selection import _one_stroke_selected_modes
 
         evaluation = raw.get("evaluation", {})
         if not isinstance(evaluation, dict):
@@ -256,11 +255,7 @@ def validate_experiment_config(
             )
 
     agent = raw["agent"]
-    configured_agent_name = agent.get("name", "direct")
-    if isinstance(configured_agent_name, str):
-        agent_name = canonical_agent_name(configured_agent_name)
-    else:
-        agent_name = configured_agent_name
+    agent_name = agent.get("name", "direct")
     if agent_name not in AGENT_NAMES:
         choices = ", ".join(AGENT_NAMES)
         raise ValueError(f"{source}: agent.name must be one of: {choices}")

@@ -126,9 +126,8 @@ def select_evaluation_records(
     grouped: dict[str, dict[str, list[dict[str, Any]]]] = {
         difficulty: {} for difficulty in DIFFICULTIES
     }
+    # Freeze clue-count thirds against the full source pool before exclusions.
     for record in records:
-        if str(record["id"]) in excluded:
-            continue
         difficulty = difficulty_for_size(str(record["size"]))
         grouped[difficulty].setdefault(str(record["size"]), []).append(record)
 
@@ -142,7 +141,8 @@ def select_evaluation_records(
         size_targets = _balanced_targets(sizes, per_difficulty, rng)
         band_targets = _balanced_targets(list(CLUE_BANDS), per_difficulty, rng)
         banded = {
-            size: _records_by_clue_band(size_groups[size])
+            size: {band: [r for r in rows if str(r["id"]) not in excluded]
+                   for band, rows in _records_by_clue_band(size_groups[size]).items()}
             for size in sizes
         }
 
@@ -202,6 +202,37 @@ def select_evaluation_records(
     return selected
 
 
+def difficulty_targets(total: int) -> dict[str, int]:
+    if total < 3:
+        raise ValueError("target total must cover all three difficulties")
+    base, remainder = divmod(total, 3)
+    return {difficulty: base + int(index < remainder)
+            for index, difficulty in enumerate(DIFFICULTIES)}
+
+
+def frozen_clue_bands(records: Iterable[dict[str, Any]]) -> dict[str, str]:
+    sizes: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        sizes.setdefault(str(record["size"]), []).append(record)
+    return {str(row["id"]): band for rows in sizes.values()
+            for band, members in _records_by_clue_band(rows).items() for row in members}
+
+
+def select_target_records(records: Iterable[dict[str, Any]], *, target_total: int,
+                          seed: int, exclude_ids: Iterable[str] = ()) -> list[dict[str, Any]]:
+    """Select arbitrary totals while retaining the older per-difficulty API."""
+    pool = list(records)
+    targets = difficulty_targets(target_total)
+    selected: list[dict[str, Any]] = []
+    # The existing selector already knows each difficulty's size/band allocation.
+    # Run each requested quota against the full pool, then retain that difficulty.
+    for difficulty, target in targets.items():
+        selected.extend(row for row in select_evaluation_records(
+            pool, per_difficulty=target, seed=seed, exclude_ids=exclude_ids)
+            if difficulty_for_size(str(row["size"])) == difficulty)
+    return selected
+
+
 def load_official_records(
     load_dataset: Callable[..., Iterable[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
@@ -250,7 +281,7 @@ def write_records(
         raise FileExistsError(f"{output_path} already exists; pass --overwrite")
     materialized = list(records)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as handle:
+    with output_path.open("w", encoding="utf-8", newline="\n") as handle:
         for record in materialized:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     return len(materialized)
@@ -262,6 +293,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output", type=Path, default=None)
     selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
+        "--target-total", type=int, default=None,
+        help="Select a balanced total (100 gives easy/medium/hard 34/33/33).",
+    )
     selection.add_argument(
         "--smoke-per-difficulty",
         type=int,
@@ -320,6 +355,9 @@ def main(argv: list[str] | None = None) -> int:
                 per_difficulty=args.smoke_per_difficulty,
                 seed=args.seed,
             )
+        elif args.target_total is not None:
+            records = select_target_records(records, target_total=args.target_total,
+                seed=args.seed, exclude_ids=load_excluded_ids(args.exclude_task_file))
         elif args.evaluation_per_difficulty is not None:
             records = select_evaluation_records(
                 records,
@@ -329,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         output = args.output or Path(
             "data/zebra/eval.jsonl"
-            if args.evaluation_per_difficulty is not None
+            if args.evaluation_per_difficulty is not None or args.target_total is not None
             else "data/zebra/tasks.jsonl"
         )
         count = write_records(records, output, overwrite=args.overwrite)

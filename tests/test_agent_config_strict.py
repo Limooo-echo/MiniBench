@@ -137,19 +137,9 @@ class StrictAgentConfigTests(unittest.TestCase):
                         )
                     )
 
-    def test_old_alias_keeps_passthrough_validation_semantics(self):
-        with self.assertWarnsRegex(FutureWarning, "passthrough"):
-            with self.assertRaisesRegex(
-                ValueError, r"agent\.samples.*agent.name=passthrough"
-            ):
-                validate_experiment_config(
-                    experiment(
-                        {
-                            "name": "openai-compatible",
-                            "samples": 3,
-                        }
-                    )
-                )
+    def test_removed_agent_alias_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, r"agent\.name must be one of"):
+            validate_experiment_config(experiment({"name": "openai-compatible"}))
 
     def test_invalid_runtime_and_search_values_are_rejected(self):
         cases = (

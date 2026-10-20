@@ -16,7 +16,7 @@ from minibench.datasets.mahjong.evaluation import (
     evaluate_mahjong_tasks,
     write_mahjong_run,
 )
-from minibench.factory.providers import OpenAICompatibleAgent
+from minibench.factory.providers import OpenAICompatibleClient
 
 
 def response(content, *, finish_reason="stop", native_reasoning=None, tokens=20):
@@ -58,7 +58,7 @@ class MahjongCompletionTraceTests(unittest.TestCase):
                 if mode == "image":
                     answer.update(hand=list(template.hand), visible_tiles=list(template.visible_tiles))
                 final = json.dumps(answer)
-                client = OpenAICompatibleAgent(
+                client = OpenAICompatibleClient(
                     model="qwen3.8-max",
                     base_url="https://example.invalid/v1",
                     api_key_env="TRACE_TEST_API_KEY",
@@ -122,7 +122,7 @@ class MahjongCompletionTraceTests(unittest.TestCase):
             ]),
         ):
             with self.subTest(agent=agent_type.name):
-                client = OpenAICompatibleAgent(
+                client = OpenAICompatibleClient(
                     model="qwen3.8-max",
                     base_url="https://example.invalid/v1",
                     api_key_env="TRACE_TEST_API_KEY",
@@ -147,7 +147,7 @@ class MahjongCompletionTraceTests(unittest.TestCase):
                     self.assertEqual(result.reasoning_trace["metadata"]["search_strategy"], "beam_bfs")
 
     def test_capture_does_not_record_other_calls_and_is_restored_after_error(self):
-        client = OpenAICompatibleAgent(
+        client = OpenAICompatibleClient(
             model="qwen3.8-max",
             base_url="https://example.invalid/v1",
             api_key_env="TRACE_TEST_API_KEY",

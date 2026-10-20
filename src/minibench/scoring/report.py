@@ -189,6 +189,16 @@ def _markdown(result: dict) -> str:
                 if s.get("weight", 0) == 0:
                     continue
                 lines.append(f"| {_cell(profile)} / {_cell(arch)} | {_cell(s.get('task'))} | {s.get('dimension')} | {_number(s.get('score'), 4)} | {_number(100*s.get('coverage', 0))}% |")
+    lines += ["", "## Zebra 规则模式", "",
+              "各模式得分按自身计划题目归一化；规则模块内各已声明模式等权，缺失模式保留原权重。", "",
+              "| 模型组 / 架构 | 规则模式 | 得分（0–1） | 严格得分（0–1） | 覆盖 | 可用 / 计划实例 |",
+              "|---|---|---:|---:|---:|---:|"]
+    for profile, data in result["profiles"].items():
+        for arch, scores in data["architectures"].items():
+            for s in scores.get("task_scores", []):
+                if s.get("task") == "zebra" and s.get("dimension") == "R":
+                    for mode, subscore in s.get("by_rule_mode", {}).items():
+                        lines.append(f"| {_cell(profile)} / {_cell(arch)} | {_cell(mode)} | {_number(subscore.get('score'), 4)} | {_number(subscore.get('strict_score'), 4)} | {_number(100*subscore.get('coverage', 0))}% | {subscore['available_slots']}/{subscore['expected_slots']} |")
     lines += ["", "## 缺失与诊断", "", "诊断量不额外加入主分。unverified_y / unverified_p 仅说明旧记录可读取，来源未核实，不能作为正式比较。", ""]
     for diag in result["diagnostics"]:
         if diag["reasons"] or diag["metrics"]:

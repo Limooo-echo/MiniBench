@@ -259,12 +259,12 @@ class OneStrokeTests(unittest.TestCase):
     def test_formal_direct_inventory_and_unsolvable_quota(self):
         tasks = load_one_stroke_tasks("data/one_stroke/direct.jsonl")
 
-        self.assertEqual(len(tasks), 30)
+        self.assertEqual(len(tasks), 100)
         for difficulty in ("easy", "medium", "hard"):
             selected = [task for task in tasks if task.difficulty == difficulty]
-            self.assertEqual(len(selected), 10)
-            self.assertEqual(sum(task.solution_exists for task in selected), 7)
-            self.assertEqual(sum(not task.solution_exists for task in selected), 3)
+            self.assertEqual(len(selected), 34 if difficulty == "easy" else 33)
+            self.assertEqual(sum(task.solution_exists for task in selected), 24 if difficulty == "easy" else 23)
+            self.assertEqual(sum(not task.solution_exists for task in selected), 10)
             for task in selected:
                 prompt = build_one_stroke_prompt(task, prompt_variant="baseline")
                 self.assertNotIn("Useful theorem and checklist", prompt)
@@ -274,10 +274,10 @@ class OneStrokeTests(unittest.TestCase):
         tasks = load_one_stroke_tasks("data/one_stroke/history.jsonl")
         expected_ranges = {"easy": (4, 6), "medium": (7, 12), "hard": (12, 20)}
 
-        self.assertEqual(len(tasks), 30)
+        self.assertEqual(len(tasks), 100)
         for difficulty, (minimum, maximum) in expected_ranges.items():
             selected = [task for task in tasks if task.difficulty == difficulty]
-            self.assertEqual(len(selected), 10)
+            self.assertEqual(len(selected), 34 if difficulty == "easy" else 33)
             self.assertTrue(all(task.capability == "history_memory" for task in selected))
             self.assertTrue(
                 all(minimum <= len(task.history_events) <= maximum for task in selected)
@@ -509,7 +509,7 @@ class OneStrokeTests(unittest.TestCase):
 
         results = evaluate_one_stroke_tasks(tasks, FormalHistoryOracleAgent())
 
-        self.assertEqual(len(results), 60)
+        self.assertEqual(len(results), 200)
         self.assertTrue(all(result.history_joint_success for result in results))
         summary = summarize_one_stroke(results)
         self.assertEqual(summary["history_final_score"], 1.0)

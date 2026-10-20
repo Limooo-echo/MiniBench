@@ -7,6 +7,7 @@ import random
 from typing import Any, Iterable
 
 from minibench.datasets.zebra.dataset import difficulty_for_size
+from minibench.datasets.zebra.validation import counterfactual_context
 
 
 DERIVATION_SEED = 20260810
@@ -198,6 +199,7 @@ def derive_counterfactual_candidates(
         candidates.append(
             {
                 **_base_variant(source, "counterfactual_semantics", seed),
+                "id": f"{source['id']}__counterfactual_semantics__{operator}",
                 "puzzle": puzzle,
                 "solution": None,
                 "original_solution": source["solution"],
@@ -226,86 +228,11 @@ def _counterfactual_context(
     operator: str,
     house_count: int,
 ) -> tuple[str, str, str]:
-    definitions = {
-        "directly_left_of": (
-            "house(B) - house(A) = 1",
-            (
-                "house(B) - house(A) = 2"
-                if house_count >= 3
-                else "house(A) - house(B) = 1"
-            ),
-            (
-                '"A is directly left of B" means A is exactly two houses to the left of B.'
-                if house_count >= 3
-                else '"A is directly left of B" means A is directly right of B.'
-            ),
-        ),
-        "directly_right_of": (
-            "house(A) - house(B) = 1",
-            (
-                "house(A) - house(B) = 2"
-                if house_count >= 3
-                else "house(B) - house(A) = 1"
-            ),
-            (
-                '"A is directly right of B" means A is exactly two houses to the right of B.'
-                if house_count >= 3
-                else '"A is directly right of B" means A is directly left of B.'
-            ),
-        ),
-        "somewhere_left_of": (
-            "house(A) < house(B)",
-            "house(A) > house(B)",
-            '"A is somewhere to the left of B" means A is somewhere to the right of B.',
-        ),
-        "somewhere_right_of": (
-            "house(A) > house(B)",
-            "house(A) < house(B)",
-            '"A is somewhere to the right of B" means A is somewhere to the left of B.',
-        ),
-        "next_to": (
-            "abs(house(A) - house(B)) = 1",
-            "abs(house(A) - house(B)) = 2",
-            (
-                '"A is next to B" means exactly one house lies between A and B. '
-                '"A is not next to B" means their house-number distance is not 2.'
-            ),
-        ),
-        "one_house_between": (
-            "abs(house(A) - house(B)) = 2",
-            "abs(house(A) - house(B)) = 1",
-            '"There is one house between A and B" means A and B are adjacent.',
-        ),
-        "two_houses_between": (
-            "abs(house(A) - house(B)) = 3",
-            "abs(house(A) - house(B)) = 2",
-            '"There are two houses between A and B" means exactly one house lies between them.',
-        ),
-    }
-    if operator == "ordinal_house_reference":
-        mappings = [
-            f'"{ORDINALS[index]} house" means House {(index + 1) % house_count + 1}'
-            for index in range(house_count)
-        ]
-        original = ", ".join(
-            f"{ORDINALS[index]}=House {index + 1}" for index in range(house_count)
-        )
-        changed = ", ".join(
-            f"{ORDINALS[index]}=House {(index + 1) % house_count + 1}"
-            for index in range(house_count)
-        )
-        body = "; ".join(mappings) + "."
-    else:
-        original, changed, body = definitions[operator]
-    context = "\n".join(
-        [
-            "Temporary counterfactual rule override (pending solution validation):",
-            body,
-            "Apply this override to every matching clue in this puzzle.",
-            "All other relation phrases retain their ordinary meanings.",
-            "House labels in the requested answer always retain their ordinary numeric meanings.",
-        ]
-    )
+    # Pending candidates retain their explicit unvalidated presentation. Formal
+    # promotion is exclusively performed by the independent release builder.
+    context, original, changed = counterfactual_context(operator, house_count)
+    context = context.replace("Temporary counterfactual rule override:",
+        "Temporary counterfactual rule override (pending solution validation):")
     return context, original, changed
 
 
@@ -355,7 +282,7 @@ def write_jsonl(
         raise FileExistsError(f"{output} already exists; pass --overwrite")
     materialized = list(records)
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", encoding="utf-8") as handle:
+    with output.open("w", encoding="utf-8", newline="\n") as handle:
         for record in materialized:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     return len(materialized)
@@ -368,6 +295,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", type=Path, default=Path("data/zebra/eval.jsonl"))
     parser.add_argument("--output-dir", type=Path, default=Path("data/zebra"))
     parser.add_argument("--seed", type=int, default=DERIVATION_SEED)
+    parser.add_argument("--target-total", type=int, default=None,
+                        help="Optional expected source count; any unique source count is supported.")
     parser.add_argument("--overwrite", action="store_true")
     return parser
 
@@ -377,8 +306,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         sources = load_jsonl(args.source)
         source_ids = [_required_text(source, "id") for source in sources]
-        if len(source_ids) != 45 or len(set(source_ids)) != 45:
-            raise ValueError("the frozen Zebra source set must contain 45 unique ids")
+        if len(set(source_ids)) != len(source_ids):
+            raise ValueError("the frozen Zebra source set must contain unique ids")
+        if args.target_total is not None and len(source_ids) != args.target_total:
+            raise ValueError(f"expected {args.target_total} source records; got {len(source_ids)}")
         codebook = [derive_codebook_record(source, seed=args.seed) for source in sources]
         history = [derive_history_record(source, seed=args.seed) for source in sources]
         counterfactual = derive_counterfactual_candidates(sources, seed=args.seed)

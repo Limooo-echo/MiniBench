@@ -2,7 +2,7 @@
 
 __all__ = [
     "AGENT_NAMES",
-    "OpenAICompatibleAgent",
+    "OpenAICompatibleClient",
     "ProviderConfig",
     "make_agent",
     "make_agent_from_config",
@@ -15,7 +15,7 @@ def __getattr__(name: str):
         from minibench.factory import agents
 
         return getattr(agents, name)
-    if name in {"OpenAICompatibleAgent", "ProviderConfig", "resolve_provider"}:
+    if name in {"OpenAICompatibleClient", "ProviderConfig", "resolve_provider"}:
         from minibench.factory import providers
 
         return getattr(providers, name)

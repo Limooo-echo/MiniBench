@@ -5,10 +5,8 @@ import unittest
 from unittest.mock import patch
 
 from minibench.core.checkpoint import RunLock, RunLockedError
-from minibench.factory.experiments import (
-    _zebra_sidecar_lock_name,
-    run_family_experiment,
-)
+from minibench.experiments.zebra import _zebra_sidecar_lock_name
+from minibench.experiments.runner import run_family_experiment
 
 
 def zebra_record(
@@ -59,7 +57,7 @@ def experiment_config(root, tasks_path, *, evaluation=None, run_name="zebra-resu
             "limit": None,
             "task_ids": [],
         },
-        "agent": {"name": "openai-compatible"},
+        "agent": {"name": "passthrough"},
         "provider": {
             "name": "generic",
             "model": "unit-model",
@@ -114,7 +112,7 @@ class HistoryAgent:
 
 
 class ZebraResumeTests(unittest.TestCase):
-    def test_precreated_empty_directory_with_legacy_lock_is_safely_initialized(self):
+    def test_precreated_empty_directory_is_safely_initialized(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             tasks_path = root / "tasks.jsonl"
@@ -122,11 +120,10 @@ class ZebraResumeTests(unittest.TestCase):
             config = experiment_config(root, tasks_path, run_name="precreated")
             run_dir = root / "runs" / "precreated"
             run_dir.mkdir(parents=True)
-            (run_dir / ".run.lock").write_text("0", encoding="utf-8")
             agent = DirectAgent()
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=agent,
             ):
                 completed_dir, summary = run_family_experiment(config)
@@ -137,6 +134,24 @@ class ZebraResumeTests(unittest.TestCase):
             self.assertTrue((run_dir / "manifest.json").is_file())
             self.assertTrue((run_dir / "predictions.jsonl").is_file())
             self.assertTrue((run_dir / "run_state.json").is_file())
+
+    def test_old_lock_in_uninitialized_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            tasks_path = root / "tasks.jsonl"
+            write_tasks(tasks_path, [zebra_record("old-lock-task")])
+            config = experiment_config(root, tasks_path, run_name="old-lock")
+            run_dir = root / "runs" / "old-lock"
+            run_dir.mkdir(parents=True)
+            lock = run_dir / ".run.lock"
+            lock.write_text("0", encoding="utf-8")
+            with patch("minibench.experiments.zebra.make_agent_from_config") as factory:
+                with self.assertRaisesRegex(ValueError, r"unexpected file.*\.run\.lock"):
+                    run_family_experiment(config)
+                factory.assert_not_called()
+            self.assertEqual(lock.read_text(encoding="utf-8"), "0")
+            self.assertFalse((run_dir / "manifest.json").exists())
+            self.assertFalse((run_dir / "run_state.json").exists())
 
     def test_manifest_only_initialization_gap_is_resumed_before_agent_call(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -149,7 +164,7 @@ class ZebraResumeTests(unittest.TestCase):
                 "minibench.datasets.zebra.evaluation.write_zebra_snapshot",
                 side_effect=OSError("initial snapshot failed"),
             ), patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.zebra.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaisesRegex(OSError, "initial snapshot failed"):
                     run_family_experiment(config)
@@ -162,7 +177,7 @@ class ZebraResumeTests(unittest.TestCase):
             resumed_agent = DirectAgent()
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=resumed_agent,
             ):
                 _, summary = run_family_experiment(config)
@@ -184,7 +199,7 @@ class ZebraResumeTests(unittest.TestCase):
             )
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=DirectAgent(interrupt=True),
             ):
                 with self.assertRaises(KeyboardInterrupt):
@@ -195,7 +210,7 @@ class ZebraResumeTests(unittest.TestCase):
             state_before = (run_dir / "run_state.json").read_bytes()
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.zebra.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaisesRegex(ValueError, "predictions.jsonl is missing"):
                     run_family_experiment(config)
@@ -215,10 +230,10 @@ class ZebraResumeTests(unittest.TestCase):
             config = experiment_config(root, tasks_path, run_name="state-gap")
 
             with patch(
-                "minibench.factory.experiments._write_zebra_state",
+                "minibench.experiments.zebra._write_zebra_state",
                 side_effect=OSError("initial state failed"),
             ), patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.zebra.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaisesRegex(OSError, "initial state failed"):
                     run_family_experiment(config)
@@ -230,7 +245,7 @@ class ZebraResumeTests(unittest.TestCase):
             resumed_agent = DirectAgent()
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=resumed_agent,
             ):
                 _, summary = run_family_experiment(config)
@@ -255,7 +270,7 @@ class ZebraResumeTests(unittest.TestCase):
                 output_dir,
                 lock_name=_zebra_sidecar_lock_name(run_name),
             ), patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.zebra.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaises(RunLockedError):
                     run_family_experiment(config)
@@ -274,7 +289,7 @@ class ZebraResumeTests(unittest.TestCase):
             (run_dir / "mystery.txt").write_text("unknown", encoding="utf-8")
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.zebra.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaisesRegex(ValueError, "unexpected file"):
                     run_family_experiment(config)
@@ -288,7 +303,7 @@ class ZebraResumeTests(unittest.TestCase):
             config = experiment_config(root, tasks_path, run_name="../escape")
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.zebra.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaisesRegex(ValueError, "single directory name"):
                     run_family_experiment(config)
@@ -314,7 +329,7 @@ class ZebraResumeTests(unittest.TestCase):
                 return write_zebra_snapshot(*args, **kwargs)
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=DirectAgent(),
             ), patch(
                 "minibench.datasets.zebra.evaluation.write_zebra_snapshot",
@@ -333,7 +348,7 @@ class ZebraResumeTests(unittest.TestCase):
 
             resumed_agent = DirectAgent()
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=resumed_agent,
             ):
                 run_family_experiment(config)
@@ -358,7 +373,7 @@ class ZebraResumeTests(unittest.TestCase):
                 return atomic_write_json(*args, **kwargs)
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=DirectAgent(),
             ), patch(
                 "minibench.datasets.zebra.evaluation.atomic_write_json",
@@ -379,7 +394,7 @@ class ZebraResumeTests(unittest.TestCase):
             )
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.zebra.make_agent_from_config"
             ) as make_agent:
                 _, summary = run_family_experiment(config)
                 make_agent.assert_not_called()
@@ -397,7 +412,7 @@ class ZebraResumeTests(unittest.TestCase):
             first_agent = DirectAgent(fail_after=2)
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=first_agent,
             ):
                 with self.assertRaisesRegex(RuntimeError, "2/3 results"):
@@ -426,7 +441,7 @@ class ZebraResumeTests(unittest.TestCase):
             second_agent = DirectAgent()
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=second_agent,
             ):
                 resumed_dir, summary = run_family_experiment(config)
@@ -455,7 +470,7 @@ class ZebraResumeTests(unittest.TestCase):
             self.assertEqual((run_dir / "manifest.json").read_bytes(), manifest_before)
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.zebra.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaisesRegex(ValueError, "already completed"):
                     run_family_experiment(config)
@@ -492,7 +507,7 @@ class ZebraResumeTests(unittest.TestCase):
             first_agent = HistoryAgent(fail_on_call=3)
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=first_agent,
             ):
                 with self.assertRaisesRegex(RuntimeError, "1/2 results"):
@@ -511,7 +526,7 @@ class ZebraResumeTests(unittest.TestCase):
 
             resumed_agent = HistoryAgent()
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=resumed_agent,
             ):
                 run_family_experiment(config)
@@ -536,7 +551,7 @@ class ZebraResumeTests(unittest.TestCase):
             config = experiment_config(root, tasks_path, run_name="mismatch")
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=DirectAgent(fail_after=1),
             ):
                 with self.assertRaises(RuntimeError):
@@ -552,7 +567,7 @@ class ZebraResumeTests(unittest.TestCase):
                 "provider": {**config["provider"], "temperature": 0.5},
             }
             with patch(
-                "minibench.factory.experiments.make_agent_from_config"
+                "minibench.experiments.zebra.make_agent_from_config"
             ) as make_agent:
                 with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
                     run_family_experiment(changed)
@@ -574,7 +589,7 @@ class ZebraResumeTests(unittest.TestCase):
             config = experiment_config(root, tasks_path, run_name="interrupt")
 
             with patch(
-                "minibench.factory.experiments.make_agent_from_config",
+                "minibench.experiments.zebra.make_agent_from_config",
                 return_value=DirectAgent(interrupt=True),
             ):
                 with self.assertRaises(KeyboardInterrupt):

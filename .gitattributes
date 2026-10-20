@@ -12,3 +12,7 @@
 *.ico binary
 *.pdf binary
 *.nnue binary
+
+# Frozen datasets retain the byte fingerprints used by pre-expansion runs.
+data/zebra/legacy/20260810/*.jsonl -text
+data/one_stroke/legacy/pre-20261013/*.jsonl -text

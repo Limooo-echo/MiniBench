@@ -40,35 +40,15 @@ def _metric_completion_tokens(metrics: Any) -> int | None:
 
 
 def _trace_stages(trace: dict[str, Any]) -> list[tuple[str, str, Any]]:
-    stage_metrics = trace.get("stage_metrics")
-    metrics = stage_metrics if isinstance(stage_metrics, dict) else {}
-    architecture = trace.get("architecture")
-    if architecture == "tot":
-        candidates = trace.get("candidates")
-        candidate_metrics = metrics.get("candidates")
-        candidate_outputs = candidates if isinstance(candidates, list) else []
-        candidate_usage = (
-            candidate_metrics if isinstance(candidate_metrics, list) else []
-        )
-        stages = [
-            (
-                f"candidate_{index + 1}",
-                str(output),
-                candidate_usage[index] if index < len(candidate_usage) else None,
-            )
-            for index, output in enumerate(candidate_outputs)
-        ]
-        stages.append(("judge", str(trace.get("final", "")), metrics.get("judge")))
-        return stages
-
-    stage_names = {
-        "cot": ("reasoning", "final"),
-        "plan-then-solve": ("plan", "solution", "final"),
-        "critic-refine": ("draft", "critique", "refinement"),
-    }.get(str(architecture), ())
+    """Read the runtime's saved stages for every supported agent architecture."""
+    stages = trace.get("stages", [])
+    if not isinstance(stages, list):
+        return []
     return [
-        (stage, str(trace.get(stage, "")), metrics.get(stage))
-        for stage in stage_names
+        (str(stage.get("stage_name", "unknown")),
+         str(stage.get("output") or ""), stage)
+        for stage in stages
+        if isinstance(stage, dict)
     ]
 
 

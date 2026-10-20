@@ -121,17 +121,17 @@ class ZebraTests(unittest.TestCase):
         )
         self.assertTrue(all("source:WildEval/ZebraLogic" in task.tags for task in tasks))
 
-    def test_formal_evaluation_set_has_fifteen_tasks_per_difficulty(self):
+    def test_formal_evaluation_set_has_one_hundred_balanced_tasks(self):
         eval_path = Path(__file__).resolve().parents[1] / "data" / "zebra" / "eval.jsonl"
         tasks = load_zebra_tasks(eval_path)
 
-        self.assertEqual(len(tasks), 45)
+        self.assertEqual(len(tasks), 100)
         self.assertEqual(
             {
                 difficulty: sum(task.difficulty == difficulty for task in tasks)
                 for difficulty in ("easy", "medium", "hard")
             },
-            {"easy": 15, "medium": 15, "hard": 15},
+            {"easy": 34, "medium": 33, "hard": 33},
         )
         self.assertTrue(all("benchmark:eval" in task.tags for task in tasks))
 

@@ -7,10 +7,9 @@ import unittest
 from unittest.mock import Mock, patch
 
 from minibench.core.checkpoint import sha256_file
-from minibench.factory.experiments import (
-    TaskFamilySpec, _evaluate, _run_checkpointed_xiangqi_experiment,
-    _select_frozen_xiangqi_tasks,
-)
+from minibench.experiments.registry import TaskFamilySpec
+from minibench.experiments.dispatch import _evaluate
+from minibench.experiments.xiangqi import _run_checkpointed_xiangqi_experiment, _select_frozen_xiangqi_tasks
 
 
 @dataclass
@@ -59,10 +58,10 @@ class XiangqiFactoryCheckpointTests(unittest.TestCase):
         return Mock()
 
     def run_experiment(self, evaluator):
-        with patch("minibench.factory.experiments._write_xiangqi_selected_tasks", self.write_selection), \
-             patch("minibench.factory.experiments._write_xiangqi_run_metadata", self.write_metadata), \
-             patch("minibench.factory.experiments.make_agent_from_config", self.create_agent), \
-             patch("minibench.factory.experiments._evaluate", evaluator):
+        with patch("minibench.experiments.xiangqi._write_xiangqi_selected_tasks", self.write_selection), \
+             patch("minibench.experiments.xiangqi._write_xiangqi_run_metadata", self.write_metadata), \
+             patch("minibench.experiments.xiangqi.make_agent_from_config", self.create_agent), \
+             patch("minibench.experiments.xiangqi._evaluate", evaluator):
             return _run_checkpointed_xiangqi_experiment(
                 self.spec, self.tasks, self.config, self.data, "xiangqi-multimodal",
                 self.config["evaluation"], self.run_config)

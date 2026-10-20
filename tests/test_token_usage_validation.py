@@ -196,7 +196,7 @@ class UsageValidationTests(unittest.TestCase):
 
     def test_nonstream_zero_usage_is_not_reintroduced_by_runtime(self):
         from minibench.core.runtime import AgentRuntime
-        from tests.test_openai_compatible_agent import FakeHTTPResponse
+        from tests.test_provider_client import FakeHTTPResponse
         zero={"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
         payload={"choices":[{"finish_reason":"stop","message":{"content":'{"ok":true}'}}],"usage":zero}
         client=OpenAICompatibleClient(model="fixture",base_url="https://invalid.example/v1",api_key_env="UNIT_KEY")

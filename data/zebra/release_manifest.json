@@ -1,0 +1,1294 @@
+{
+  "seed": 20261013,
+  "target_total": 100,
+  "difficulty_targets": {
+    "easy": 34,
+    "medium": 33,
+    "hard": 33
+  },
+  "source_path": "D:\\AAALimoWork\\CS\\Seminar\\Dataset\\ZebraLogic\\grid_mode\\test-00000-of-00001.parquet",
+  "source_sha256": "545cd5cce9c54575c7f74769b8f1250b8bb94f5745519c83b99b8db01f95924d",
+  "validator_sha256": "60c5fc520d332507bcc926f9e086d4d07a10c7b59dabcae0d4397d3fd759ab15",
+  "records": {
+    "eval.jsonl": 100,
+    "rule_codebook_eval.jsonl": 100,
+    "history_eval.jsonl": 100,
+    "rule_counterfactual_eval.jsonl": 100,
+    "rule_eval.jsonl": 200
+  },
+  "builder_sha256": "d70f987da68352094f9d91f0995aa77af28a2b1cc3edc278c4c7e36ed77cefcc",
+  "pool_original_statuses": {
+    "verified_unique": 1000
+  },
+  "pool_counterfactual_statuses": {
+    "verified_unique": 898,
+    "unsatisfiable": 778,
+    "multiple_solutions": 1610
+  },
+  "counterfactual_eligible_sources": 660,
+  "original_45_retained": [
+    "lgp-test-2x2-13",
+    "lgp-test-2x2-23",
+    "lgp-test-2x3-1",
+    "lgp-test-2x3-39",
+    "lgp-test-2x4-3",
+    "lgp-test-2x4-39",
+    "lgp-test-2x5-18",
+    "lgp-test-2x5-38",
+    "lgp-test-2x6-0",
+    "lgp-test-2x6-4",
+    "lgp-test-3x2-37",
+    "lgp-test-3x3-38",
+    "lgp-test-3x3-5",
+    "lgp-test-3x4-8",
+    "lgp-test-3x4-9",
+    "lgp-test-3x5-12",
+    "lgp-test-3x5-20",
+    "lgp-test-3x5-6",
+    "lgp-test-3x6-24",
+    "lgp-test-3x6-26",
+    "lgp-test-4x2-12",
+    "lgp-test-4x2-21",
+    "lgp-test-4x3-16",
+    "lgp-test-4x3-17",
+    "lgp-test-4x4-30",
+    "lgp-test-4x4-34",
+    "lgp-test-4x5-22",
+    "lgp-test-4x5-4",
+    "lgp-test-4x6-7",
+    "lgp-test-5x2-28",
+    "lgp-test-5x2-29",
+    "lgp-test-5x3-22",
+    "lgp-test-5x3-9",
+    "lgp-test-5x4-3",
+    "lgp-test-5x5-18",
+    "lgp-test-5x5-37",
+    "lgp-test-5x6-20",
+    "lgp-test-6x2-14",
+    "lgp-test-6x2-18",
+    "lgp-test-6x3-2",
+    "lgp-test-6x3-9",
+    "lgp-test-6x4-36",
+    "lgp-test-6x5-17",
+    "lgp-test-6x5-25",
+    "lgp-test-6x6-18"
+  ],
+  "original_rejections": [],
+  "direct_added_ids": [
+    "lgp-test-2x2-15",
+    "lgp-test-2x2-6",
+    "lgp-test-2x3-12",
+    "lgp-test-2x3-19",
+    "lgp-test-2x4-25",
+    "lgp-test-2x4-33",
+    "lgp-test-2x5-23",
+    "lgp-test-2x5-7",
+    "lgp-test-2x6-20",
+    "lgp-test-2x6-23",
+    "lgp-test-3x2-17",
+    "lgp-test-3x2-29",
+    "lgp-test-3x2-34",
+    "lgp-test-3x2-7",
+    "lgp-test-3x3-29",
+    "lgp-test-3x3-32",
+    "lgp-test-3x3-4",
+    "lgp-test-3x4-3",
+    "lgp-test-3x4-32",
+    "lgp-test-3x5-39",
+    "lgp-test-3x5-5",
+    "lgp-test-3x6-15",
+    "lgp-test-3x6-18",
+    "lgp-test-3x6-34",
+    "lgp-test-4x2-14",
+    "lgp-test-4x2-6",
+    "lgp-test-4x3-19",
+    "lgp-test-4x3-3",
+    "lgp-test-4x4-1",
+    "lgp-test-4x4-24",
+    "lgp-test-4x4-35",
+    "lgp-test-4x5-38",
+    "lgp-test-4x5-7",
+    "lgp-test-4x6-27",
+    "lgp-test-4x6-33",
+    "lgp-test-5x2-25",
+    "lgp-test-5x2-37",
+    "lgp-test-5x2-9",
+    "lgp-test-5x3-37",
+    "lgp-test-5x4-10",
+    "lgp-test-5x4-29",
+    "lgp-test-5x5-30",
+    "lgp-test-5x6-24",
+    "lgp-test-5x6-32",
+    "lgp-test-5x6-34",
+    "lgp-test-6x2-22",
+    "lgp-test-6x2-25",
+    "lgp-test-6x2-37",
+    "lgp-test-6x3-17",
+    "lgp-test-6x3-36",
+    "lgp-test-6x4-1",
+    "lgp-test-6x4-4",
+    "lgp-test-6x5-8",
+    "lgp-test-6x6-11",
+    "lgp-test-6x6-4"
+  ],
+  "codebook_counterfactual_source_intersection": [
+    "lgp-test-2x2-13",
+    "lgp-test-2x2-15",
+    "lgp-test-2x2-23",
+    "lgp-test-2x2-6",
+    "lgp-test-2x3-1",
+    "lgp-test-2x3-12",
+    "lgp-test-2x3-19",
+    "lgp-test-2x3-39",
+    "lgp-test-2x4-25",
+    "lgp-test-2x4-3",
+    "lgp-test-2x4-33",
+    "lgp-test-2x4-39",
+    "lgp-test-2x5-18",
+    "lgp-test-2x5-23",
+    "lgp-test-2x5-38",
+    "lgp-test-2x5-7",
+    "lgp-test-2x6-0",
+    "lgp-test-2x6-20",
+    "lgp-test-2x6-23",
+    "lgp-test-2x6-4",
+    "lgp-test-3x2-17",
+    "lgp-test-3x2-34",
+    "lgp-test-3x2-37",
+    "lgp-test-3x2-7",
+    "lgp-test-3x3-29",
+    "lgp-test-3x3-38",
+    "lgp-test-3x3-4",
+    "lgp-test-3x4-3",
+    "lgp-test-3x4-32",
+    "lgp-test-3x4-8",
+    "lgp-test-3x4-9",
+    "lgp-test-3x5-12",
+    "lgp-test-3x5-39",
+    "lgp-test-3x5-5",
+    "lgp-test-3x6-15",
+    "lgp-test-3x6-24",
+    "lgp-test-3x6-26",
+    "lgp-test-4x2-14",
+    "lgp-test-4x3-16",
+    "lgp-test-4x3-17",
+    "lgp-test-4x3-19",
+    "lgp-test-4x4-1",
+    "lgp-test-4x4-24",
+    "lgp-test-4x5-22",
+    "lgp-test-4x5-4",
+    "lgp-test-4x5-7",
+    "lgp-test-4x6-33",
+    "lgp-test-5x2-28",
+    "lgp-test-5x2-37",
+    "lgp-test-5x2-9",
+    "lgp-test-5x4-10",
+    "lgp-test-5x4-29",
+    "lgp-test-5x4-3",
+    "lgp-test-5x5-18",
+    "lgp-test-5x5-30",
+    "lgp-test-5x6-32",
+    "lgp-test-5x6-34",
+    "lgp-test-6x2-14",
+    "lgp-test-6x2-22",
+    "lgp-test-6x2-25",
+    "lgp-test-6x3-36",
+    "lgp-test-6x3-9",
+    "lgp-test-6x4-1",
+    "lgp-test-6x4-36",
+    "lgp-test-6x4-4",
+    "lgp-test-6x5-25",
+    "lgp-test-6x6-11",
+    "lgp-test-6x6-18",
+    "lgp-test-6x6-4"
+  ],
+  "counterfactual_fill_ids": [
+    "lgp-test-3x2-26",
+    "lgp-test-3x3-12",
+    "lgp-test-3x3-24",
+    "lgp-test-3x5-0",
+    "lgp-test-3x5-23",
+    "lgp-test-3x6-12",
+    "lgp-test-3x6-20",
+    "lgp-test-4x2-27",
+    "lgp-test-4x2-39",
+    "lgp-test-4x2-5",
+    "lgp-test-4x3-21",
+    "lgp-test-4x3-37",
+    "lgp-test-4x4-11",
+    "lgp-test-4x4-13",
+    "lgp-test-4x4-23",
+    "lgp-test-4x6-16",
+    "lgp-test-4x6-35",
+    "lgp-test-5x2-12",
+    "lgp-test-5x2-15",
+    "lgp-test-5x3-14",
+    "lgp-test-5x3-15",
+    "lgp-test-5x3-26",
+    "lgp-test-5x3-32",
+    "lgp-test-5x5-25",
+    "lgp-test-5x6-31",
+    "lgp-test-6x2-38",
+    "lgp-test-6x3-23",
+    "lgp-test-6x4-31",
+    "lgp-test-6x5-20",
+    "lgp-test-6x5-26",
+    "lgp-test-6x5-3"
+  ],
+  "counterfactual_operator_counts": {
+    "easy": {
+      "ordinal_house_reference": 12,
+      "directly_left_of": 5,
+      "somewhere_right_of": 7,
+      "somewhere_left_of": 5,
+      "next_to": 5
+    },
+    "medium": {
+      "directly_left_of": 7,
+      "next_to": 7,
+      "ordinal_house_reference": 7,
+      "somewhere_left_of": 6,
+      "somewhere_right_of": 4,
+      "two_houses_between": 1,
+      "one_house_between": 1
+    },
+    "hard": {
+      "ordinal_house_reference": 2,
+      "directly_left_of": 8,
+      "somewhere_left_of": 6,
+      "next_to": 8,
+      "one_house_between": 2,
+      "somewhere_right_of": 4,
+      "two_houses_between": 3
+    }
+  },
+  "counterfactual_attempted_operator_counts": {
+    "directly_left_of": 602,
+    "directly_right_of": 0,
+    "somewhere_left_of": 509,
+    "somewhere_right_of": 487,
+    "next_to": 362,
+    "one_house_between": 264,
+    "two_houses_between": 162,
+    "ordinal_house_reference": 900
+  },
+  "source_sampling": {
+    "algorithm": "deterministic-minimum-cost-flow-v1",
+    "networkx_version": "3.4.2",
+    "clue_band_frozen_before_exclusions": true,
+    "selected": [
+      {
+        "id": "lgp-test-2x2-13",
+        "size": "2*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x2-15",
+        "size": "2*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x2-23",
+        "size": "2*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x2-6",
+        "size": "2*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x3-1",
+        "size": "2*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x3-12",
+        "size": "2*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x3-19",
+        "size": "2*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x3-39",
+        "size": "2*3",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x4-25",
+        "size": "2*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x4-3",
+        "size": "2*4",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x4-33",
+        "size": "2*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x4-39",
+        "size": "2*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x5-18",
+        "size": "2*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x5-23",
+        "size": "2*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x5-38",
+        "size": "2*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x5-7",
+        "size": "2*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x6-0",
+        "size": "2*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x6-20",
+        "size": "2*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x6-23",
+        "size": "2*6",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x6-4",
+        "size": "2*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x2-17",
+        "size": "3*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x2-29",
+        "size": "3*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x2-34",
+        "size": "3*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x2-37",
+        "size": "3*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x2-7",
+        "size": "3*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x3-29",
+        "size": "3*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x3-32",
+        "size": "3*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x3-38",
+        "size": "3*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x3-4",
+        "size": "3*3",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x3-5",
+        "size": "3*3",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x2-12",
+        "size": "4*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x2-14",
+        "size": "4*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x2-21",
+        "size": "4*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x2-6",
+        "size": "4*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x4-3",
+        "size": "3*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x4-32",
+        "size": "3*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x4-8",
+        "size": "3*4",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x4-9",
+        "size": "3*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x5-12",
+        "size": "3*5",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x5-20",
+        "size": "3*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x5-39",
+        "size": "3*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x5-5",
+        "size": "3*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x5-6",
+        "size": "3*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x6-15",
+        "size": "3*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x6-18",
+        "size": "3*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x6-24",
+        "size": "3*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x6-26",
+        "size": "3*6",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x6-34",
+        "size": "3*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x3-16",
+        "size": "4*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x3-17",
+        "size": "4*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x3-19",
+        "size": "4*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x3-3",
+        "size": "4*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x4-1",
+        "size": "4*4",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x4-24",
+        "size": "4*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x4-30",
+        "size": "4*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x4-34",
+        "size": "4*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x4-35",
+        "size": "4*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-5x2-25",
+        "size": "5*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x2-28",
+        "size": "5*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-5x2-29",
+        "size": "5*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x2-37",
+        "size": "5*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x2-9",
+        "size": "5*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x2-14",
+        "size": "6*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x2-18",
+        "size": "6*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-6x2-22",
+        "size": "6*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x2-25",
+        "size": "6*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x2-37",
+        "size": "6*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x5-22",
+        "size": "4*5",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x5-38",
+        "size": "4*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x5-4",
+        "size": "4*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x5-7",
+        "size": "4*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x6-27",
+        "size": "4*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x6-33",
+        "size": "4*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x6-7",
+        "size": "4*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x3-22",
+        "size": "5*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x3-37",
+        "size": "5*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x3-9",
+        "size": "5*3",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-5x4-10",
+        "size": "5*4",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x4-29",
+        "size": "5*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x4-3",
+        "size": "5*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x5-18",
+        "size": "5*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x5-30",
+        "size": "5*5",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x5-37",
+        "size": "5*5",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x6-20",
+        "size": "5*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x6-24",
+        "size": "5*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x6-32",
+        "size": "5*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x6-34",
+        "size": "5*6",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x3-17",
+        "size": "6*3",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x3-2",
+        "size": "6*3",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x3-36",
+        "size": "6*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x3-9",
+        "size": "6*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-6x4-1",
+        "size": "6*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x4-36",
+        "size": "6*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x4-4",
+        "size": "6*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x5-17",
+        "size": "6*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-6x5-25",
+        "size": "6*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x5-8",
+        "size": "6*5",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x6-11",
+        "size": "6*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-6x6-18",
+        "size": "6*6",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x6-4",
+        "size": "6*6",
+        "clue_band": "high"
+      }
+    ],
+    "counterfactual": [
+      {
+        "id": "lgp-test-2x2-13",
+        "size": "2*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x2-15",
+        "size": "2*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x2-23",
+        "size": "2*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x2-6",
+        "size": "2*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x3-1",
+        "size": "2*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x3-12",
+        "size": "2*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x3-19",
+        "size": "2*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x3-39",
+        "size": "2*3",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x4-25",
+        "size": "2*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x4-3",
+        "size": "2*4",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x4-33",
+        "size": "2*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x4-39",
+        "size": "2*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x5-18",
+        "size": "2*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x5-23",
+        "size": "2*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x5-38",
+        "size": "2*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x5-7",
+        "size": "2*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-2x6-0",
+        "size": "2*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x6-20",
+        "size": "2*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-2x6-23",
+        "size": "2*6",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-2x6-4",
+        "size": "2*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x2-17",
+        "size": "3*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x2-26",
+        "size": "3*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x2-34",
+        "size": "3*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x2-37",
+        "size": "3*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x2-7",
+        "size": "3*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x3-12",
+        "size": "3*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x3-24",
+        "size": "3*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x3-29",
+        "size": "3*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x3-38",
+        "size": "3*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x3-4",
+        "size": "3*3",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x2-14",
+        "size": "4*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x2-27",
+        "size": "4*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x2-39",
+        "size": "4*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x2-5",
+        "size": "4*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x4-3",
+        "size": "3*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x4-32",
+        "size": "3*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x4-8",
+        "size": "3*4",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x4-9",
+        "size": "3*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x5-0",
+        "size": "3*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x5-12",
+        "size": "3*5",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x5-23",
+        "size": "3*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x5-39",
+        "size": "3*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x5-5",
+        "size": "3*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-3x6-12",
+        "size": "3*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x6-15",
+        "size": "3*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-3x6-20",
+        "size": "3*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x6-24",
+        "size": "3*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-3x6-26",
+        "size": "3*6",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x3-16",
+        "size": "4*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x3-17",
+        "size": "4*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x3-19",
+        "size": "4*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x3-21",
+        "size": "4*3",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x3-37",
+        "size": "4*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x4-1",
+        "size": "4*4",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x4-11",
+        "size": "4*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x4-13",
+        "size": "4*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x4-23",
+        "size": "4*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x4-24",
+        "size": "4*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-5x2-12",
+        "size": "5*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-5x2-15",
+        "size": "5*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x2-28",
+        "size": "5*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-5x2-37",
+        "size": "5*2",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x2-9",
+        "size": "5*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x2-14",
+        "size": "6*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x2-22",
+        "size": "6*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x2-25",
+        "size": "6*2",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x2-38",
+        "size": "6*2",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x5-22",
+        "size": "4*5",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-4x5-4",
+        "size": "4*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x5-7",
+        "size": "4*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x6-16",
+        "size": "4*6",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-4x6-33",
+        "size": "4*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-4x6-35",
+        "size": "4*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x3-14",
+        "size": "5*3",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-5x3-15",
+        "size": "5*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x3-26",
+        "size": "5*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x3-32",
+        "size": "5*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x4-10",
+        "size": "5*4",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x4-29",
+        "size": "5*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x4-3",
+        "size": "5*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x5-18",
+        "size": "5*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x5-25",
+        "size": "5*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-5x5-30",
+        "size": "5*5",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x6-31",
+        "size": "5*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-5x6-32",
+        "size": "5*6",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-5x6-34",
+        "size": "5*6",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x3-23",
+        "size": "6*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-6x3-36",
+        "size": "6*3",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x3-9",
+        "size": "6*3",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-6x4-1",
+        "size": "6*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x4-31",
+        "size": "6*4",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-6x4-36",
+        "size": "6*4",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x4-4",
+        "size": "6*4",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x5-20",
+        "size": "6*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-6x5-25",
+        "size": "6*5",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x5-26",
+        "size": "6*5",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-6x5-3",
+        "size": "6*5",
+        "clue_band": "low"
+      },
+      {
+        "id": "lgp-test-6x6-11",
+        "size": "6*6",
+        "clue_band": "middle"
+      },
+      {
+        "id": "lgp-test-6x6-18",
+        "size": "6*6",
+        "clue_band": "high"
+      },
+      {
+        "id": "lgp-test-6x6-4",
+        "size": "6*6",
+        "clue_band": "high"
+      }
+    ]
+  },
+  "file_sha256": {
+    "eval.jsonl": "9faa81a8926a824ddb167eaa92fc5c7ec42a39f6f2bd09b196a5922236e3596c",
+    "rule_codebook_eval.jsonl": "0309b9dfff932104bfe437f524bb34ced88860af8e256ac19c3af75f69c18dcd",
+    "history_eval.jsonl": "609a08568e321f356163153c112421fb28522c97b29a8a18d33771e377442f1f",
+    "rule_counterfactual_eval.jsonl": "4e02450254cb0ea7f2c10126b9fc606184bbbe696dadd1f70239b299174535af",
+    "rule_eval.jsonl": "8462c2242580613a14bff061df2d0d2fce9d58c588a02f9e94f918750ad8c40f"
+  },
+  "validation_sha256": "d12fe3796f520b824d1008c2e44f67456a946ed8ae769b1cd91dd2c6bb4ffae5",
+  "all_release_records_verified": true,
+  "history_modes_share_source_and_clue_order": true
+}

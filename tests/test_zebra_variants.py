@@ -78,25 +78,25 @@ class ZebraVariantTests(unittest.TestCase):
         self.assertTrue(candidate["counterfactual_rule"]["affected_clue_indices"])
         self.assertIn("not-scoreable", candidate["tags"])
 
-    def test_generated_sets_share_all_forty_five_source_ids(self):
+    def test_generated_sets_share_all_one_hundred_source_ids(self):
         source_rows = MODULE.load_jsonl(ROOT / "data" / "zebra" / "eval.jsonl")
         codebook_path = ROOT / "data" / "zebra" / "rule_codebook_eval.jsonl"
         history_path = ROOT / "data" / "zebra" / "history_eval.jsonl"
-        counterfactual_path = (
-            ROOT / "data" / "zebra" / "rule_counterfactual_candidates.jsonl"
-        )
+        counterfactual_path = ROOT / "data" / "zebra" / "rule_counterfactual_eval.jsonl"
         codebook_rows = MODULE.load_jsonl(codebook_path)
         history_rows = MODULE.load_jsonl(history_path)
         counterfactual_rows = MODULE.load_jsonl(counterfactual_path)
         source_ids = {row["id"] for row in source_rows}
 
-        self.assertEqual(len(source_ids), 45)
-        for rows in (codebook_rows, history_rows, counterfactual_rows):
-            self.assertEqual(len(rows), 45)
+        self.assertEqual(len(source_ids), 100)
+        for rows in (codebook_rows, history_rows):
+            self.assertEqual(len(rows), 100)
             self.assertEqual({row["source_id"] for row in rows}, source_ids)
-        self.assertTrue(all(row["solution"] is None for row in counterfactual_rows))
+        self.assertEqual(len(counterfactual_rows), 100)
+        self.assertEqual(len({row["source_id"] for row in counterfactual_rows}), 100)
+        self.assertTrue(all(row["solution"] != row["original_solution"] for row in counterfactual_rows))
         self.assertTrue(
-            all(row["validation_status"] == "pending_manual_review" for row in counterfactual_rows)
+            all(row["validation_status"] == "verified_unique" for row in counterfactual_rows)
         )
 
         codebook_tasks = load_zebra_tasks(codebook_path)

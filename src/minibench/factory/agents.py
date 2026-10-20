@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Callable
-import warnings
 
 from minibench.agents.best_of_n import BestOfNAgent
 from minibench.agents.critic_refine import CriticRefineAgent
@@ -32,10 +31,6 @@ REASONING_AGENTS: dict[str, ReasoningAgentFactory] = {
     LeastToMostAgent.name: LeastToMostAgent,
 }
 
-LEGACY_AGENT_ALIASES = {
-    "openai-compatible": PassthroughAgent.name,
-}
-
 AGENT_NAMES = (
     PassthroughAgent.name,
     DirectAgent.name,
@@ -61,17 +56,6 @@ SAMPLED_AGENTS = frozenset(
         BestOfNAgent.name,
     }
 )
-
-
-def canonical_agent_name(name: str, *, stacklevel: int = 3) -> str:
-    canonical = LEGACY_AGENT_ALIASES.get(name, name)
-    if canonical != name:
-        warnings.warn(
-            f"agent name {name!r} is deprecated; use {canonical!r} instead",
-            FutureWarning,
-            stacklevel=stacklevel,
-        )
-    return canonical
 
 
 def _make_openai_client(
@@ -148,7 +132,6 @@ def make_agent(
     retry_initial_backoff_seconds: float = 1.0,
     retry_max_backoff_seconds: float = 30.0,
 ) -> Agent:
-    name = canonical_agent_name(name)
     if predictions:
         return PredictionFileAgent(predictions)
     if name not in AGENT_NAMES:

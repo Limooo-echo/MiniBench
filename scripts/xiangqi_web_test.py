@@ -29,7 +29,9 @@ from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT, direct_prompt
 from minibench.datasets.xiangqi.engines.pikafish import resolve_pikafish_executable, pikafish_fingerprint
 from minibench.datasets.xiangqi.runtime import PROTOCOL_VERSION
 from minibench.factory.config import load_experiment_config
-from minibench.factory.experiments import _evaluate, get_task_family_spec, _select_frozen_xiangqi_tasks
+from minibench.experiments.dispatch import _evaluate
+from minibench.experiments.registry import get_task_family_spec
+from minibench.experiments.xiangqi import _select_frozen_xiangqi_tasks
 
 
 TASKS = {

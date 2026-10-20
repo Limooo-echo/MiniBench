@@ -5,20 +5,21 @@ The formal tracks use semantic names throughout task IDs, configs, and scores.
 
 ## Files and protocols
 
-- `direct.jsonl`: 30 direct-reasoning tasks, with 10 easy, 10 medium, and
-  10 hard tasks. Each difficulty contains seven solvable and three unsolvable
+- `direct.jsonl`: 100 direct-reasoning tasks, with 34 easy, 33 medium, and
+  33 hard tasks. Easy contains 24 solvable and 10 unsolvable graphs; medium
+  and hard each contain 23 solvable and 10 unsolvable
   graphs. IDs use `direct-<difficulty>-<NN>`. The formal `baseline` prompt
   contains no Euler-theorem hint.
-- `history.jsonl`: 30 history-memory tasks, again 10 per difficulty, with IDs
+- `history.jsonl`: 100 history-memory tasks, with 34 easy, 33 medium and 33 hard, with IDs
   `history-<difficulty>-<NN>` and capability `history_memory`. Evaluation
   runs each graph under both `incremental_state` and `step_history_only`,
-  yielding 60 instance results.
-- `multimodal.jsonl`: 30 tasks paired to direct tasks through
+  yielding 200 instance results from the same 100 graphs and event sequences.
+- `multimodal.jsonl`: 100 tasks paired to direct tasks through
   `source_task_id`. IDs use `multimodal-<difficulty>-<NN>`. Each record has
   one `image` path, relative to the JSONL file, pointing to
   `images/<task-id>.png`. The renderer version is `multimodal-v3`.
-  Main evaluation uses `image` (30 results); paired ablation uses
-  `text` and `image` (60 results). Graph difficulty remains easy/medium/hard;
+  Main evaluation uses `image` (100 results); paired ablation uses
+  `text` and `image` (200 results). Graph difficulty remains easy/medium/hard;
   there are no separate image difficulty variants.
 - `tasks.jsonl`: the earlier compatibility/smoke set.
 - `tasks_generated.jsonl`: the existing generated set, retained independently.
@@ -28,25 +29,49 @@ edge-list order. Each event supplies the current vertex and its original static
 incident edges, but never the authoritative used-edge set. In
 `incremental_state`, the agent writes that state after each event; in
 `step_history_only`, it may acknowledge only the step number. Hard tasks include
-a reversible wrong move followed by an undo event.
+a reversible exploratory move followed by a strict LIFO undo event. The move
+is different from the selected oracle step; it is not necessarily a dead end.
 
 ## Provenance and reproducibility
 
-The small easy-graph motifs are inspired by the BSD-3-Clause NetworkX Graph
-Atlas. Larger tasks are handcrafted deterministic combinations of cycles,
-bridges, chords, and parallel edges, informed by locally archived one-stroke
-datasets. No raw unlicensed level is copied into this repository.
+The original 30 direct records and 29 distinct history inputs are preserved.
+The exact duplicate `history-easy-09` is retired in favor of `history-easy-03`.
+All original 30 history records remain in `legacy/pre-20261013/history.jsonl`
+for inspecting old results.
+
+New easy direct tasks are sampled deterministically from the BSD-3-Clause
+NetworkX Graph Atlas; the pinned archive and license are bundled under
+`sources/`. Its SHA-256 is
+`73fc416df0164923607751cb759f4ae81deb5f6550bf25be59c86de3b747e41d`.
+Other new tasks use independent seeded combinations of cycles, chords and,
+where allowed, parallel edges. Raw unlicensed Cocos/Yuyaoo levels are not copied.
+Both generators use seed `20261013`.
+
+Direct vertex counts are easy 4–6, medium 7–9 and hard 9–12; only hard direct
+graphs use parallel edges. History vertex counts use the same ranges and event
+counts are easy 4–6, medium 7–12 and hard 12–20. History graphs may contain
+parallel edges. New candidates reject endpoint-aware multigraph isomorphism
+against retained baseline graphs and other new graphs. Existing graph-isomorphic
+histories with different events remain, except the exact retired duplicate.
 
 Regenerate the formal files and images with:
 
 ```powershell
-python scripts/build_one_stroke_direct_history.py
+python scripts/build_one_stroke_direct_history.py --total 100 --seed 20261013
 python scripts/build_one_stroke_multimodal.py --overwrite
 ```
 
-The loader independently checks graph solvability, complete oracle paths,
-history legality, LIFO undo semantics, and the existence of a valid completion
-after the recorded history.
+The builder cross-checks the production loader with NetworkX MultiGraph Euler
+paths under fixed endpoints. It verifies full oracle edge multisets, independently
+replays each history move and LIFO undo, and saves a valid residual completion.
+Unsolvable records include connectivity, odd-degree or endpoint proofs in
+`validation-20261013.json`; per-image pairs and hashes are in
+`multimodal-validation-20261013.json`.
+
+New direct candidates also pass deterministic visual clearance checks against
+the eventual image-ID layout: nodes remain separated and nonincident nodes stay
+clear of straight and parallel Bezier edges. All 100 images receive visual QA.
+Original 30 image bytes remain preserved under renderer `multimodal-v3`.
 
 ## Scoring and interpretation
 
@@ -74,7 +99,8 @@ Each configured run creates a manifest and empty checkpoint before the first
 model call, then atomically checkpoints each completed task/mode item. The
 manifest records resolved config, provider/model identity, data/code/image
 fingerprints, Git state, and the work plan. Protocol-generation totals are
-direct=30, history=652, and multimodal main=30/paired=60; reasoning wrappers may
+direct=100, history=2198, and multimodal main=100/paired=200; the history total
+is computed as `2 * sum(len(history_events) + 1)`; reasoning wrappers may
 add internal calls on final turns. Compare tracks only with appropriately
 paired designs and controlled model identities; shipped text and image configs
 use different model families.

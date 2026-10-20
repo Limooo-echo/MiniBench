@@ -254,7 +254,7 @@ class MahjongSoloTests(unittest.TestCase):
                 "minibench.datasets.mahjong_solo.dataset.load_mahjong_solo_tasks",
                 return_value=[tsumo_task(), tsumo_task()],
             ), patch(
-                "minibench.cli._make_cli_agent",
+                "minibench.commands.mahjong._make_cli_agent",
                 return_value=TimeoutOnSecondSoloCallAgent(),
             ):
                 with self.assertRaisesRegex(SystemExit, "partial results saved"):

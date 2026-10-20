@@ -226,7 +226,7 @@ python -B scripts/maintenance/cleanup_xiangqi_m2_images.py --suite-dir runs/clou
 - `config/cloud`：可提交的空密钥模板；`local*.yaml` 为忽略的私有配置。
 - `tests/test_cloud*.py`：仅模拟接口和离线测试，不需真实 key、不扣用户额度。
 
-其他任务继续通过 `factory.experiments` 的原生加载器、评测器和汇总器执行。通用云端入口可添加已登记家族的 experiment YAML；默认 pilot 仅象棋，不等于已经验证所有服务商能跑所有其他任务。多模态需要视觉支持，DeepSeek 文本账号不能分配图片任务。
+其他任务继续通过 `experiments` 的任务注册、分发和运行模块 的原生加载器、评测器和汇总器执行。通用云端入口可添加已登记家族的 experiment YAML；默认 pilot 仅象棋，不等于已经验证所有服务商能跑所有其他任务。多模态需要视觉支持，DeepSeek 文本账号不能分配图片任务。
 
 ## 8. 必须保留的学术与发布边界
 

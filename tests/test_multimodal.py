@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 
 from minibench.core.multimodal import ImageAttachment, summarize_paired_modes
-from minibench.factory.providers import OpenAICompatibleAgent
+from minibench.factory.providers import OpenAICompatibleClient
 
 
 PNG_STUB = b"\x89PNG\r\n\x1a\nmultimodal-test"
@@ -43,7 +43,7 @@ class ImageAttachmentTests(unittest.TestCase):
 
 class MultimodalPayloadTests(unittest.TestCase):
     def setUp(self):
-        self.agent = OpenAICompatibleAgent(
+        self.agent = OpenAICompatibleClient(
             model="test-model",
             base_url="https://example.com/v1",
             api_key_env="TEST_KEY",

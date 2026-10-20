@@ -13,9 +13,8 @@ from time import perf_counter, sleep
 from typing import Any, Sequence
 import urllib.error
 import urllib.request
-import warnings
 
-from minibench.core.agent import Agent, ChatMessage, CompletionResult, MessagePhase
+from minibench.core.agent import ChatMessage, CompletionResult
 from minibench.core.metrics import empty_token_usage, extract_token_usage
 from minibench.core.token_usage import assess_token_usage
 from minibench.core.multimodal import ImageAttachment
@@ -474,71 +473,6 @@ class OpenAICompatibleClient:
             return
         for key, value in token_usage.items():
             self._token_usage[key] = self._token_usage.get(key, 0) + value
-
-
-class OpenAICompatibleAgent(OpenAICompatibleClient, Agent):
-    """Deprecated combined transport/agent kept for Python API compatibility."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        warnings.warn(
-            "OpenAICompatibleAgent is deprecated; compose OpenAICompatibleClient "
-            "with PassthroughAgent or another agent architecture instead",
-            FutureWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
-
-    def generate(self, prompt: str, task: Any) -> str:
-        return self.complete(prompt)
-
-    def generate_multimodal(
-        self,
-        prompt: str,
-        task: Any,
-        *,
-        images: Sequence[ImageAttachment],
-    ) -> str:
-        return self.complete(prompt, images=images)
-
-    def generate_messages(
-        self,
-        messages: Sequence[ChatMessage],
-        task: Any,
-        *,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        json_mode: bool | None = None,
-        images: Sequence[ImageAttachment] = (),
-    ) -> str:
-        return self.complete_messages(
-            messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            json_mode=json_mode,
-            images=images,
-        )
-
-    def generate_messages_for_phase(
-        self,
-        messages: Sequence[ChatMessage],
-        task: Any,
-        *,
-        phase: MessagePhase,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        json_mode: bool | None = None,
-    ) -> str:
-        if phase not in ("intermediate", "final"):
-            raise ValueError(
-                f"Unsupported message phase {phase!r}; expected 'intermediate' or 'final'"
-            )
-        return self.generate_messages(
-            messages,
-            task,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            json_mode=json_mode,
-        )
 
 
 def _content_part_to_text(part: object) -> str:
