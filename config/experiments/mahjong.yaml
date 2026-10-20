@@ -23,4 +23,4 @@ provider:
 
 run:
   output_dir: runs
-  run_name: mahjong-cot-new-qwen
+  run_name: mahjong-cot-new-qwen-100-per-type

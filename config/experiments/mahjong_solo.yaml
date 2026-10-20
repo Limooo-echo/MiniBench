@@ -29,4 +29,4 @@ evaluation:
 
 run:
   output_dir: runs
-  run_name: mahjong-solo-cot-full-hand-2048-new1
+  run_name: mahjong-solo-cot-full-hand-2048-new1-100

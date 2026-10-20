@@ -29,4 +29,4 @@ evaluation:
     - "red_dragon_wildcard+cyclic_one_tile_substitution"
 run:
   output_dir: runs
-  run_name: new-rule4
+  run_name: new-rule4-100

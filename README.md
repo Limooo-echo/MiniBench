@@ -410,7 +410,9 @@ main 的新 ToT 是 beam/BFS 搜索，使用 `prompt_version: v2` 及 `max_depth
 | `mahjong_solo.yaml` | 标准规则下的 full-hand 单人摸弃决策 |
 | `mahjong_rule_variants.yaml` | 全手牌规则适应，默认扩展全部规则通道 |
 | `mahjong_history_only.yaml` | 标准规则下的在线多轮 history-only 决策 |
-| `mahjong_multimodal.yaml` | 静态 90 题的一一对应图片版本，仅运行 image，默认 Qwen |
+| `mahjong_multimodal.yaml` | 静态 600 题的一一对应图片版本，仅运行 image，默认 Qwen |
+
+当前静态麻将六个子题组各 100 道（共 600 道），多模态逐题镜像。Solo、history-only 和改规则共用 100 道摸打源题，每个改规则通道各 100 道。原有静态 90 道、摸打 15 道的题目和 ID 均保留；新增题使用现有生成器，随机种子为 `20261011`。摸打仍使用 50 轮上限，初始向听不超过 2、初始进张至少 12、参考策略 18 轮内胡牌，并要求 10 次并列弃牌随机模拟的胡牌率至少 0.8。题目筛选、提示词和评分逻辑不变。
 
 ```bash
 minibench run-config config/experiments/mahjong.yaml
