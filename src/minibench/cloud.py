@@ -257,7 +257,20 @@ def prepare(config_path: Path, suite: Path, *, pilot_count: int | None = None):
         tree_directory = config.get("evaluation",{}).get("solution_tree_dir")
         if family in {"xiangqi-history","xiangqi-rule-variants"} and tree_directory:
             from minibench.datasets.xiangqi.solution_tree import TreeSession
+            from minibench.datasets.xiangqi.tree_certificate import (
+                REPORT_FILENAME, require_saved_tree_certificate,
+            )
             directory = Path(tree_directory)
+            certified = [asdict(task) if is_dataclass(task) else task for task in tasks]
+            certified = [record for record in certified if record.get("shortest_proof")]
+            if certified:
+                proof_path = source.resolve().parent.parent / REPORT_FILENAME
+                require_saved_tree_certificate(certified, data_path=source, tree_dir=directory,
+                                               report_path=proof_path)
+                independent_file = freeze_file(proof_path, suite)
+                if independent_file["path"] not in file_paths:
+                    plan["files"].append(independent_file)
+                    file_paths.add(independent_file["path"])
             for task in tasks:
                 raw = asdict(task) if is_dataclass(task) else task
                 TreeSession(raw,directory)  # Reject unknown shortest before any paid request.
@@ -651,6 +664,11 @@ def verify_shortest_trees(suite, plan):
         if not trees and any(r.get('shortest_proof') for r in records):
             raise ValueError('Certified shortest-mate tasks require solution_tree_dir')
         if trees:
+            from minibench.datasets.xiangqi.tree_certificate import require_saved_tree_certificate
+            certified = [record for record in records if record.get("shortest_proof")]
+            if certified:
+                require_saved_tree_certificate(certified, data_path=suite/exp['source'],
+                                               tree_dir=suite/trees)
             for record in records:
                 TreeSession(record,suite/trees)
 

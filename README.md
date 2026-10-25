@@ -295,7 +295,8 @@ FEN 数据。旧吃将题、残局生存、通用对局、Gym action-index 接�
 | `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 与D3同局面的中文图片组；一步将杀、合法率、识图准确率 |
 
 D3/M2用精确棋规判定将死，Pikafish提供独立诊断。H2/C2树内使用认证策略，
-合法树外着分别由Pikafish和规则感知depth-3对手继续应手；总上限是认证最短步数+2次攻方落子。
+合法树外着分别由Pikafish和规则感知depth-3对手继续应手；总上限是认证最短步数n次攻方落子，
+从开局累计且偏离不重置，每次落子后检查是否将死。达到n步仍未将死即失败，不再延长两步。
 C2的CPE loss不能与H2的Pikafish CP loss混为同一单位。最短证明与树的边界见
 [象棋新版协议](docs/xiangqi-shortest-protocol.md)。
 参考引擎与 NNUE 指纹在 `data/xiangqi/provenance.json`。云端入口采用

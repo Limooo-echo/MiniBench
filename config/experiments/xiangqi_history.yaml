@@ -1,5 +1,5 @@
 task:
-  prompt_version: xiangqi-shortest-tree-v1
+  prompt_version: xiangqi-shortest-tree-strict-n-v2
   family: xiangqi-history
   path: data/xiangqi/history/tasks.jsonl
   limit: 100

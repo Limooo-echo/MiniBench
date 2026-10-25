@@ -50,21 +50,22 @@ class ShortestTreeTests(unittest.TestCase):
         self.assertFalse(tree["shortest_certified"])
         self.assertIsNone(tree["forced_mate"])
 
-    def test_stronger_defender_allows_exact_bound_and_plus_two(self):
+    def test_stronger_defender_allows_only_original_shortest_budget(self):
         record=self.record()
         tree=build_tree(record,max_attacker_moves=2,seconds=10)
         with tempfile.TemporaryDirectory() as directory:
             atomic_write_json(Path(directory)/"fixture.json",tree)
             session=TreeSession(record,directory)
-            self.assertEqual(session.max_plies,7)
+            self.assertEqual(session.max_plies,3)
             self.assertTrue(session.scores(True,3)["mate_within_shortest_steps"])
             later=session.scores(True,7)
             self.assertFalse(later["mate_within_shortest_steps"])
-            self.assertTrue(later["mate_within_shortest_plus_two_steps"])
-            self.assertFalse(session.scores(True,9)["mate_within_shortest_plus_two_steps"])
+            self.assertNotIn("mate_within_shortest_plus_two_steps",later)
+            self.assertFalse(session.scores(True,5)["mate_within_shortest_steps"])
+            self.assertEqual(later["solution_tree_metadata"]["fallback_max_attacker_moves"],2)
             self.assertIsNone(session.scores(None,None)["mate_within_shortest_steps"])
 
-    def test_stale_tree_cannot_grant_more_than_shortest_plus_two(self):
+    def test_stale_tree_cannot_grant_more_than_shortest(self):
         record=self.record()
         tree=build_tree(record,max_attacker_moves=2,seconds=10)
         tree["max_attacker_moves"]=5
@@ -129,7 +130,7 @@ class ShortestTreeTests(unittest.TestCase):
     def test_unmetered_or_missing_shortest_not_false_success(self):
         session=TreeSession(self.record(),None)
         self.assertIsNone(session.scores(True,3)["mate_within_shortest_steps"])
-        self.assertIsNone(session.scores(True,3)["mate_within_shortest_plus_two_steps"])
+        self.assertNotIn("mate_within_shortest_plus_two_steps",session.scores(True,3))
         summary=summarize_tree_metrics([{"status":"error","mate_within_shortest_steps":True}])
         self.assertIsNone(summary["mate_within_shortest_rate"])
 
@@ -248,7 +249,7 @@ class SchedulerTests(unittest.TestCase):
 
 
 class TreeGameTests(unittest.TestCase):
-    def test_h2_and_c2_stop_after_exactly_shortest_plus_two_attacker_moves(self):
+    def test_h2_and_c2_stop_after_exactly_shortest_total_attacker_moves(self):
         from types import SimpleNamespace
         from minibench.datasets.xiangqi import history,rule_variants
         from minibench.datasets.xiangqi.dataset import XiangqiTask
@@ -271,36 +272,43 @@ class TreeGameTests(unittest.TestCase):
         def cp(engine,board,side,**kwargs):
             return board.legal_moves(side)[0].to_uci(),0
         with tempfile.TemporaryDirectory() as directory:
-            atomic_write_json(Path(directory)/"fixture.json",tree)
-            def session(*args):
-                value=TreeSession(record,directory)
-                value.off_tree=True
-                return value
-            task=XiangqiTask(id="fixture",fen=TWO,board=board,side_to_move="ally",agent_side="ally",
-                max_steps=99,tags=(),schema_version=2,family="xiangqi-history",agent_color="red",
-                difficulty="short",oracle=record["oracle"])
-            with no_engine(history),patch.object(history,"VariantBoard",NeverMateBoard),\
-                    patch.object(history,"TreeSession",side_effect=session),\
-                    patch.object(history,"_pikafish_analysis",side_effect=cp):
-                h=history.evaluate_history_tasks([task],FixedAgent('{"move":"a0a1"}'),
-                                                 history_mode="full-state",solution_tree_dir=directory)[0]
-            ctask={**record,"board":board,"rules":[],"ruleset":"standard","agent_color":"red",
-                   "side_to_move":"ally","max_plies":99,"difficulty":"short"}
-            with patch.object(rule_variants,"VariantBoard",NeverMateBoard),\
-                    patch.object(rule_variants,"TreeSession",side_effect=session),\
-                    patch.object(rule_variants,"score_moves_cpe",side_effect=analysis):
-                c=rule_variants.evaluate_rule_variant_task(ctask,FixedAgent('{"move":"a0a1"}'),
-                                                          solution_tree_dir=directory)
-            for result in (h,c):
-                self.assertEqual(result.status,"ok",result)
-                self.assertEqual(len(result.steps),7)
-                self.assertEqual(sum(s["actor"]=="agent" for s in result.steps),4)
-                self.assertFalse(result.success)
-                self.assertFalse(result.mate_within_shortest_steps)
-                self.assertFalse(result.mate_within_shortest_plus_two_steps)
-                self.assertIn("max_steps_reached",result.reasons)
+            for departure_ply in (0, 2):
+                atomic_write_json(Path(directory)/"fixture.json",tree)
+                def session(*args):
+                    value=TreeSession(record,directory)
+                    def advance(state, side, ply, uci):
+                        if ply == departure_ply:
+                            value.off_tree=True
+                            value.off_tree_ply=ply+1
+                    value.advance=advance
+                    value.opponent_move=lambda *args: None
+                    return value
+                task=XiangqiTask(id="fixture",fen=TWO,board=board,side_to_move="ally",agent_side="ally",
+                    max_steps=99,tags=(),schema_version=2,family="xiangqi-history",agent_color="red",
+                    difficulty="short",oracle=record["oracle"])
+                with no_engine(history),patch.object(history,"VariantBoard",NeverMateBoard),\
+                        patch.object(history,"TreeSession",side_effect=session),\
+                        patch.object(history,"_pikafish_analysis",side_effect=cp):
+                    h=history.evaluate_history_tasks([task],FixedAgent('{"move":"a0a1"}'),
+                                                     history_mode="full-state",solution_tree_dir=directory)[0]
+                ctask={**record,"board":board,"rules":[],"ruleset":"standard","agent_color":"red",
+                       "side_to_move":"ally","max_plies":99,"difficulty":"short"}
+                with patch.object(rule_variants,"VariantBoard",NeverMateBoard),\
+                        patch.object(rule_variants,"TreeSession",side_effect=session),\
+                        patch.object(rule_variants,"score_moves_cpe",side_effect=analysis):
+                    c=rule_variants.evaluate_rule_variant_task(ctask,FixedAgent('{"move":"a0a1"}'),
+                                                              solution_tree_dir=directory)
+                for result in (h,c):
+                    self.assertEqual(result.status,"ok",result)
+                    self.assertEqual(len(result.steps),3)
+                    self.assertEqual(sum(s["actor"]=="agent" for s in result.steps),2)
+                    self.assertFalse(result.success)
+                    self.assertFalse(result.mate_within_shortest_steps)
+                    self.assertNotIn("mate_within_shortest_plus_two_steps",vars(result))
+                    self.assertIn("max_steps_reached",result.reasons)
+                    self.assertEqual(result.solution_tree_metadata["first_off_tree_ply"],departure_ply+1)
 
-    def test_h2_and_c2_actually_play_two_move_solution_and_score_both_windows(self):
+    def test_h2_and_c2_actually_play_two_move_solution_and_score_shortest_window(self):
         from minibench.datasets.xiangqi import history,rule_variants
         from minibench.datasets.xiangqi.dataset import XiangqiTask
         from minibench.datasets.xiangqi.schema import fen_to_board
@@ -321,7 +329,7 @@ class TreeGameTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             atomic_write_json(Path(directory)/"fixture.json",tree)
             task=XiangqiTask(id="fixture",fen=TWO,board=board,side_to_move="ally",agent_side="ally",
-                max_steps=7,tags=(),schema_version=2,family="xiangqi-history",agent_color="red",
+                max_steps=3,tags=(),schema_version=2,family="xiangqi-history",agent_color="red",
                 difficulty="short",oracle=record["oracle"])
             agent=SequenceAgent()
             with no_engine(history):
@@ -329,19 +337,89 @@ class TreeGameTests(unittest.TestCase):
                                                  solution_tree_dir=directory)[0]
             self.assertEqual(h.status,"ok",h)
             self.assertTrue(h.mate_within_shortest_steps)
-            self.assertTrue(h.mate_within_shortest_plus_two_steps)
             self.assertEqual(h.checkmate_ply,3)
             self.assertIsNone(h.avg_cp_loss)
             self.assertTrue(any("certified shortest forced mate in 2" in p for p in agent.messages))
             ctask={**record,"board":board,"rules":[],"ruleset":"standard","agent_color":"red",
-                   "side_to_move":"ally","max_plies":7,"difficulty":"short"}
+                   "side_to_move":"ally","max_plies":3,"difficulty":"short"}
             c=rule_variants.evaluate_rule_variant_task(ctask,SequenceAgent(),solution_tree_dir=directory)
             self.assertEqual(c.status,"ok",c)
             self.assertTrue(c.mate_within_shortest_steps)
-            self.assertTrue(c.mate_within_shortest_plus_two_steps)
             self.assertEqual(c.checkmate_ply,3)
             self.assertIsNotNone(c.avg_variant_loss)
             self.assertEqual([s["uci"] for s in c.steps],[first,reply,second])
+
+
+    def test_real_off_tree_move_can_still_checkmate_on_last_allowed_move(self):
+        from minibench.datasets.xiangqi import history, rule_variants
+        from minibench.datasets.xiangqi.dataset import XiangqiTask
+        from minibench.datasets.xiangqi.schema import fen_to_board
+        from tests.test_xiangqi_runtime_errors import FixedAgent, no_engine
+        from types import SimpleNamespace
+        board, _ = fen_to_board(TWO)
+        record = {"id": "fixture", "fen": TWO, "oracle": {"mate_in_plies": 3}}
+        tree = build_tree(record, max_attacker_moves=2, seconds=10)
+        root = tree["nodes"][tree["root"]]
+        first = "c7d5"
+        defence = tree["nodes"][root["edges"][first]]
+        reply = min(defence["edges"])
+        last = min(tree["nodes"][defence["edges"][reply]]["edges"])
+
+        class SequenceAgent(FixedAgent):
+            def generate(self, prompt, task):
+                self.messages.append(prompt)
+                self.calls += 1
+                return json.dumps({"move": first if self.calls == 1 else last})
+
+        # Simulate a missing book branch without changing the game or legality.
+        def missing_branch_session(*args):
+            session = TreeSession(record, directory)
+            advance = session.advance
+            def book_advance(board, side, ply, uci):
+                if ply == 0:
+                    session.off_tree = True
+                    session.off_tree_ply = 1
+                else:
+                    advance(board, side, ply, uci)
+            session.advance = book_advance
+            return session
+
+        def cp(engine, state, side, **kwargs):
+            moves = state.legal_moves(side)
+            preferred = next((m.to_uci() for m in moves if m.to_uci() == reply), None)
+            return preferred or moves[0].to_uci(), 0.0
+
+        def cpe(state, side, **kwargs):
+            return [SimpleNamespace(move=m, value=0.0) for m in
+                    sorted(state.legal_moves(side), key=lambda m: (m.to_uci() != reply, m.to_uci()))]
+
+        with tempfile.TemporaryDirectory() as directory:
+            atomic_write_json(Path(directory) / "fixture.json", tree)
+            task = XiangqiTask(id="fixture", fen=TWO, board=board, side_to_move="ally",
+                agent_side="ally", max_steps=99, tags=(), schema_version=2,
+                family="xiangqi-history", agent_color="red", difficulty="short",
+                oracle=record["oracle"])
+            with no_engine(history), patch.object(history, "TreeSession", side_effect=missing_branch_session), \
+                    patch.object(history, "_pikafish_analysis", side_effect=cp):
+                h = history.evaluate_history_tasks([task], SequenceAgent(), history_mode="full-state",
+                                                  solution_tree_dir=directory)[0]
+            ctask = {**record, "board": board, "rules": [], "ruleset": "standard",
+                     "agent_color": "red", "side_to_move": "ally", "max_plies": 99,
+                     "difficulty": "short"}
+            with patch.object(rule_variants, "TreeSession", side_effect=missing_branch_session), \
+                    patch.object(rule_variants, "score_moves_cpe", side_effect=cpe):
+                c = rule_variants.evaluate_rule_variant_task(ctask, SequenceAgent(),
+                                                            solution_tree_dir=directory)
+            for result, fallback in ((h, "pikafish-fallback"), (c, "depth3-fallback")):
+                self.assertEqual(result.status, "ok", result)
+                self.assertTrue(result.success)
+                self.assertTrue(result.mate_within_shortest_steps)
+                self.assertEqual(result.checkmate_ply, 3)
+                self.assertEqual([s["uci"] for s in result.steps], [first, reply, last])
+                self.assertEqual(result.steps[1]["opponent_source"], fallback)
+                self.assertTrue(result.solution_tree_metadata["off_tree"])
+                self.assertEqual(result.solution_tree_metadata["first_off_tree_ply"], 1)
+                self.assertEqual(result.solution_tree_metadata["fallback_max_attacker_moves"], 2)
 
 
 class PairedOutputTests(unittest.TestCase):

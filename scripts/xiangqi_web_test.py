@@ -249,7 +249,6 @@ def _print_item_result(key: str, record: dict[str, Any]) -> None:
     if key == "h2":
         fields.extend([
             f"mate_shortest={_display(record.get('mate_within_shortest_steps'))}",
-            f"mate_shortest_plus2={_display(record.get('mate_within_shortest_plus_two_steps'))}",
             f"legal={_display(legal, percent=True)}",
             f"cp_loss={_display(record.get('avg_cp_loss'))}",
         ])
@@ -261,7 +260,6 @@ def _print_item_result(key: str, record: dict[str, Any]) -> None:
     elif key == "c2":
         fields.extend([
             f"mate_shortest={_display(record.get('mate_within_shortest_steps'))}",
-            f"mate_shortest_plus2={_display(record.get('mate_within_shortest_plus_two_steps'))}",
             f"legal={_display(legal, percent=True)}",
             f"variant_loss={_display(record.get('avg_variant_loss'))}",
         ])
@@ -288,7 +286,6 @@ def _print_family_summary(key: str, summary: dict[str, Any]) -> None:
         print(
             "SUMMARY H2 "
             f"mate_shortest={_display(summary.get('mate_within_shortest_rate'), percent=True)} "
-            f"mate_shortest_plus2={_display(summary.get('mate_within_shortest_plus_two_rate'), percent=True)} "
             f"legal={_display(summary.get('legality_rate'), percent=True)} "
             f"cp_loss={_display(summary.get('avg_cp_loss'))}",
             flush=True,
@@ -297,7 +294,6 @@ def _print_family_summary(key: str, summary: dict[str, Any]) -> None:
         print(
             "SUMMARY C2 "
             f"mate_shortest={_display(summary.get('mate_within_shortest_rate'), percent=True)} "
-            f"mate_shortest_plus2={_display(summary.get('mate_within_shortest_plus_two_rate'), percent=True)} "
             f"legal={_display(summary.get('legality_rate'), percent=True)} "
             f"variant_loss={_display(summary.get('avg_variant_loss'))}",
             flush=True,

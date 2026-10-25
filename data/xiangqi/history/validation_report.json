@@ -1,7 +1,8 @@
 {
   "certified_shortest_count": 100,
   "parent_dataset_sha256": "eda3df0c68447d5f660881f1256194d29bf9d4967916f11d4d6f3062d5e79a3d",
+  "protocol": "certified-shortest-total-attacker-moves-no-extension",
   "selected_count": 100,
-  "selected_dataset_sha256": "1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27",
-  "version": "xiangqi-shortest-paired100-v2"
+  "selected_dataset_sha256": "4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8",
+  "version": "xiangqi-shortest-paired100-strict-n-v3"
 }

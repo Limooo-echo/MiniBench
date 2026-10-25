@@ -1,5 +1,5 @@
 task:
-  prompt_version: xiangqi-shortest-tree-v1
+  prompt_version: xiangqi-shortest-tree-strict-n-v2
   family: xiangqi-rule-variants
   path: data/xiangqi/rule_variants/tasks.jsonl
   limit: 100
@@ -19,7 +19,7 @@ provider:
 evaluation:
   final_move_timeout_seconds: 900
   search_depth: 3
-  horizon_policy: shortest_plus_two_attacker_moves
+  horizon_policy: certified_shortest_attacker_moves
   loss_unit: rule-aware-centipawn-equivalent-not-pikafish
   pricing: null
   solution_tree_dir: data/xiangqi/solution_trees/c2

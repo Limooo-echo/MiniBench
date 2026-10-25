@@ -27,7 +27,7 @@ SOURCE_REVISION = "368a47a947773dd8692c026e286dd19b6277b993"
 SOURCE_LICENSE = "CC-BY-4.0"
 TARGETS = {"short": 80, "medium": 80, "long": 90}
 GENERATOR_VERSION = "h2-pikafish-double-depth-v2"
-H2_EXTENSION_PLIES = 4
+H2_EXTENSION_PLIES = 0
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -217,7 +217,7 @@ def make_record(item: dict, verification: dict, identifier: str) -> dict:
             "validation_runs": verification["runs"], "source_reused": False,
             "interpretation": (
                 "Two engine reference lines end in independently verified checkmate; not a shortest-mate proof. "
-                "The prescribed-horizon metric uses the reference PV length; the primary mate metric permits four additional half-moves as a bounded safety horizon."
+                "The reference PV bounds candidate play without extra turns; published tasks require a separate certified shortest proof and use that shortest total attacker-move bound."
             )}}
     if changed_identity:
         record["replaces_id"] = previous["id"]

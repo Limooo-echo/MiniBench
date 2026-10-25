@@ -128,6 +128,17 @@ def audit_xiangqi_release(manifest_path: str | Path, *, validation_report: str |
                     gate_problems.append(f"submitted_selection_changed:{family}")
         except (OSError, ValueError, KeyError, TypeError):
             gate_problems.append("submitted_selection_manifest_missing_or_invalid")
+    from minibench.datasets.xiangqi.tree_certificate import validate_saved_tree_certificate
+    independent_trees = {}
+    for family, folder in (("xiangqi-history", "h2"), ("xiangqi-rule-variants", "c2")):
+        rows = records_by_family.get(family, [])
+        if rows and all(record.get("shortest_proof") for record in rows):
+            checked = validate_saved_tree_certificate(
+                rows, data_path=repository_root/FAMILY_PATHS[family],
+                tree_dir=manifest_file.parent/"solution_trees"/folder)
+            independent_trees[family] = checked
+            if not checked["valid"]:
+                gate_problems.extend(f"{family}:"+why for why in checked["reasons"])
     runtime_policy_problems = []
     gate: dict[str, Any] = {}
     if gate_path.is_file():
@@ -198,6 +209,7 @@ def audit_xiangqi_release(manifest_path: str | Path, *, validation_report: str |
         "unresolved_external_provenance": unresolved,
         "independent_validation_report": str(gate_path),
         "independent_validation_problems": gate_problems,
+        "independent_tree_verification": independent_trees,
         "runtime_policy_problems": runtime_policy_problems,
         "technical_ready": technical_ready,
         "experiment_ready": experiment_ready,

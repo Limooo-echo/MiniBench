@@ -3,8 +3,9 @@
 Each sampled initial position is evaluated twice: once with the current board
 visible every agent turn and once with only the initial board plus chronological
 UCI move history. The model must generate a legal UCI move itself in both
-conditions; no legal-move candidates are disclosed. Pikafish supplies the
-opponent move and centipawn oracle.
+conditions; no legal-move candidates are disclosed. A certified shortest tree
+supplies opponent replies on-tree; Pikafish supplies fallback replies and the
+centipawn oracle.
 """
 from __future__ import annotations
 
@@ -66,7 +67,6 @@ class HistoryResult:
     termination_reason: str = ""
     protocol_version: str = PROTOCOL_VERSION
     mate_within_shortest_steps: bool | None = None
-    mate_within_shortest_plus_two_steps: bool | None = None
     solution_tree_metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -142,19 +142,20 @@ def _task_objective_hint(task: XiangqiTask) -> str:
             f"This position has a certified shortest forced mate in {n} of YOUR moves. "
             f"Your primary objective is to checkmate within those {n} moves, against "
             "the opponent's strongest legal replies. Do not settle for a longer mating line. "
-            f"If you leave the certified strategy, continue trying within a hard limit of {n+2} "
-            "of YOUR moves, including all moves already played. Stalemate is not checkmate."
+            f"If your play deviates from a known solution, continue trying within the SAME hard total limit of {n} "
+            "of YOUR moves counted from the initial position, including every move already played. "
+            "The move counter never resets and no extra moves are allowed. "
+            "Checkmate is judged after every move. Stalemate is not checkmate."
         )
     reference_plies = (task.oracle or {}).get("mate_in_plies")
     if not isinstance(reference_plies, int) or reference_plies < 1:
         reference_plies = task.max_steps
-    extension = max(0, task.max_steps - reference_plies)
+    limit = min(task.max_steps, reference_plies)
     return (
-        f"Primary target: checkmate the fixed opponent within {reference_plies} "
-        "half-moves total (both sides combined), matching the verified reference "
-        "line length. If that horizon is missed, continue trying to checkmate through "
-        f"the extended limit of {task.max_steps} half-moves (+{extension}). "
-        "Stalemate does not complete this task or either scoring target."
+        f"Target: checkmate the fixed opponent within a hard total limit of {limit} "
+        "half-moves (both sides combined), based on the verified reference line, "
+        "not a certified shortest distance. All moves already played count toward "
+        "this fixed limit; there is no extension. Stalemate is not checkmate."
     )
 
 
@@ -268,6 +269,12 @@ def evaluate_history_tasks(
     final_move_timeout_seconds: float = FINAL_MOVE_TIMEOUT_SECONDS,
 ) -> list[HistoryResult]:
     final_move_timeout_seconds = validate_move_timeout(final_move_timeout_seconds)
+    from .tree_certificate import preflight_tree_records
+    preflight_tree_records([
+        {"id": task.id, "fen": task.fen, "oracle": task.oracle,
+         "max_plies": task.max_steps, "shortest_proof": task.shortest_proof}
+        for task in tasks
+    ], solution_tree_dir)
     if history_mode == "paired":
         return [result for mode in ("full-state", "move-history-only")
                 for result in evaluate_history_tasks(tasks, agent, history_mode=mode,
@@ -318,11 +325,13 @@ def evaluate_history_tasks(
                 initial_board = board_state_text(board.board)
                 messages = None
                 last_agent_uci = None
-                limit = session.max_plies if session.enabled else task.max_steps
+                reference_plies = (task.oracle or {}).get("mate_in_plies")
+                if not isinstance(reference_plies, int) or reference_plies < 1:
+                    reference_plies = task.max_steps
+                limit = (session.max_plies if session.enabled else
+                         2*task.shortest_mate_moves-1 if task.shortest_mate_moves is not None else
+                         min(task.max_steps, reference_plies))
                 for step_index in range(limit):
-                    if session.enabled and step_index >= 2*session.cap-1 and not session.off_tree:
-                        reasons.append("tree_horizon_reached")
-                        break
                     stage = "judge"
                     legal_moves = board.legal_moves(side)
                     if not legal_moves:
@@ -439,6 +448,8 @@ def evaluate_history_tasks(
             reference_mate_plies = (task.oracle or {}).get("mate_in_plies")
             if not isinstance(reference_mate_plies, int) or reference_mate_plies < 1:
                 reference_mate_plies = task.max_steps
+            if session.shortest is not None:
+                reference_mate_plies = 2*session.shortest-1
             strict_success = (None if mate_success is None else bool(
                 mate_success and checkmate_ply is not None and checkmate_ply <= reference_mate_plies
             ))
@@ -456,7 +467,7 @@ def evaluate_history_tasks(
                 normalized_score=None, tags=list(task.tags), reasons=reasons,
                 mate_in_plies=(task.oracle or {}).get("mate_in_plies"), status=status, error=error,
                 diagnostics=diagnostics, metrics=finish_task_metrics(agent, start), termination_reason=reasons[-1],
-                protocol_version="xiangqi-shortest-tree-v1" if session.enabled else PROTOCOL_VERSION,
+                protocol_version=PROTOCOL_VERSION,
                 **session.scores(mate_success, checkmate_ply),
             )
             results.append(result)
@@ -484,7 +495,7 @@ def _paired_history_comparison(results: list[HistoryResult]) -> dict[str, Any]:
             float(getattr(p["full-state"], key)) - float(getattr(p["move-history-only"], key))
             for p in pairs if getattr(p["full-state"], key) is not None
             and getattr(p["move-history-only"], key) is not None)
-            for key in ("mate_within_shortest_steps", "mate_within_shortest_plus_two_steps")},
+            for key in ("mate_within_shortest_steps",)},
         "mate_rate_gap": mean_or_none(
             float(p["full-state"].success) - float(p["move-history-only"].success)
             for p in pairs if p["full-state"].success is not None
@@ -523,7 +534,6 @@ def summarize_history(results: list[HistoryResult]) -> dict[str, Any]:
     return {
         **summary, "unique_tasks": len({r.task_id for r in results}),
         "primary_metric": "mate_within_shortest_rate",
-        "secondary_metric": "mate_within_shortest_plus_two_rate",
         "opponent_policy": "shortest strategy DAG when enabled; Pikafish fallback and CP oracle",
         "cp_loss_unit": "Pikafish centipawns from the agent perspective; mate scores use a distance-aware 100,000 scale",
         "paired_comparison": _paired_history_comparison(results),
@@ -544,13 +554,11 @@ def write_history_run(results, output_dir="runs", run_name=None, *, write_predic
     (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     lines = ["Xiangqi History Evaluation", f"Total: {summary['total']} Missing: {summary['missing']}",
              f"Mate within shortest: {display(summary['mate_within_shortest_rate'], '.1%')}",
-             f"Mate within shortest+2: {display(summary['mate_within_shortest_plus_two_rate'], '.1%')}",
              f"Legality: {display(summary['legality_rate'], '.1%')}",
              f"Average CP loss: {display(summary['avg_cp_loss'])}"]
     for mode, values in summary["by_mode"].items():
         lines.append(
             f"{mode}: mate_shortest={display(values['mate_within_shortest_rate'], '.1%')} "
-            f"shortest_plus2={display(values['mate_within_shortest_plus_two_rate'], '.1%')} "
             f"legal={display(values['legality_rate'], '.1%')} "
             f"cp_loss={display(values['avg_cp_loss'])} missing={values['missing']}"
         )

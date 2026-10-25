@@ -262,7 +262,7 @@ class CloudDeadlineTests(unittest.TestCase):
             self.assertEqual(len(timeouts),1)
             self.assertFalse(timeouts[0]["success"])
             self.assertFalse(timeouts[0]["mate_within_shortest_steps"])
-            self.assertFalse(timeouts[0]["mate_within_shortest_plus_two_steps"])
+            self.assertNotIn("mate_within_shortest_plus_two_steps",timeouts[0])
             self.assertEqual(json.loads((suite/"state.json").read_text())["status"],"completed")
             summary=json.loads((suite/"summary.json").read_text())
             self.assertIsNone(summary["usage"]["total_tokens"])

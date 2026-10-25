@@ -84,9 +84,12 @@ under their own active rules and the rule change must actually apply.
 D3/M2 share all 100 positions and retain the same structural difficulty labels;
 both use `max_plies: 1`. M2 is Chinese-piece-image only; D3 is the text baseline.
 Both return a move and a piece-coordinate transcription, but recognition is
-scored only for M2. For H2/C2, `max_plies` is `2*(n+2)-1`, where `n` is the
-certified shortest number of attacker moves. Report mate within `n` and within
-`n+2` separately, never renew the allowance after leaving a tree. Each complete
+scored only for M2. For H2/C2, `max_plies` is `2*n-1`, where `n` is the
+certified shortest number of attacker moves. The attacker may move at most `n`
+times in total, counted from the initial position, even after leaving the tree.
+Every move is checked for strict checkmate; a non-mating nth attacker move ends
+the episode in failure without an extra reply. There is no extra-move window.
+Each complete
 Agent decision has a 900-second final-move deadline; search-budget exhaustion
 while constructing a certificate is instead unknown and cannot publish a task.
 

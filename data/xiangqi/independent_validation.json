@@ -1,6 +1,615 @@
 {
   "c2_runtime_certificates": {
-    "policy": "complete shortest tree; finite-depth fallback is not a proof",
+    "independent_verification": {
+      "reasons": [],
+      "record_count": 100,
+      "records": {
+        "xiangqi-rule-variants-c2-r2-004-chariot-no-center-2f157981fd": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f36661bdeb6199f6010e2cdcb6b7ceac64f63c4622da98da0d4e5f9f8932fe27",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-004-standard-2f157981fd": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "196f0c37713a3b1d97ba94de80b78e6801c646d6329f2fdd50c271b12c229ea5",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-005-chariot-no-center-862d68410f": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "8c85b6021362bbc22d2f83f3600e38637f6cb692f29c7d4b4535b916ceed09c7",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-005-standard-862d68410f": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "14beb024272a4deb3f74ba0a1336117bfbf7b77524ab08bc0412a3a0bd48b535",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-007-chariot-no-center-2f51805449": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "d316364e179f8041cefdb724de5be01095eec5fcbaa67569dc5f7e0b17883109",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-007-standard-2f51805449": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c89869d2497ea3d9264dfc7ee2565119063d83d7cf32bb049b70e3f91d60d019",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-008-chariot-no-center-f14a83ed55": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "5efcda8a0dae255db3ef872756dc4aacbc6e62a3e75e712e445fbca86644a962",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-008-standard-f14a83ed55": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "2e6203725a916b6fbac37d5a81bd564740073860c2b5fa520233aa28340c2e1e",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-045-horse-no-leg-block-30adfa7f7b": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b417599a0ec9fdcb73fca321b0421fb4701cfa8e2235d14432a4c8a1899c611d",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-045-standard-30adfa7f7b": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b467582980de5c379c622fe862cbfb12c8e832d64e266b5aed9fbf8ed7a131fd",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-058-horse-no-leg-block-a6da6da9db": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "fa5c8f61dc0023960839486ba6960155a21a9d389ef1ce077aa103016cc5f39a",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-058-standard-a6da6da9db": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4d5e610f7d5f8d6450fa2baeb65c0e67df8b2857d182145f5682351839cbbf09",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-060-horse-no-leg-block-db8e48622e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "39ed3abe4dd59a868920596bfc60a959ed4dd99f259dfaf9522bbc7b28ab0ec6",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-060-standard-db8e48622e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "7eab37b122d34773fa467fcd2e2c9a37f10b1617811671121e6dbf62ee067885",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-064-horse-no-leg-block-f74b1a20bc": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "74ebfa95b27f204b5be53f8142bde87da8349211ad474290d4fc1546539f3dd2",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-064-standard-f74b1a20bc": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "77a09ac219b3be3b676e865afd5e1642846295d184d4150c6fff656969d48599",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-066-standard-38184e4292": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "7d3a2e2a6c22f230de30fd7c849f332ae2f343a7c4a5792b61dd52acdf2ebfb3",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-068-standard-6d5377de72": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "3ba5ec58a745313d63d9add35b0b57a7eb47a75312487042eb3978b08cdf284f",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-071-horse-no-leg-block-1f6bbbbf55": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "34be60f20b98a572ff57d0dd61f27b0031d2a71dc31a84aa5a92b4b8fb1a3870",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-071-standard-1f6bbbbf55": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "d42e0b72f135a4f08ac0f8caf67416c94c837d3b315bba5035f871552ec265fa",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-072-horse-no-leg-block-4cc9f8ae22": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "e630d740b567521c05c9311047f89b9e394269ca3d66818e8f97654c5d336cd8",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-072-standard-4cc9f8ae22": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "aa429be065910693f54f00576a8191ef1ce69dba7d7a664453edea36b0a2a59c",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-073-horse-no-leg-block-341810d255": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "6e401d49f9691cbe4def5c2010c848bdd87efe01b442bed675418b9d81f28f89",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-073-standard-341810d255": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "ae2aedc5704100e32432662742e4b1152c86fe4242da2bc36431f9073b154718",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-077-horse-no-leg-block-4205fe52b1": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "1fe186c9c9e037c5b7a3c1ef9c7dba631427f9f98f9662f58fc5420431052445",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-077-standard-4205fe52b1": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c8a0269566ec74383dbacf33e6d37a15a9f1028cc1e57197cdb06b99dafaf973",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-081-horse-no-leg-block-42cb863709": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f6fe4d157a04ab9021e56253926e430a875b5b0171409353e26ff42774ea144c",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-081-standard-42cb863709": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "51fcb04bd8fe5f4d8b9916536c0eb119a695eda36907aea9f427cccc8eee5a25",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-087-soldier-free-retreat-168b80bcfb": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "0cc8979095c098e8c046b147cc6bbe3801be8d2a79793e74a922142df058d42c",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-087-standard-168b80bcfb": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "8741d4620c1aeed202625578dd7785682d5190ca9be3eee129bb8b7a459f5929",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-092-soldier-free-retreat-f99098e971": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "63ffc47c8353169c21b163976fa90c41029153c417956349d4c7be1ecdd34761",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-092-standard-f99098e971": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "6648ea7a0a2cf23ce0cfb1a273587a6aa4a14bd84a602a78f35538aaace4171e",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-097-soldier-free-retreat-0e42e78add": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "584832b8615e9d614d70a568f3ac20d964215601fba94623298903b01418ac8b",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-097-standard-0e42e78add": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "a89163cf827982b6db48e719cd47ce0b8fb1e7869c4ca4252d14255065469587",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-098-soldier-free-retreat-21712ea0c5": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b382b82208ec1c5f40e175861bf2d921b03e8749ed636ac5c01dd1b102b4707d",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-098-standard-21712ea0c5": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4185edc1a31f8e9545d4b280c0483c255f8c6d4b8edf682165c6adb637205dd9",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-099-soldier-free-retreat-e4bd4c1e67": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "dbdbfed3adba6f14225f6c531516da7589af4c0bd070dd63de13ccda221b5340",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-099-standard-e4bd4c1e67": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "a934c49d861d9f1cb1982ff73c23045a0a985535491ddb5fe9a3446e91868e31",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-100-soldier-free-retreat-c28a5c0212": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "3cb07677d9fcab0151d1753d000804ca52bf22d1f12f57e2d19b97475c487e86",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-100-standard-c28a5c0212": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "23f2c051e5801df588e348c66f9357f9645e4ea6b727666f2697be144ab8fe6f",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-108-soldier-free-retreat-ea500a6575": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b910f9787dc99679f1360e4fcd30dbd4df04994cb4e717e0d7b121e39985cb05",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-108-standard-ea500a6575": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "53afc41f1b82d4e142da84b12a49e9ed543d74e4ed33ccce213165d96fdf1e6a",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1081-chariot-no-center-1a3fa727ad": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "9ac2595db5c85241fa52cdaeec2de3579a96afeb8419fb5e351e7d4d7d3fc9c5",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1081-standard-1a3fa727ad": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "12d83697933479a786ffef00f6077881c38d3b6294fe3ba39d336ad41a737169",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1082-chariot-no-center-c8ec8e48a3": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "8df167d5893f50ed556df098610b436730085a1b1bbf9f04fbfb1e19eff9ebfd",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1082-standard-c8ec8e48a3": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "592a585cdb664e8fbf11b8d534f45bac3e94c41ad44424c69f2ff15cb0a6dfc6",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1083-chariot-no-center-9159cec16c": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c6bb05a11034abebdf46e6972d68153e65f544d9a970f4cc166ce6fa13099033",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1083-standard-9159cec16c": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f69b9885602690eadec354f611b9d2aca7f7cf9ea6229d1755601416ee442128",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-111-soldier-free-retreat-231d429582": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "2eb1099e89508f8ae30bf97ed7e2e5afabbb330cf09307ff6a1cc7604180200f",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-111-standard-231d429582": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "a87607670fbaf98f6fb82374d8060527ef142560e07ce4036719db9cc30403e1",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-114-soldier-free-retreat-cee384b3e4": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "23220c4699885b961c9e1384cbcbf53c1deba1b2b5eb6492bb7ae9a2344a1fa6",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-114-standard-cee384b3e4": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "23adaa0f535c93f60a6cfab4acf96218e5a4cf8a0ede3f47ad2240454ca139f6",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1251-chariot-no-center-4f0d1d57f4": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "eff13ececa29675528496aa423e0b770d142f32bd1ea39077f502f2e09391e89",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1251-standard-4f0d1d57f4": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "623bffc0762b7734d59249400700cf315e9bd3ae4c2a17fbedaacde1512fe48e",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1270-chariot-no-center-ddf7e81dd7": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "39dd398f76b0bb79bc58e8f4e40729f9221297671f89319af2b4607c16cf1479",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1270-standard-ddf7e81dd7": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "273082e67593c2f3c60518dd712957c174fe123bbcb2f106684d63d4306ffe6f",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1271-chariot-no-center-f9ea9f704e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "e9e4d1e1e4c86ab1088c8424b79e43feeeda37e480a7dafff7ee8528758ba673",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1271-standard-f9ea9f704e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "a260de23cf01597a868c5dbd0e28ce23b7fdbe36f7371d2ff0db14b6833cb64e",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-1398-standard-d6b5fe818f": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "a609e02dd5ca6ccf43e94dc2ee019a6d20afeadf2bfdaec2b10f93bdd014a31c",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-2001-chariot-no-center-e06cefabbe": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "7a2178973f3a39530ba2b4994330c8896576b5f22474b942e9d6080378113dd6",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-2001-standard-e06cefabbe": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "7e9fa6da66603b3b396659e5f451bc6ff1532c7f8c5a5970435eaa478633478e",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-2003-chariot-no-center-4e80966410": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "9499c73406b98a854cf5e381f00e208e567cfae5948a63338a85cfe83715b9d9",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-2003-standard-4e80966410": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "d391f8bc823a5c42cf62fcfd9402be6b19197b4f60744db432e711932a7bf263",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-2008-chariot-no-center-4544351011": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "43180dc0670ba11679ed4140805d976ef7e0675f218b3c652c1899844cbd537f",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-2008-standard-4544351011": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4fdc052b6c85f3a5f0bfdbc5746a545a2c21e889047ed9639605965d6b2a9a5a",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-2009-chariot-no-center-125907fcae": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "6dd39f1e9529b2dd77b739438d0933a537abaa138b4cd31f9312d45d405cb6ac",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-2009-standard-125907fcae": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f712b5d12ff94cb205a8d7823db7c0bbc96ab64a310325819e6762a61d0626a0",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-2010-chariot-no-center-9f4f75cdc8": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "a48558bae73ab0ce6fd04bc7eb1e711a9a59f35462cddd3b8a10c61121e75293",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-2010-standard-9f4f75cdc8": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "e1a5e3c9227097f33510ed71096e484376a7c406bd6d41d15f7c2fd1cbfee705",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3002-standard-dc3d1f4570": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4d4b2c0543e2e0730021dac4f2d071d66bef216280a814903b1b10ea62763875",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3007-soldier-free-retreat-0dd072b4f8": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "165fa78eae15b97adfe4d58f38ebc4890590d60ed7a99024aebbf03bfc9a18d4",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3007-standard-0dd072b4f8": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f6d5545db3b55a485ecbb7be515ca018cd2c6ce001152c87b9ff82fea143f17b",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3009-horse-no-leg-block-274c8e6064": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c4d1b7b3ec902c4abd3cd4a223da5c99f5e40504003baba3244d0df503b104ec",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3009-standard-274c8e6064": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b452faaadc038dfa82ba8d9322399ececa98f224e82ed618e23a733f7c35ff76",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3014-soldier-free-retreat-64b7b41b26": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b94bdfcdea53da78dead9a729a06a871237bb739ea3b0e3230a346c1ceae2608",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3014-standard-64b7b41b26": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f0c0b9ebc16e6fe94785f32f595d8ab4fbe05b253e15053292df6ec4068de4c4",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3020-soldier-free-retreat-e6e2b90d81": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "5f245dd5cbc650b10302bb8d28aed1c71be284227860ffa3a70ddb675511f9e1",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3020-standard-e6e2b90d81": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "8f5bb34a0dd57cea69da4b963d8a8a4028258471028e19db15e7abb0c62f9da5",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3021-horse-no-leg-block-ac19a8d5c4": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "81f8bfed639f878d549de5b113163d5a766622d1308facca0f22ce18903000a9",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3021-standard-ac19a8d5c4": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "ea72ce40a6a8cfe389ff70a988ae7844068dc88d6b287862bacfb8a51dfd6d07",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3022-soldier-free-retreat-eaa5f1ccd9": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "18cd012bfe8018843c2b9a5bbca02cfe06e0f8a28e512429d805d397c7cede0d",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3022-standard-eaa5f1ccd9": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "2b6fa8b1ef43a1838a481cf4d492b10f10aca8e3a53ba1bd55e55c0d83f49124",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3023-soldier-free-retreat-a8bb178dab": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "a8217ccb256bbeccaa3a3b565b689cd958595f68942b4045c370651652514fa6",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3023-standard-a8bb178dab": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "abd99a8646bbb8efe9f27cebfdbd1e5b43fc21eb54d9f8b0f3e1dbe50e33655c",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3024-soldier-free-retreat-8e1b281cbd": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "8fc439022ab7f33a5e41f58c8ad3affadd1460680c31d0a8b7f8fd47f3c9dbdb",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3024-standard-8e1b281cbd": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "5cd61e418d64375db94a4fc3968b6952e84830503cd96ffce29e24afdb4a8f6c",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3025-soldier-free-retreat-a45ab3ee73": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "eb68ba741cb83fea9435ab28d7ce2cadd7bc4b67a2a799c9fa68e05edf10e375",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3025-standard-a45ab3ee73": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "dc7ea4db45e09dfa8fb21e49bf6327d30ed1fa538cf76d716cdd7484dac9516c",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3026-standard-3fc14eff0f": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "22dd1a055a58f5b35c8f3511b3946f3c8e9c1a5e5886ddb9658602c4d3df8288",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3028-horse-no-leg-block-1350551fd0": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f74b07b0f2046d36c8484d51095cca55088d1fdf6a9853f9424bd1e6a6a841e4",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3028-standard-1350551fd0": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "8abd0aab1b34f7f364e0a58792861e6c947b143b72c3ce3811e9410e6f306718",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-3029-standard-fd1d9b2899": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f99a0a4b074ee48a85a4b0033d2e005ac2427342d84dca81124a0952eae34df2",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-793-chariot-no-center-ac190086f9": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "d69de446fccc1996886f42a1b07febd59c96d1fbf12f296a7455d1d93dcf2a33",
+          "valid": true
+        },
+        "xiangqi-rule-variants-c2-r2-793-standard-ac190086f9": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4d4a8cab0dc080653c30c4bb2ce41590e57e521761fbeb7ed0dd9786a6574547",
+          "valid": true
+        },
+        "xiangqi-rule-variants-shortest-09deb7b37179ff24": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "d0d2d71f95f2f5607f6273d0b63f19f82803a4148777e2c5384907aa0f26d674",
+          "valid": true
+        },
+        "xiangqi-rule-variants-shortest-15b88dae57ec00ce": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "1bb3f5121f49cb3ae250a2085664b6ab58a15baab7968bed85b915bad6190e5b",
+          "valid": true
+        },
+        "xiangqi-rule-variants-shortest-669daed832082fe5": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c0e10666fdb42584025c96bd691fd8739af176fb822f4dc858dd414ccbad988b",
+          "valid": true
+        },
+        "xiangqi-rule-variants-shortest-86818c9bcb6845ae": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "589e6f42401b3063e1f427f3aab4504421558f96c64cc7248795358f0a290179",
+          "valid": true
+        },
+        "xiangqi-rule-variants-shortest-94a87eabcc40d612": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "27527141b3c761de7f79e34868a72ef1b65a2f0ee001971a6cac0e7ecb90e91a",
+          "valid": true
+        },
+        "xiangqi-rule-variants-shortest-a598f8eb3397cc72": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4cbe44b8079f32bbf95cc39299f57eac6aed03c156e22d450f5195fc160349d3",
+          "valid": true
+        }
+      },
+      "report_path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/solution_tree_verification.json",
+      "report_sha256": "73ad86431ff906c558bc73300f709ee0a6045e722dc2e803a6b2f86de16b1e5b",
+      "valid": true
+    },
+    "policy": "content-bound independent shortest/branch proof plus positive replay; finite-depth fallback is not a proof",
     "reasons": [],
     "record_count": 100,
     "records": {
@@ -911,7 +1520,7 @@
     "inputs": {
       "history/tasks.jsonl": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/history/tasks.jsonl",
-        "sha256": "1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27"
+        "sha256": "4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8"
       },
       "sources/c2_h2_origins.jsonl": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/sources/c2_h2_origins.jsonl",
@@ -12550,7 +13159,7 @@
     "inputs": {
       "formal/c2.jsonl": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/evaluation_samples/formal/c2.jsonl",
-        "sha256": "ac0e39744b36338143b46fc40eb3082306e4240615aa7241fc235994abb2bff0"
+        "sha256": "460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c"
       },
       "formal/d3.jsonl": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/evaluation_samples/formal/d3.jsonl",
@@ -12558,7 +13167,7 @@
       },
       "formal/h2.jsonl": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/evaluation_samples/formal/h2.jsonl",
-        "sha256": "1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27"
+        "sha256": "4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8"
       },
       "formal/m2.jsonl": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/evaluation_samples/formal/m2.jsonl",
@@ -12566,11 +13175,11 @@
       },
       "manifest.json": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/evaluation_samples/manifest.json",
-        "sha256": "ea65540291f25c4f3d6bc3a7f385d6324111bf3cf09f30d3ad6cdc9b834b8380"
+        "sha256": "d604dc9367ab811dd32abed73267570a83a1ad419201d8b9be671e46ce15f42d"
       },
       "smoke/c2.jsonl": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/evaluation_samples/smoke/c2.jsonl",
-        "sha256": "bd766e2fb9d8542b2add514db6f816f536c8db6614549247c22291a0f293e75c"
+        "sha256": "c710a980a41ee978fb7a1747a233f6963852901f3115ecbe5f32421eb074d7ca"
       },
       "smoke/d3.jsonl": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/evaluation_samples/smoke/d3.jsonl",
@@ -12578,7 +13187,7 @@
       },
       "smoke/h2.jsonl": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/evaluation_samples/smoke/h2.jsonl",
-        "sha256": "3b0e7d3e5b0d2fdc3c50a9b31368a492d4686c56a86f5b1885558d5a7a4308a3"
+        "sha256": "ccb4b15a0ead2fd561fcdd783883e0500d77c8f859ef219604ead0fb5d98461c"
       },
       "smoke/m2.jsonl": {
         "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/evaluation_samples/smoke/m2.jsonl",
@@ -12594,7 +13203,7 @@
             "reasons": [],
             "record_count": 100,
             "scenario_count": 50,
-            "sha256": "ac0e39744b36338143b46fc40eb3082306e4240615aa7241fc235994abb2bff0",
+            "sha256": "460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c",
             "task_ids": [
               "xiangqi-rule-variants-c2-r2-004-standard-2f157981fd",
               "xiangqi-rule-variants-c2-r2-005-standard-862d68410f",
@@ -12810,7 +13419,7 @@
           "h2": {
             "reasons": [],
             "record_count": 100,
-            "sha256": "1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27",
+            "sha256": "4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8",
             "task_ids": [
               "xiangqi-history-derived-0dbc6714e1f191ad",
               "xiangqi-history-derived-0efac1424e94a2b2",
@@ -13033,7 +13642,7 @@
             "reasons": [],
             "record_count": 6,
             "scenario_count": 3,
-            "sha256": "bd766e2fb9d8542b2add514db6f816f536c8db6614549247c22291a0f293e75c",
+            "sha256": "c710a980a41ee978fb7a1747a233f6963852901f3115ecbe5f32421eb074d7ca",
             "task_ids": [
               "xiangqi-rule-variants-c2-r2-007-chariot-no-center-2f51805449",
               "xiangqi-rule-variants-c2-r2-007-standard-2f51805449",
@@ -13061,7 +13670,7 @@
           "h2": {
             "reasons": [],
             "record_count": 6,
-            "sha256": "3b0e7d3e5b0d2fdc3c50a9b31368a492d4686c56a86f5b1885558d5a7a4308a3",
+            "sha256": "ccb4b15a0ead2fd561fcdd783883e0500d77c8f859ef219604ead0fb5d98461c",
             "task_ids": [
               "xiangqi-history-derived-55a363efc11237bb",
               "xiangqi-history-r1-revised-0008-69dbfe9cf3",
@@ -13096,7 +13705,616 @@
   "full": true,
   "gate_version": "xiangqi-release-gate-v1",
   "h2_shortest_certificates": {
-    "policy": "complete shortest tree; finite-depth fallback is not a proof",
+    "independent_verification": {
+      "reasons": [],
+      "record_count": 100,
+      "records": {
+        "xiangqi-history-derived-0dbc6714e1f191ad": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "df34e63143b716f71dd83bc718785e46e0cccd42570db56753196f0570211e05",
+          "valid": true
+        },
+        "xiangqi-history-derived-0efac1424e94a2b2": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "bd1a0dffafa81f51caef245a327b0db31d561bde667a1b35d860edac9c8a76da",
+          "valid": true
+        },
+        "xiangqi-history-derived-11ae19700dcbb616": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4fa79127ee73ccb7daea5b759f1be63215ef621bd3eb07533f2093f3bbb6cfcb",
+          "valid": true
+        },
+        "xiangqi-history-derived-2685ea91b417919d": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "bbe5075a286dc43cbb24079ac0f15037a59bfad25e94225bb533491c58266c29",
+          "valid": true
+        },
+        "xiangqi-history-derived-2fbb746532daabbb": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "d1236508d25b6820e9c79b8df0ca8e0a3cf5de0dbdf24837137c9ba4844bbf86",
+          "valid": true
+        },
+        "xiangqi-history-derived-379592afdd5ace0c": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c0dd000cfff0dd4024b5e26242b3bb082646e4d141790405716b610ff7d0b820",
+          "valid": true
+        },
+        "xiangqi-history-derived-4dba3febb50517e9": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "e86222e651ed4a3118c9eb796f604022ff2db63cd90cfb5ed0233faaf401c603",
+          "valid": true
+        },
+        "xiangqi-history-derived-55a363efc11237bb": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4f62fb8c700361458e2c6ce3122647370225859ef1945463775db382b62c0480",
+          "valid": true
+        },
+        "xiangqi-history-derived-56d56d946ae0637e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "e3b60f132124e84fa32a91e5ef25d1783b0f20b3aeb68e7c77fbaf517e500f4c",
+          "valid": true
+        },
+        "xiangqi-history-derived-ba865b00fdb48857": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "aebe55fcbe5ca4463661be4015b811ca3f673359a6d3e17262a6f88a01133fe3",
+          "valid": true
+        },
+        "xiangqi-history-derived-cac5f66d701bad80": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b8c6bf5cfa9bb147468139c0734f8978ca7f67573e457c1f99249c30ce98114a",
+          "valid": true
+        },
+        "xiangqi-history-derived-ddf21cf227f6dd89": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b8211438bf5a70bceedbad14b412d353702f97738cd4cccf2becddb390c0166c",
+          "valid": true
+        },
+        "xiangqi-history-derived-ec5a33444b6aa38b": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "fa8918f1e4a62fdb6b83a8e01a919938eb94f576cc8691596ee266a9fb4bcde5",
+          "valid": true
+        },
+        "xiangqi-history-derived-fcc77ab8b501a228": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "baaa62c722892b0555b8f8d2e08da84dad44ead8889e93adeab8bac91c86c60e",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0002-7845eda370": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "6f95ed9cdce46a0078ca2ffeb9b17ba6e6d5dc08bbd5b67c173327fa34f2f80b",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0003-4989825f2a": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "97c0757a7104bc402e7939763be0f4e708ab65494622bf751bd240ab31e8f899",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0006-e3bc8514b9": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f50dcb7a33508f59595a6f903b872dd81c9f9b8cc259a0225d5e4cc43ae999be",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0007-768dd5f39f": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "8baa65a003dbfba7c1a87050e09ab36890ae7476bd79091c9e6e77ae49261bb4",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0008-69dbfe9cf3": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "88ad8aad607dfc841c207a34cd26629b2c1172df985edcf4730c9e0491deae50",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0009-a1b1396533": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "5e4404e40ddeff2eedb6d2fff2c7eb67914f91d7bbb729ea73c0bf14b0b87455",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0010-f196f48a3e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "7c0600a23ea9daf34d23c2b6e09b6d5056c2b047fb87ac32b2359ba96b83b3d8",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0011-a0ce56f374": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "14a150ec8963efdcdd1c356c6fc479013d1708e13da5f44564fe73d624d44e71",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0016-94babdaf85": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "d01e631053a2affb7ad643417d8131aec20ce5294afdd4cbdb273f09a92696b6",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0017-4b8626d98b": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "fc5250df152b75b69e8235f647428c20e696a4012439f5b2f5ddfb9ee6a151ae",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0020-5cdf5157c6": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "0aeee0d4fe4158536c974427b3872c621990ae058216bb2016f193d53d409955",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0021-cac7b2ff98": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "ac27eabc343f64b63aed10813960c9165a82727a415ece1bbe3f15f43a8ec6a4",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0022-d04aef62ac": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "21c794fb894f2b702c987e6d76a3c518cf2687646716c474230aa69f99951973",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0023-65f9864d99": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "11aab72ee51bc0446ec51088af32a43d65c11f4122e265ac8b425ed25cbbc846",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0024-f0c2730ddb": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "01f89c931066bcf8b51e608a6de3225ccdc0c8cbe7de7790a60f7b86b5980cca",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0026-be89b1592a": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "31c4d1cdfce00ec4fff1a4c8bc029f4d385af49ddcc25545fd1a02fbf44b3d8d",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0027-658034f53e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "762e580eee1f5d2fb252465bd51cf9bcf167d892582272b8e6869d705c5ef92b",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0028-27bde14e7f": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4cda5b005dfe8859257c225cc5425dec9e12be7791317900c21f8f92286a0ed7",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0033-e8898053bf": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b21d8999d49e88f49fbdb7198c0119af4d3e1c473e5130ae95d3623e378182a0",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0035-2668ae249e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b2c5ffe746ae72a0193642f672ad1469859a84bee28fe3bcf90f71ddfcc0bf90",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0036-6b87f1498d": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "367ff45183cf386ed08687fc61cd094f62b0493dcb44c149113ae2a3c9330039",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0039-0357f6f077": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "042beac723229c1fc26082869ca06d9bd9dccd4e73695382476bd811bd253b0f",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0041-3abf34acd7": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "3d559563830702f385937b3ebf01445f772cce77fadf402ef7056d4b112d6161",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0043-402e9c876a": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "7c4f0e086e3533d2f185c82d308ba1cf99344fcc60af96247e1373b76c1bebe1",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0044-f8b5bd377a": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "0f94a4866078424248d756212a97b92b1e2af0bfd2964998b8c01b09a91a5d9b",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0046-83a7be9e9a": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "05d0d67dd9e224b41de6c604b01621d0641a5745837db30a7c711ff6c6abf5e6",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0047-e6215ceb6d": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c06fd761f16991e81a7b0b799981cfef0e0cfadd91c115c3c3c763a68ccc32f7",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0050-5621ad89be": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "9cd6b0a89469b65dc5b1a52468d1b26abed3281babb8394bd43cca8056bf1f24",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0051-e9f882a272": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b31f5c27cfb21279d392cdc1b28f656a1f867ac42c8aee380571edb0ca062477",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0052-e67b7b0b00": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "7f20bc57e06767d9f2fb99e1c36a17c433b2c925c4bc7952c19717372c9114a3",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0053-0a5554d483": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "af9ba049c60d47d93fc1e58e116edaf3525bb38cb0c3de49310aef4716456581",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0054-b1ca52e21b": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "5ed12ed9969b9969d7e2f2abaf04471cd1b44ee6c7c7ff750765c4a3de2b1082",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0056-c8c8299f8a": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "2e3dba6f1e8bfd067dcfe7b3388db68e9bc9cdcfdf94ce66a4b06d1393d34d77",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0057-e652bb1309": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "0450f72dd508c6cf46556faa31ca9cf5778639388b89156f083f5c38bdde5c0a",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0059-55e7dc797a": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b9a2412fea9e19530775b7cd624cb95c13cb47d7a8dfa9b1e6f5b9f876c7ac4a",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0060-ee87592fa5": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "6113152530c2eee800fbac2a1cabf8ca8c36c577698804c2441b5e1ea8827e45",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0061-4f7a55a8fe": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c00a354aacbde100f3792ea1d64207f16597d16fc962717043f5f657b16403eb",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0062-8aa767123b": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "acef87d4a0f02d0523c2f8aaddd2f9991f3d7d6a7df5e30a624541d373e9f33c",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0063-9977b7992e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "35c91de16fda97b57ce4827e9fa9ce7756d3615da5a7e7e1322f14b034a2c79b",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0064-cc83b26a5b": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "1c40bebf8f3818f46909ffce90c933bad1c7289d29cb8cb9d3aeec409f1f22ef",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0065-515e3a6242": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "eb327560160e3d64a0a9de30658c5a6060c3569fe9fdf40b70d9a32c37948b13",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0066-e00c382dc6": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "131f25ee9abd6e33f5f5fd0ba8d6e19fe21e3a839a08277bfd2fe7d4d2b9bafe",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0067-69d8fd1400": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "19c5ccd4ff9a43a80a6bf85bd303d0ec5bbcf821118856f53dc90f4e44608034",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0069-353d675c23": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "8fd60d31bb352f1742e2d297612cc3aff31fd6041ff2c56825c772ab4742370c",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0070-077838f41a": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "edf98768b3e83f91034407a6028eabd52e510b2891f40965bb50252da2230c58",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0071-f72487d4e4": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "51386a8b28692076cba3810b7d06302a4add6bca1980ce3396c2980cf218eb37",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0074-25ecd47548": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "788fbe88289db9156382b937f684ee46aebd47f7c7d4750bcfe92e7c5e94b1c5",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0076-36b9eb64b3": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "17c91895a2e221934ad2cc381dd667e718e060d7aafb021019e55c588fceb2aa",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0077-ce45043de5": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "122fa1694b88a4a8615fc1781a59c34131d79ac24a34ff1c667dc4bae7eb0139",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0080-6b986382ab": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "d9992d580285ff11d1366400dd57d10c50ac1001bc75e0713018ba5bdfd3a69e",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0088-ed4dc5f126": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b2bc3b45079cae733f31c4edb33864aa3389c1039adfea11820971a0b31f1917",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0089-5618b7c2e4": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c2211225a0e64641f34c8c6c2462a9e1f97a125cb9ab432ca6a52fe993408c13",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0090-834add4be2": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "02f89f45df6994252720d1731d613f0f9dcaebf7c42b0b32f178ef4db78f8c9e",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0094-96762f87fe": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4befc2311655231001363f46cd429ab1786aefc7f539bb85a69978ca9197e19a",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0096-ff97475760": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "53cc01c29e41db9fec1f7890d01511a87dba00f6dc5e1d78ba7d582a54585e3f",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0103-a37530f096": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "d0d44600d562b772252b22ef9ba531be0931f5ef86cdb83a6d4efc5485990cc5",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0111-c24683f54e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "fb471171b67b7cf2c5427ce115bccb857f144bdf4a859a7a001b0bf547f52d63",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0112-9490433db0": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b861b0aa6953bd8852f0cc34f4a3880112c188d24959f8ea6009de6d297c7e28",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0115-8586aee313": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "3c252cde14a708674957979a1c996b2b2074db4aae440fbc84c9633a411e7b4a",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0116-6cc1dba73f": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "3f8a93d1a5f4a59d918af4c9d7976e225465e0fb1e62c3c876c04896c02515cd",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0123-681c46daca": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "789991e4fd32a00c3ac98674bf776852e0266f98875662430f5accd0392f5a59",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0124-0f8e6b2f45": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "b152e76297db59a1a6585c5285787d90b7a3721cf0eaa1d997cc4a2a0d747e6c",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0125-6fc7a92f38": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "92dc3011096474c87851b91de90c8faacaf4ab310d2bdf9d0235bc7ae3d0fe1d",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0128-554890f23e": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "77091cfe42437e82e0ea616897d440bb94cf8f0879e675b5107dec67fa10b2ad",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0132-fba21c9cb1": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f82689cf5a99b9e83d904755f82c6a7929daf768da088ca051e507097264f06f",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0134-ba419dbf56": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "ead4518ca441234d358e6a48ceee67387257d02fb09fe6a6d12bb16a21e7fedf",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0135-b09d7230a3": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "1c432f62a35656ade395f5cc86fc51314523941c9859a7ee7409062d0af20282",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0137-20ab1374f1": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "df02f43da106851d53b4e7769ac2a06ce7d7b5e8d192a695000776b8b21232ed",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0138-ffa44f1ea6": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f0faad204a06845392f09405d539c49572d4277a7647ed3b0decf200ee718789",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0146-71978b7acb": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "14f94d2edc8b844061ca37831a84a591dfd57c0d124dbbdbcdef0094580b1ef0",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0148-a51097fef1": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "4fb5a70a4e635941475458ecaf25416968b4ef4f27a3965202e77e003afa1595",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0150-2aa29cbc29": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "3cb223547731441af89bb93d78dae569246b09a65456e22307e15c3aac76384f",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0156-0e3e29617d": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "53810fe42b7fa90a0a7f189f7a64f0f097b498beeaee63b26d74e69866bcbf9f",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0158-3ce40246c3": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "06a95364b45fe2696c5b4bf501363a0941d663f43675b7c61b2cf404a7dcad01",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0159-2433d2f6e7": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c8b84d4d5436311f54186e5f1137ca0983f20fb08f7408791b2fb39363995ac4",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-0f5f1e2ccc-d548a2de54": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "468d46149fee7d11d7174180223355e933f3874c035ceef93da3c0e3fb53a9a0",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-206129acec-c4a00bfecb": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "6ce0dff850b4df0a9824040123f95845f01b753c5ecb8ddf0e88ffa7d3221099",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-553e21b041-1081f7dc0c": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "842fe79047133ce629f7914a8cce4dc93227549b6edc534661f44d5f77a23a5d",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-61f21603de-3482352724": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "0dd0134751a7c9cca57d8909b33c48fb7b3bbb18573ce1ac316cb5604f733f76",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-67cb60bbbc-0466a2c579": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "6634fdef7782e0889e56a0e38266465b7d80a2eaf999a3ce885e17b44db96a56",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-7c0062fe03-be7c8d27d1": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "a7566784b47c5f8a8c18237e0b4619eda11d7aee48ffded7ea97f56e80082906",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-86344bf170-864ea8848d": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "73e4c2842ef82adb56a4921c9c082401f219ad5c073d6e581fc8f506210ebd28",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-b3ad8e5609-0637ac40bc": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "c5e7346907e6f6455c2b32c5df065446abad0437cf4f29440fd9c531c87757e7",
+          "valid": true
+        },
+        "xiangqi-history-r1-revised-d299958613-f684beee3a": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "d45598ac618cb848d9f7b538f46e8cb3be1e8fcb9a4d21245856509e9a0beba1",
+          "valid": true
+        },
+        "xiangqi-history-shortest-08f857f4981981ce": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "f0b8aa1423a02788e5fdc045de0aa2054ab711d2bf9fd903d2be1a9a9bc94811",
+          "valid": true
+        },
+        "xiangqi-history-shortest-1753e83cf26f3860": {
+          "reasons": [],
+          "status": "verified",
+          "tree_sha256": "af1250ca1192a59b1db7668de2655ae5d1e9b07640a0b515335eda2ba2f0f5b2",
+          "valid": true
+        }
+      },
+      "report_path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/solution_tree_verification.json",
+      "report_sha256": "73ad86431ff906c558bc73300f709ee0a6045e722dc2e803a6b2f86de16b1e5b",
+      "valid": true
+    },
+    "policy": "content-bound independent shortest/branch proof plus positive replay; finite-depth fallback is not a proof",
     "reasons": [],
     "record_count": 100,
     "records": {
@@ -14017,7 +15235,7 @@
   "inputs": {
     "xiangqi-history": {
       "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/history/tasks.jsonl",
-      "sha256": "1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27"
+      "sha256": "4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8"
     },
     "xiangqi-mate-in-one": {
       "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/mate_in_one/tasks.jsonl",
@@ -14029,7 +15247,7 @@
     },
     "xiangqi-rule-variants": {
       "path": "/home/zyh/MINIBENCH-FINAL/data/xiangqi/rule_variants/tasks.jsonl",
-      "sha256": "ac0e39744b36338143b46fc40eb3082306e4240615aa7241fc235994abb2bff0"
+      "sha256": "460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c"
     }
   },
   "limitations": [
@@ -14046,12 +15264,14 @@
   "validation_version": "xiangqi-independent-validation-v1",
   "validator_hashes": {
     "scripts/extract_ccpd_positions.py": "228eba116796125b6678248f3fbef2f378514e8a14ce511d41e03e47629b3c8f",
-    "scripts/validate_xiangqi_data.py": "c8ecb3d4246fd8887a730695f234d34c925e96db310d64f421064f5c25e79d4c",
+    "scripts/validate_xiangqi_data.py": "6f4ae5924390486db37593d1c7b5266a81ceb09931bdaade3c00fdfef0b12398",
     "scripts/verify_xiangqi_mate.py": "f30a2746f9a00ec2f06c0f0806157103adc35ec75219ebd09ec92039d5501e2f",
     "src/minibench/datasets/xiangqi/reference.py": "5620ba0f5bc31d8777f81afe280d47860f052bfb003f96b4550a064dcf615503",
-    "src/minibench/datasets/xiangqi/rule_variants.py": "58374ef384c0121c0c5ec6ccb5a343a773c2109c61322f456c38682d53fb6fa7",
-    "src/minibench/datasets/xiangqi/schema.py": "bad47660d7bfdc02f151e9ab7aecfdd34333d095c649077416064ae78d9b8ee8",
-    "src/minibench/datasets/xiangqi/solution_tree.py": "0a205345692488451791ea814ea28415c2342e41e5738b7f1ede3d6ecd7535b0",
+    "src/minibench/datasets/xiangqi/rule_variants.py": "80357700d222141713081196e924735488d148424d17e1f99849228c1e9a60a0",
+    "src/minibench/datasets/xiangqi/schema.py": "33cf315a44dd2ec967018ac96d1031a46bd95be523c5ad2a568d474b0a84768b",
+    "src/minibench/datasets/xiangqi/solution_tree.py": "4048db90da6be59556bea7e457db2b891e08e24bdf13fdf1f354be8d48961307",
+    "src/minibench/datasets/xiangqi/tree_certificate.py": "6dd27567eea4eec95618b00217326e10b49ec9c0396e643b06f2d10cc5010bfd",
+    "src/minibench/datasets/xiangqi/tree_verification.py": "b3d94b0ffe53ac580c4e7ee860800dcc16d32c95cd22f315478ed21bde4eab4a",
     "src/minibench/datasets/xiangqi/validation.py": "8c44bfe3cdce9de5422b8c6afb13658ba617aef3d0b7cb5f3fc7056dde76fedf",
     "src/minibench/datasets/xiangqi/variants/board.py": "3550036b584743eb10e9d2e123729ba6a9cdfeceea326c64932e8917b7a77311",
     "src/minibench/datasets/xiangqi/variants/certification.py": "f87d30f5acc069a9b573cc5c9aa1c386dd19165df9697ce0d84778470bf78e46",

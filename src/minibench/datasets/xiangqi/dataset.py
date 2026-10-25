@@ -46,6 +46,7 @@ def xiangqi_task_from_dict(raw: dict[str, Any]) -> XiangqiTask:
         schema_version=record["schema_version"], family=record["family"],
         fen=record["fen"], agent_color=record["agent_color"],
         difficulty=record["difficulty"], oracle=dict(record["oracle"]),
+        shortest_mate_moves=record.get("shortest_mate_moves"),
         shortest_proof=dict(record["shortest_proof"]) if "shortest_proof" in record else None,
     )
 

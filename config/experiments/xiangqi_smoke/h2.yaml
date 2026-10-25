@@ -1,10 +1,10 @@
 task:
-  prompt_version: xiangqi-shortest-tree-v1
+  prompt_version: xiangqi-shortest-tree-strict-n-v2
   family: xiangqi-history
   path: data/xiangqi/history/tasks.jsonl
   selection:
     path: data/xiangqi/evaluation_samples/smoke/h2.jsonl
-    sha256: 3b0e7d3e5b0d2fdc3c50a9b31368a492d4686c56a86f5b1885558d5a7a4308a3
+    sha256: ccb4b15a0ead2fd561fcdd783883e0500d77c8f859ef219604ead0fb5d98461c
 agent:
   name: direct
   max_format_repairs: 0

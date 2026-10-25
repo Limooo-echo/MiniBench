@@ -27,8 +27,8 @@
     "h2": "python scripts/prepare_xiangqi_shortest_release.py --parent <immutable-parent-pool> --out <reviewed-candidate-work-dir> --publish --pikafish-path <engine>",
     "independent_validation": "python scripts/validate_xiangqi_data.py --workers 4 --output data/xiangqi/independent_validation.json",
     "m2": "Derived from the same selected D3 positions with build_xiangqi_m2_from_d3.build; source IDs and same-FEN pairs are recorded in submission_manifest.json.",
-    "submitted_selection": "prepare_xiangqi_shortest_release.publish, seed=42; complete shortest trees required; see submission_manifest.json",
-    "shortest_tree": "python scripts/build_xiangqi_solution_trees.py --data <candidate-jsonl> --out-dir <staging-tree-dir> --max-moves 5 --seconds <budget> --workers <workers>"
+    "shortest_tree": "python scripts/build_xiangqi_solution_trees.py --data <candidate-jsonl> --out-dir <staging-tree-dir> --max-moves 5 --seconds <budget> --workers <workers>",
+    "submitted_selection": "prepare_xiangqi_shortest_release.publish, seed=42; complete shortest trees required; see submission_manifest.json"
   },
   "generator_seed": {
     "c2": "deterministic ordering over the fixed H2 release",
@@ -42,8 +42,9 @@
   },
   "interpretation": {
     "c2": "Same-FEN standard/focus pairs, each certified under its own active rules",
+    "c2_horizon": "2*certified_shortest_attacker_moves-1 half-moves; total attacker moves, no reset or extension",
     "h2": "Certified shortest forced mate; 50 short / 50 medium",
-    "h2_horizon": "2*certified_shortest_attacker_moves+3 half-moves",
+    "h2_horizon": "2*certified_shortest_attacker_moves-1 half-moves; total attacker moves, no reset or extension",
     "history_visual_gaps": "Task gaps are not direct memory evidence; M2 separately scores explicit initial-board transcription.",
     "shortest_oracle": "oracle and shortest_line_uci are certified shortest; h2/c2_analysis preserves historical reference evidence"
   },
@@ -54,7 +55,7 @@
     "migration_policy": "Legacy ID mapping targets only the immutable legacy archive; no old answers are attached to replaced boards.",
     "revision": "xiangqi-corpus-rebuild-2026-08-31"
   },
-  "protocol_version": "xiangqi-shortest-tree-v1",
+  "protocol_version": "xiangqi-shortest-tree-strict-n-v2",
   "release_id": "xiangqi-2026-09-19-r1",
   "schema_version": 2,
   "source_license": {
@@ -76,7 +77,7 @@
   },
   "submission": {
     "manifest": "submission_manifest.json",
-    "sha256": "66b3a386d5c6accc6cf1a91dc5276bd093576a11d86d8bae3eefcefbd407d65d"
+    "sha256": "377345b79aca9b858495800b22f179b43ccf5a32e7ac826976992c0944e6cd43"
   },
   "validation": {
     "publish_on_disagreement": false,

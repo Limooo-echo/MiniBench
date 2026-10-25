@@ -40,7 +40,7 @@ TARGETS = {
     "soldier-free-retreat": 41,
 }
 SEARCH_DEPTH = 3
-HORIZON_EXTENSION = 4
+HORIZON_EXTENSION = 0
 
 
 def _public_rules(ruleset: str) -> list[dict[str, str]]:

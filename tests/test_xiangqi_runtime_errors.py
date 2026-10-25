@@ -179,7 +179,7 @@ class RuntimeErrorsTests(unittest.TestCase):
         self.assertEqual((result.status, result.success), ("ok", False))
         self.assertEqual(result.termination_reason, "stalemate")
 
-    def test_h2_reports_strict_and_extended_mate_windows_separately(self):
+    def test_h2_reference_horizon_is_a_hard_total_cap_without_extension(self):
         class SequenceAgent(FixedAgent):
             def __init__(self):
                 super().__init__()
@@ -198,17 +198,21 @@ class RuntimeErrorsTests(unittest.TestCase):
             board=board_fixture(with_pawn=True), max_steps=5,
             oracle={"mate_in_plies": 3},
         )
+        agent = SequenceAgent()
         with no_engine(h2), patch.object(h2, "_pikafish_analysis", side_effect=analysis):
-            result = h2.evaluate_history_tasks([task], SequenceAgent())[0]
-        self.assertEqual(result.checkmate_ply, 5)
-        self.assertTrue(result.success)
-        self.assertTrue(result.goal_achieved)
-        self.assertTrue(result.extended_mate_success)
+            result = h2.evaluate_history_tasks([task], agent)[0]
+        self.assertEqual(agent.calls, 2)
+        self.assertEqual(len(result.steps), 3)
+        self.assertIsNone(result.checkmate_ply)
+        self.assertFalse(result.success)
+        self.assertFalse(result.goal_achieved)
+        self.assertFalse(result.extended_mate_success)
         self.assertFalse(result.mate_within_prescribed_steps)
+        self.assertEqual(result.termination_reason, "max_steps_reached")
         self.assertEqual(result.reference_mate_plies, 3)
         self.assertIsNone(result.first_move_optimal_rate)
         summary = h2.summarize_history([result])
-        self.assertEqual(summary["mate_rate"], 1.0)
+        self.assertEqual(summary["mate_rate"], 0.0)
         self.assertEqual(summary["mate_within_prescribed_rate"], 0.0)
 
     def test_h2_unavailable_required_opponent_is_missing(self):
@@ -271,8 +275,8 @@ class RuntimeErrorsTests(unittest.TestCase):
         full = h2._full_state_prompt(task, VariantBoard(task.board, []), [])
         history = h2._initial_move_history_messages(task, "initial")[1]["content"]
         for prompt in (full, history):
-            self.assertIn("within 3 half-moves total", prompt)
-            self.assertIn("Stalemate does not complete this task", prompt)
+            self.assertIn("hard total limit of 3 half-moves", prompt)
+            self.assertIn("Stalemate is not checkmate", prompt)
             self.assertNotIn("A forced checkmate exists", prompt)
 
     def test_m2_timeout_excluded_from_paired_denominator(self):

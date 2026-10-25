@@ -121,7 +121,9 @@ def _h2_details(record, reasons):
     if (analysis.get("reference_mate_plies") != plies
             or ("shortest_proof" not in record and record["oracle"].get("mate_in_plies") != plies)):
         reasons.append("reference_mate_plies_mismatch")
-    if record.get("max_plies") != 2*shortest+3:
+    horizon = 2*shortest-1
+    allowed_horizons = ({horizon} if "shortest_proof" in record else {horizon, horizon+4})
+    if record.get("max_plies") not in allowed_horizons:
         reasons.append("h2_horizon_mismatch")
     if analysis.get("source_reused") is not False:
         reasons.append("source_reuse_must_be_false")
@@ -201,8 +203,9 @@ def _c2_details(record, board, side, reasons, skip_search):
     reference_plies = analysis.get("reference_mate_plies")
     if analysis.get("search_depth") != 3:
         reasons.append("c2_requires_registered_depth_three_policy")
-    expected_horizon = (2*record["shortest_mate_moves"]+3
-                        if "shortest_mate_moves" in record else reference_plies+4)
+    expected_horizon = (2*record["shortest_mate_moves"]-1
+                        if "shortest_mate_moves" in record
+                        else reference_plies+analysis.get("max_plies_extension", 4))
     if (not isinstance(reference_plies, int) or reference_plies < 3
             or record.get("max_plies") != expected_horizon):
         reasons.append("c2_invalid_multi_ply_horizon")
@@ -581,12 +584,12 @@ def audit_frozen_samples(data_root: Path, datasets: dict[str, Sequence[dict]], i
         manifest = json.loads(raw)
         if manifest.get("release_id") != RELEASE_ID:
             reasons.append("frozen_release_id_mismatch")
-        if manifest.get("protocol_version") not in {"xiangqi-reasoning-v2", "xiangqi-shortest-tree-v1"}:
+        if manifest.get("protocol_version") not in {"xiangqi-reasoning-v2", "xiangqi-shortest-tree-v1", "xiangqi-shortest-tree-strict-n-v2"}:
             reasons.append("frozen_protocol_version_mismatch")
         if set(manifest.get("samples", {})) != {"smoke", "formal"}:
             reasons.append("frozen_requires_smoke_and_formal_samples")
         sources = {family: {record["id"]: record for record in rows} for family, rows in datasets.items()}
-        formal_new = manifest.get("protocol_version")=="xiangqi-shortest-tree-v1"
+        formal_new = manifest.get("protocol_version") in {"xiangqi-shortest-tree-v1", "xiangqi-shortest-tree-strict-n-v2"}
         for size, seed, count, c2count in (("smoke",20260909,6,3),
                                           ("formal",42,100 if formal_new else 30,50 if formal_new else 10)):
             sample = manifest.get("samples", {}).get(size, {})
@@ -713,6 +716,8 @@ def audit_release(
             ROOT / "src/minibench/datasets/xiangqi/variants/mate_search.py",
             ROOT / "src/minibench/datasets/xiangqi/variants/certification.py",
             ROOT / "src/minibench/datasets/xiangqi/solution_tree.py",
+            ROOT / "src/minibench/datasets/xiangqi/tree_verification.py",
+            ROOT / "src/minibench/datasets/xiangqi/tree_certificate.py",
             ROOT / "scripts/verify_xiangqi_mate.py",
             ROOT / "src/minibench/datasets/xiangqi/rule_variants.py")},
         "limitations": ["PV checks validate the supplied lines, not all possible defences or shortest mate distance.",
@@ -804,6 +809,11 @@ def audit_release(
         result["runtime_policy_certified"] = certificate["valid"]
         if not certificate["valid"]:
             result["limitations"].append("C2 runtime-policy certification failed or is absent: " + "; ".join(certificate["reasons"]))
+            if rows["xiangqi-rule-variants"] and all(
+                record.get("shortest_proof") for _, record in rows["xiangqi-rule-variants"]
+            ):
+                result["reasons"].append("c2_independent_shortest_certification_failed")
+                result["valid"] = result["static_data_ready"] = False
     result["experiment_ready"] = (
         result["static_data_ready"]
         and result["runtime_policy_certified"] is not False
@@ -820,8 +830,15 @@ def _certificate_payload(payload):
 
 def audit_shortest_certificates(data_root,records,folder):
     from minibench.datasets.xiangqi.solution_tree import validate_tree_record
-    report={"valid":False,"reasons":[],"record_count":len(records),"records":{},
-            "policy":"complete shortest tree; finite-depth fallback is not a proof"}
+    from minibench.datasets.xiangqi.tree_certificate import validate_saved_tree_certificate
+    family_folder = "history" if folder == "h2" else "rule_variants"
+    independent = validate_saved_tree_certificate(
+        records, data_path=data_root/family_folder/"tasks.jsonl",
+        tree_dir=data_root/"solution_trees"/folder)
+    report={"valid":False,"reasons":list(independent["reasons"]),
+            "record_count":len(records),"records":{},
+            "independent_verification": independent,
+            "policy":"content-bound independent shortest/branch proof plus positive replay; finite-depth fallback is not a proof"}
     for record in records:
         path=data_root/"solution_trees"/folder/f"{record['id']}.json"
         try:

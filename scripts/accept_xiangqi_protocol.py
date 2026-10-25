@@ -242,9 +242,10 @@ def run_acceptance(output_dir: Path, engine_path: Path, families: list[str], *, 
                     checks["m2.image_only"] = len(results) == 1 and all(r["input_mode"] == "chinese-piece-image" for r in results)
                 if family in {"h2", "c2"}:
                     checks[family + ".certified_shortest_protocol"] = all(
-                        r["protocol_version"] == "xiangqi-shortest-tree-v1"
+                        r["protocol_version"] == "xiangqi-shortest-tree-strict-n-v2"
                         and r["mate_within_shortest_steps"] is True
-                        and r["mate_within_shortest_plus_two_steps"] is True for r in results)
+                        and r["solution_tree_metadata"]["fallback_max_attacker_moves"] == selected[family]["shortest_mate_moves"]
+                        for r in results)
                 bad = FixedAgent()
                 results = run_case(family, "returned_invalid_answer", bad)
                 checks[family + ".invalid_answer"] = all(r["status"] == "invalid" and r["success"] is False for r in results)

@@ -84,7 +84,7 @@ class H2ValidationTests(unittest.TestCase):
         record = build_h2.make_record(item, result, old["id"])
         self.assertTrue(record["id"].startswith("xiangqi-history-r1-revised-0105-"))
         self.assertEqual(record["replaces_id"], old["id"])
-        old["max_plies"] = 7
+        old["max_plies"] = 3
         unchanged = build_h2.make_record(item, result, old["id"])
         self.assertEqual(unchanged["id"], old["id"])
         self.assertNotIn("replaces_id", unchanged)
@@ -98,13 +98,13 @@ class H2ValidationTests(unittest.TestCase):
         result = {"reference_mate_moves": 2, "reference_mate_plies": 3, "band": "short", "runs": runs}
         record = build_h2.make_record({"fen": self.FEN, "source_file": "Dataset/example.pgn", "ply_index": 10},
                                       result, "xiangqi-history-r1-0001")
-        expected_suffix = build_h2.fingerprint_payload({"fen": self.FEN, "goal": "checkmate", "max_plies": 7, "agent_color": "black"})[:10]
+        expected_suffix = build_h2.fingerprint_payload({"fen": self.FEN, "goal": "checkmate", "max_plies": 3, "agent_color": "black"})[:10]
         self.assertEqual(record["id"], "xiangqi-history-r1-0001-" + expected_suffix)
         self.assertEqual(record["release_id"], "xiangqi-2026-09-19-r1")
         retained = build_h2.make_record({"fen": self.FEN, "source_file": "Dataset/example.pgn", "ply_index": 10},
                                        result, "xiangqi-history-0001")
         self.assertEqual(retained["id"], "xiangqi-history-0001")
-        self.assertEqual(record["max_plies"], 7)
+        self.assertEqual(record["max_plies"], 3)
         self.assertEqual(record["source_id"], "ccpd:Dataset/example.pgn")
         self.assertNotIn("shortest_mate_plies", record["h2_analysis"])
         self.assertEqual(len(record["h2_analysis"]["validation_runs"]), 2)

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-24 — independent Xiangqi strategy verification
+
+- Add an independent bounded solver using the production rules backend rather
+  than the tree exporter's reference backend. Recompute shortest distance and
+  every declared optimal attack/defence edge; a positive-line replay alone is
+  not an exhaustive proof.
+- Persist per-task verified/invalid/unknown results and content/code bindings.
+  Budget exhaustion stays unknown; stale or missing evidence blocks selected
+  certified tasks before model calls in standalone and cloud runners.
+- Add deletion, forged-distance, stale-evidence and resumable-CLI regressions.
+
+## Unreleased — strict certified shortest-mate horizon
+
+- H2/C2 allow legal off-tree moves to continue against their existing fallback
+  opponent, but the total attacker budget is the certified shortest `n` moves,
+  counted from the initial position. Check for checkmate after every move; no
+  counter reset or `n+2` extension is allowed.
+- Report and plot only mate within that shortest bound, legality and the existing
+  task-specific loss. Version the new protocol separately from archived runs.
+
 ## 2026-10-20 — integrated release branch
 
 - Merge the latest Mahjong 100-item groups and the current main branch's

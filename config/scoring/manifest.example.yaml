@@ -117,29 +117,29 @@ experiments:
   dimension: R
   dataset:
     path: ../../data/xiangqi/rule_variants/tasks.jsonl
-    sha256: ac0e39744b36338143b46fc40eb3082306e4240615aa7241fc235994abb2bff0
+    sha256: 460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c
   protocol:
-    version: xiangqi-shortest-tree-v1
+    version: xiangqi-shortest-tree-strict-n-v2
     release_id: xiangqi-2026-09-19-r1
     evaluation:
       final_move_timeout_seconds: 900
       search_depth: 3
-      horizon_policy: shortest_plus_two_attacker_moves
+      horizon_policy: certified_shortest_attacker_moves
       loss_unit: rule-aware-centipawn-equivalent-not-pikafish
       pricing: null
       solution_tree_dir: data/xiangqi/solution_trees/c2
   runs: []
   selection:
     path: ../../data/xiangqi/evaluation_samples/formal/c2.jsonl
-    sha256: ac0e39744b36338143b46fc40eb3082306e4240615aa7241fc235994abb2bff0
+    sha256: 460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c
 - id: xiangqi-history
   family: xiangqi_history
   dimension: H
   dataset:
     path: ../../data/xiangqi/history/tasks.jsonl
-    sha256: 1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27
+    sha256: 4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8
   protocol:
-    version: xiangqi-shortest-tree-v1
+    version: xiangqi-shortest-tree-strict-n-v2
     release_id: xiangqi-2026-09-19-r1
     evaluation:
       final_move_timeout_seconds: 900
@@ -153,7 +153,7 @@ experiments:
   runs: []
   selection:
     path: ../../data/xiangqi/evaluation_samples/formal/h2.jsonl
-    sha256: 1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27
+    sha256: 4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8
 - id: xiangqi-visual
   family: xiangqi_multimodal
   dimension: V

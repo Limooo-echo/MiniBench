@@ -1,10 +1,10 @@
 task:
-  prompt_version: xiangqi-shortest-tree-v1
+  prompt_version: xiangqi-shortest-tree-strict-n-v2
   family: xiangqi-rule-variants
   path: data/xiangqi/rule_variants/tasks.jsonl
   selection:
     path: data/xiangqi/evaluation_samples/smoke/c2.jsonl
-    sha256: bd766e2fb9d8542b2add514db6f816f536c8db6614549247c22291a0f293e75c
+    sha256: c710a980a41ee978fb7a1747a233f6963852901f3115ecbe5f32421eb074d7ca
 agent:
   name: direct
   max_format_repairs: 0
@@ -21,7 +21,7 @@ provider:
 evaluation:
   final_move_timeout_seconds: 900
   search_depth: 3
-  horizon_policy: shortest_plus_two_attacker_moves
+  horizon_policy: certified_shortest_attacker_moves
   loss_unit: rule-aware-centipawn-equivalent-not-pikafish
   pricing: null
   solution_tree_dir: data/xiangqi/solution_trees/c2

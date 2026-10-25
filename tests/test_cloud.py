@@ -31,12 +31,18 @@ class ShortestPreflightTests(unittest.TestCase):
                     patch.object(cloud,'completed_jobs',return_value={}),\
                     patch('minibench.datasets.xiangqi.schema.load_records',return_value=[record]),\
                     patch('minibench.datasets.xiangqi.solution_tree.TreeSession',
-                          side_effect=ValueError('invalid complete tree')):
-                with self.assertRaisesRegex(ValueError,'invalid complete tree'):
+                          side_effect=ValueError('invalid complete tree')) as tree_session,\
+                    patch.object(cloud,'execute_job') as paid_job:
+                # Missing independent evidence must block before even the cheap
+                # tree loader, credentials, or any model work is reached.
+                with self.assertRaisesRegex(ValueError,'Independent shortest-tree verification required'):
                     cloud.run(Path(temporary),plan,allow_uncertified_c2=True)
+                tree_session.assert_not_called()
+                paid_job.assert_not_called()
                 exp['configs']['direct']['evaluation']={}
                 with self.assertRaisesRegex(ValueError,'require solution_tree_dir'):
                     cloud.run(Path(temporary),plan,allow_uncertified_c2=True)
+                paid_job.assert_not_called()
 
 
 class PoolCleanupTests(unittest.TestCase):
@@ -258,14 +264,14 @@ class CloudPlanTests(unittest.TestCase):
             self.assertEqual(len(list(charts.glob("*.svg"))), 2)
             self.assertTrue((charts / "comparison.csv").is_file())
 
-    def test_c2_unverified_policy_is_explicitly_blocked_without_paid_calls(self):
+    def test_c2_changed_tree_is_explicitly_blocked_without_paid_calls(self):
         with tempfile.TemporaryDirectory() as tmp:
             suite, plan = self.fixture(Path(tmp))
             config=plan["experiments"]["c2"]["configs"]["direct"]
             directory=suite/config["evaluation"]["solution_tree_dir"]
             certificate=directory/f"{plan['experiments']['c2']['task_ids'][0]}.json"
             certificate.write_text(certificate.read_text()+"\n")
-            with self.assertRaisesRegex(ValueError, "hash"), patch.object(cloud, "execute_job") as execute:
+            with self.assertRaisesRegex(ValueError, "independent_tree_bytes_changed"), patch.object(cloud, "execute_job") as execute:
                 cloud.run(suite, plan)
             execute.assert_not_called()
 

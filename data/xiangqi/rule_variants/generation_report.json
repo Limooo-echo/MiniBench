@@ -5,6 +5,7 @@
     "medium": 50,
     "short": 50
   },
+  "protocol": "certified-shortest-total-attacker-moves-no-extension",
   "record_count": 100,
   "ruleset_counts": {
     "chariot-no-center": 17,
@@ -14,5 +15,5 @@
   },
   "scenario_count": 50,
   "stored_defences": "optimal replies only, unless header says all_legal",
-  "version": "xiangqi-shortest-paired100-v2"
+  "version": "xiangqi-shortest-paired100-strict-n-v3"
 }

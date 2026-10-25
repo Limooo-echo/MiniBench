@@ -329,7 +329,11 @@ def score_record(family: str, dimension: str, record: dict, task: dict | None, *
             result = _mahjong(record, task, dimension)
         elif family in {"mahjong_solo", "mahjong_rule_variants"}:
             result = _mahjong_episode(record, task, family)
-        elif family in {"xiangqi_history","xiangqi_rule_variants"} and record.get("protocol_version")=="xiangqi-shortest-tree-v1":
+        elif (family in {"xiangqi_history", "xiangqi_rule_variants"}
+              and record.get("protocol_version") in {
+                  "xiangqi-shortest-tree-v1",  # Archived n+2 runs retain their original main score.
+                  "xiangqi-shortest-tree-strict-n-v2",
+              }):
             y = _outcome(record,"mate_within_shortest_steps")
             result = _result(record,y,0.0,status="ok" if y is not None else "missing",
                 reasons=[] if y is not None else ["missing_shortest_mate_outcome"],

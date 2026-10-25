@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from hashlib import sha256
 import json
@@ -37,6 +38,7 @@ from minibench.datasets.xiangqi.schema import (
     load_records,
     runtime_dict,
     sample_records,
+    validate_record,
 )
 from minibench.datasets.xiangqi.text_encoding import board_state_text
 from minibench.datasets.xiangqi.variants.board import VariantBoard
@@ -145,6 +147,27 @@ class XiangqiV2DataTests(unittest.TestCase):
         self.assertIn("Exact piece-coordinate list", prompt)
         self.assertNotIn("Candidate moves", prompt)
 
+    def test_h2_rejects_variant_rules_in_a_standard_history_task(self):
+        from minibench.datasets.xiangqi.solution_tree import record_key
+
+        original = self.by_family["xiangqi-history"][0]
+        validate_record(original, expected_family="xiangqi-history")
+        for field, value in (
+            ("ruleset", "horse-no-leg-block"),
+            ("ruleset", "chariot-no-center"),
+            ("ruleset", "soldier-free-retreat"),
+            ("rules", [{"kind": "move-modification", "piece": "horse",
+                        "effect": "ignore-leg-block"}]),
+        ):
+            with self.subTest(field=field):
+                record = deepcopy(original)
+                record[field] = value
+                # Keep identity metadata consistent so an unrelated stale key
+                # cannot hide a missing H2 standard-rules guard.
+                record["shortest_proof"]["record_key"] = record_key(record)
+                with self.assertRaisesRegex(ValueError, "standard|rules"):
+                    validate_record(record, expected_family="xiangqi-history")
+
     def test_h2_random_sample_is_seeded_but_not_legacy_short_long_balanced(self):
         records = self.by_family["xiangqi-history"]
         first = sample_records(records, count=10, seed=42, strategy="random")
@@ -229,6 +252,7 @@ class XiangqiV2DataTests(unittest.TestCase):
         result = evaluate_rule_variant_task(
             task,
             StandardOnlyMoveAgent(),
+            solution_tree_dir=Path(record["shortest_proof"]["tree_path"]).parent,
         )
         self.assertEqual(result.steps[0]["uci"], standard_only_uci)
         self.assertIn("variant_violation", result.reasons)
@@ -346,7 +370,7 @@ class XiangqiV2DataTests(unittest.TestCase):
         for family, config_path in CONFIG_PATHS.items():
             config = load_experiment_config(config_path)
             expected_prompt = ("xiangqi-paired-one-move-v3" if family in {"xiangqi-multimodal","xiangqi-mate-in-one"}
-                               else "xiangqi-shortest-tree-v1")
+                               else "xiangqi-shortest-tree-strict-n-v2")
             self.assertEqual(config["task"]["prompt_version"], expected_prompt)
             self.assertNotIn("sampling", config["task"])
             self.assertNotIn("selection", config["task"])
@@ -360,7 +384,7 @@ class XiangqiV2DataTests(unittest.TestCase):
                 self.assertEqual(config["evaluation"]["search_depth"], 3)
                 self.assertEqual(
                     config["evaluation"]["horizon_policy"],
-                    "shortest_plus_two_attacker_moves",
+                    "certified_shortest_attacker_moves",
                 )
                 self.assertEqual(
                     config["evaluation"]["loss_unit"],

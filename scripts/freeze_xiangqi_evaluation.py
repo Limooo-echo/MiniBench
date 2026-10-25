@@ -13,7 +13,7 @@ from minibench.datasets.xiangqi.schema import load_records, sample_records
 TASKS = {"d3":("mate_in_one","xiangqi-direct"), "c2":("rule_variants","xiangqi-rule"),
          "h2":("history","xiangqi-history"), "m2":("multimodal","xiangqi-visual")}
 RELEASE_ID = "xiangqi-2026-09-19-r1"
-PROTOCOL_VERSION = "xiangqi-shortest-tree-v1"
+PROTOCOL_VERSION = "xiangqi-shortest-tree-strict-n-v2"
 
 def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -63,6 +63,8 @@ def main():
             config["evaluation"].setdefault("pricing",None)
             if key in {"h2","c2"}:
                 config["evaluation"]["solution_tree_dir"]=f"data/xiangqi/solution_trees/{key}"
+            if key == "c2":
+                config["evaluation"]["horizon_policy"]="certified_shortest_attacker_moves"
             config["task"].pop("task_ids",None)
             config["task"].pop("limit",None)
             if size == "formal":

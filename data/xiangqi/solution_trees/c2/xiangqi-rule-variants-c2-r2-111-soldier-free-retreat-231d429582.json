@@ -3,7 +3,7 @@
   "complete": true,
   "deepest_mate_attacker_moves": 5,
   "defender_coverage": "all_optimal",
-  "extension_attacker_moves": 2,
+  "extension_attacker_moves": 0,
   "forced_mate": true,
   "initial_fen": "7RC/3ka4/9/5P3/P5C2/5rB2/4p4/5An2/2n2K3/3A5 w - - 0 1",
   "max_attacker_moves": 5,

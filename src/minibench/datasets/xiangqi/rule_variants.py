@@ -66,19 +66,20 @@ def _objective_hint(task: dict[str, Any]) -> str:
             f"This position has a certified shortest forced mate in {n} of YOUR moves "
             "under the active rule card. Checkmate within that shortest bound; "
             "consider all legal defences, not just locally attractive moves. "
-            f"If your strategy leaves the certified tree, the hard total cap is {n+2} "
-            "of YOUR moves (including moves already played). Stalemate is not checkmate."
+            f"If your play deviates from a known solution, continue within the SAME hard total cap of {n} "
+            "of YOUR moves counted from the initial position, including every move already played. "
+            "The move counter never resets and no extra moves are allowed. "
+            "Checkmate is judged after every move. Stalemate is not checkmate."
         )
     reference = task.get("oracle", {}).get("mate_in_plies")
     if not isinstance(reference, int) or reference < 1:
         reference = int(task["max_plies"])
-    extension = max(0, int(task["max_plies"]) - reference)
+    limit = min(int(task["max_plies"]), reference)
     return (
-        f"Primary target: checkmate within {reference} half-moves total, matching "
-        "the independently replayed reference mating line. If that horizon is "
-        f"missed, continue through the bounded limit of {task['max_plies']} "
-        f"half-moves (+{extension}). Stalemate and capturing the general do not "
-        "count as checkmate."
+        f"Target: checkmate within a hard total limit of {limit} half-moves, "
+        "based on the independently replayed reference line, not a certified shortest distance. "
+        "All moves already played count toward this fixed limit; there is no extension. "
+        "Stalemate and capturing the general do not count as checkmate."
     )
 
 
@@ -146,7 +147,6 @@ class RuleVariantResult:
     termination_reason: str = ""
     protocol_version: str = PROTOCOL_VERSION
     mate_within_shortest_steps: bool | None = None
-    mate_within_shortest_plus_two_steps: bool | None = None
     solution_tree_metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -189,11 +189,14 @@ def evaluate_rule_variant_task(
             task["board"],
             [Rule.from_dict(rule) for rule in task.get("rules", [])],
         )
-        limit = session.max_plies if session.enabled else int(task["max_plies"])
+        reference_plies = task.get("oracle", {}).get("mate_in_plies")
+        if not isinstance(reference_plies, int) or reference_plies < 1:
+            reference_plies = int(task["max_plies"])
+        shortest = task.get("shortest_mate_moves")
+        limit = (session.max_plies if session.enabled else
+                 2*shortest-1 if shortest is not None else
+                 min(int(task["max_plies"]), reference_plies))
         for step_index in range(limit):
-            if session.enabled and step_index >= 2*session.cap-1 and not session.off_tree:
-                reasons.append("tree_horizon_reached")
-                break
             stage = "judge"
             legal_moves = board.legal_moves(side)
             if not legal_moves:
@@ -349,6 +352,8 @@ def evaluate_rule_variant_task(
     reference = task.get("oracle", {}).get("mate_in_plies")
     if not isinstance(reference, int) or reference < 1:
         reference = int(task["max_plies"])
+    if session.shortest is not None:
+        reference = 2*session.shortest-1
     prescribed = (
         None
         if mate_success is None
@@ -380,7 +385,7 @@ def evaluate_rule_variant_task(
         diagnostics=diagnostics,
         metrics=finish_task_metrics(agent, start),
         termination_reason=reasons[-1],
-        protocol_version="xiangqi-shortest-tree-v1" if session.enabled else PROTOCOL_VERSION,
+        protocol_version=PROTOCOL_VERSION,
         **session.scores(mate_success, checkmate_ply),
     )
 
@@ -395,6 +400,8 @@ def evaluate_rule_variant_tasks(
     pricing: dict | None = None,
     final_move_timeout_seconds: float = FINAL_MOVE_TIMEOUT_SECONDS,
 ) -> list[RuleVariantResult]:
+    from .tree_certificate import preflight_tree_records
+    preflight_tree_records(tasks, solution_tree_dir)
     results: list[RuleVariantResult] = []
     for task in tasks:
         result = evaluate_rule_variant_task(task, agent, search_depth=search_depth,
@@ -423,7 +430,7 @@ def _paired_effects(results: list[RuleVariantResult]) -> dict[str, Any]:
                     float(getattr(pair[ruleset], key)) - float(getattr(pair["standard"], key))
                     for pair in pairs if getattr(pair[ruleset], key) is not None
                     and getattr(pair["standard"], key) is not None)
-                    for key in ("mate_within_shortest_steps", "mate_within_shortest_plus_two_steps")},
+                    for key in ("mate_within_shortest_steps",)},
                 "rule_minus_standard_mate_rate": mean_or_none(
                     float(pair[ruleset].success) - float(pair["standard"].success)
                     for pair in pairs
@@ -464,7 +471,6 @@ def summarize_rule_variants(results: list[RuleVariantResult]) -> dict[str, Any]:
         **status_counts(results),
         "unique_scenarios": len({result.scenario_id for result in results}),
         "primary_metric": "mate_within_shortest_rate",
-        "secondary_metric": "mate_within_shortest_plus_two_rate",
         "opponent_policy": "shortest strategy DAG when enabled; deterministic rule-aware depth3 fallback/CPE",
         "variant_loss_unit": LOSS_UNIT,
         **group(valid),
@@ -508,8 +514,6 @@ def write_rule_variants_run(
         "Xiangqi Rule-Variant Multi-Ply Checkmate Evaluation",
         f"Total: {summary['total']} Missing: {summary['missing']}",
         f"Mate within shortest: {display(summary['mate_within_shortest_rate'], '.1%')}",
-        "Mate within shortest+2: "
-        f"{display(summary['mate_within_shortest_plus_two_rate'], '.1%')}",
         f"Legality: {display(summary['legality_rate'], '.1%')}",
         f"Average variant loss: {display(summary['avg_variant_loss'])}",
         f"Loss unit: {LOSS_UNIT}",
@@ -517,7 +521,6 @@ def write_rule_variants_run(
     for ruleset, values in summary["by_ruleset"].items():
         lines.append(
             f"{ruleset}: mate_shortest={display(values['mate_within_shortest_rate'], '.1%')} "
-            f"shortest_plus2={display(values['mate_within_shortest_plus_two_rate'], '.1%')} "
             f"legal={display(values['legality_rate'], '.1%')} "
             f"variant_loss={display(values['avg_variant_loss'])}"
         )

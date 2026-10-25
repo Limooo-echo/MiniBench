@@ -55,7 +55,7 @@ def derived_sources(sources):
             item.update(id="xiangqi-history-derived-"+hashlib.sha256(fen.encode()).hexdigest()[:16],
                         fen=fen, piece_count=sum(bool(p) for row in board for p in row),
                         difficulty="short" if n <= 3 else "medium",
-                        max_plies=len(tail)+4, derived_source_pending_reanalysis=True)
+                        max_plies=len(tail), derived_source_pending_reanalysis=True)
             item["oracle"].update(best_move_uci=tail[0], mate_in_plies=len(tail))
             item["h2_analysis"].update(mate_in_moves=n, reference_mate_plies=len(tail),
                                        principal_variation_uci=tail)
@@ -101,7 +101,7 @@ def tree_sources(sources, directory):
             n=(len(tail)+1)//2
             item.update(id="xiangqi-history-derived-"+hashlib.sha256(fen.encode()).hexdigest()[:16],
                         fen=fen,agent_color=color,piece_count=sum(bool(p) for row in board for p in row),
-                        difficulty="short" if n<=3 else "medium",max_plies=len(tail)+4,
+                        difficulty="short" if n<=3 else "medium",max_plies=len(tail),
                         derived_source_pending_reanalysis=True)
             item["oracle"].update(best_move_uci=tail[0],mate_in_plies=len(tail))
             item["h2_analysis"].update(mate_in_moves=n,reference_mate_plies=len(tail),
@@ -438,12 +438,14 @@ def publish(parent, work, *, seed=42, engine_path=None):
                 row["source"]=deepcopy(origins[row["source_task_id"]]["source"])
             old_id=row["id"]
             n=row["shortest_mate_moves"]
-            new_max=2*n+3
+            new_max=2*n-1
             if row["max_plies"]!=new_max:
                 row["replaces_id"]=old_id
                 row["id"]=row["family"]+"-shortest-"+hashlib.sha256(
                     f"{old_id}|{new_max}".encode()).hexdigest()[:16]
             row["max_plies"]=new_max
+            if family == "c2":
+                row["c2_analysis"]["max_plies_extension"] = 0
             row["tags"]=sorted(set(t for t in row["tags"] if not t.startswith("mate-band:"))
                                |{f"mate-band:{row['difficulty']}",f"certified-shortest:{n}"})
             tree=json.loads((work/(family+"-pool-v2")/f"{old_id}.json").read_text())
@@ -451,6 +453,7 @@ def publish(parent, work, *, seed=42, engine_path=None):
                     or tree["shortest_attacker_moves"]!=n):
                 raise ValueError("Missing shortest certificate")
             tree["task_id"]=row["id"]
+            tree["extension_attacker_moves"]=0
             cursor=tree["root"]
             line=[]
             while tree["nodes"][cursor]["edges"]:
@@ -484,8 +487,8 @@ def publish(parent, work, *, seed=42, engine_path=None):
     manifest=json.loads((destination/"submission_manifest.json").read_text())
     manifest.pop("c2_eligible_certified_scenarios",None)
     manifest.pop("c2_excluded_uncertified_scenarios",None)
-    manifest.update(version="xiangqi-shortest-paired100-v2",seed=seed,
-                    protocol="shortest-with-two-extra-attacker-moves",
+    manifest.update(version="xiangqi-shortest-paired100-strict-n-v3",seed=seed,
+                    protocol="certified-shortest-total-attacker-moves-no-extension",
                     c2_rule_pair_counts={"standard":50,"chariot-no-center":17,
                                          "horse-no-leg-block":17,"soldier-free-retreat":16},
                     c2_derived_source_count=sum(bool(origins[k].get("source",{}).get("derivation"))
@@ -528,7 +531,7 @@ def publish(parent, work, *, seed=42, engine_path=None):
                               for k in used_sources)})
     provenance=json.loads((destination/"provenance.json").read_text())
     provenance.update(corpus_name="MiniBench shortest paired100 release 2026-10-19",
-                      protocol_version="xiangqi-shortest-tree-v1")
+                      protocol_version="xiangqi-shortest-tree-strict-n-v2")
     provenance["generation_command"].update(
         h2="prepare_xiangqi_shortest_release.publish with reviewed complete trees; see submission_manifest.json",
         c2="prepare_xiangqi_shortest_release.publish with reviewed complete paired trees; see submission_manifest.json",
@@ -543,7 +546,7 @@ def publish(parent, work, *, seed=42, engine_path=None):
     provenance["interpretation"].update(
         h2="Certified shortest forced mate; 50 short / 50 medium",
         c2="Same-FEN standard/focus pairs, each certified under its own active rules",
-        h2_horizon="2*certified_shortest_attacker_moves+3 half-moves",
+        h2_horizon="2*certified_shortest_attacker_moves-1 half-moves; total attacker moves, no reset or extension",
         shortest_oracle="oracle and shortest_line_uci are certified shortest; h2/c2_analysis preserves historical reference evidence",
     )
     provenance["intentional_overlap"]["D3_M2"]="100 identical positions; D3 text versus M2 Chinese images; same output schema."

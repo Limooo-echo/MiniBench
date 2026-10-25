@@ -1,6 +1,6 @@
 {
   "release_id": "xiangqi-2026-09-19-r1",
-  "protocol_version": "xiangqi-shortest-tree-v1",
+  "protocol_version": "xiangqi-shortest-tree-strict-n-v2",
   "samples": {
     "smoke": {
       "seed": 20260909,
@@ -21,8 +21,8 @@
         },
         "h2": {
           "path": "data/xiangqi/evaluation_samples/smoke/h2.jsonl",
-          "sha256": "3b0e7d3e5b0d2fdc3c50a9b31368a492d4686c56a86f5b1885558d5a7a4308a3",
-          "dataset_sha256": "1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27",
+          "sha256": "ccb4b15a0ead2fd561fcdd783883e0500d77c8f859ef219604ead0fb5d98461c",
+          "dataset_sha256": "4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8",
           "record_count": 6,
           "task_ids": [
             "xiangqi-history-derived-55a363efc11237bb",
@@ -35,8 +35,8 @@
         },
         "c2": {
           "path": "data/xiangqi/evaluation_samples/smoke/c2.jsonl",
-          "sha256": "bd766e2fb9d8542b2add514db6f816f536c8db6614549247c22291a0f293e75c",
-          "dataset_sha256": "ac0e39744b36338143b46fc40eb3082306e4240615aa7241fc235994abb2bff0",
+          "sha256": "c710a980a41ee978fb7a1747a233f6963852901f3115ecbe5f32421eb074d7ca",
+          "dataset_sha256": "460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c",
           "record_count": 6,
           "task_ids": [
             "xiangqi-rule-variants-c2-r2-007-chariot-no-center-2f51805449",
@@ -176,8 +176,8 @@
         },
         "h2": {
           "path": "data/xiangqi/evaluation_samples/formal/h2.jsonl",
-          "sha256": "1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27",
-          "dataset_sha256": "1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27",
+          "sha256": "4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8",
+          "dataset_sha256": "4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8",
           "record_count": 100,
           "task_ids": [
             "xiangqi-history-derived-0dbc6714e1f191ad",
@@ -284,8 +284,8 @@
         },
         "c2": {
           "path": "data/xiangqi/evaluation_samples/formal/c2.jsonl",
-          "sha256": "ac0e39744b36338143b46fc40eb3082306e4240615aa7241fc235994abb2bff0",
-          "dataset_sha256": "ac0e39744b36338143b46fc40eb3082306e4240615aa7241fc235994abb2bff0",
+          "sha256": "460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c",
+          "dataset_sha256": "460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c",
           "record_count": 100,
           "task_ids": [
             "xiangqi-rule-variants-c2-r2-004-standard-2f157981fd",

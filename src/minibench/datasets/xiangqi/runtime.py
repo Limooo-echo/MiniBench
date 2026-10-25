@@ -10,7 +10,7 @@ from typing import Any, Iterable
 from minibench.core.runtime import StrictJSONObjectError
 from minibench.datasets.xiangqi.deadline import FinalMoveTimeout, validate_move_timeout
 
-PROTOCOL_VERSION = "xiangqi-shortest-tree-v1"
+PROTOCOL_VERSION = "xiangqi-shortest-tree-strict-n-v2"
 UCI_MOVE_PATTERN = re.compile(r"[a-i][0-9][a-i][0-9]", re.IGNORECASE)
 
 _ENGINE_FIELDS = {"pikafish_path", "pikafish_depth", "pikafish_timeout",
@@ -40,8 +40,8 @@ def validate_evaluation_config(family: str, config: dict[str, Any]) -> None:
         depth = config.get("search_depth", 3)
         if isinstance(depth, bool) or not isinstance(depth, int) or depth != 3:
             raise ValueError("C2 requires search_depth=3")
-        expected_horizon = ("shortest_plus_two_attacker_moves" if config.get("solution_tree_dir")
-                            else "reference_mate_plies_plus_4")
+        expected_horizon = ("certified_shortest_attacker_moves" if config.get("solution_tree_dir")
+                            else "reference_mate_plies")
         if config.get("horizon_policy", expected_horizon) != expected_horizon:
             raise ValueError(f"C2 horizon must be {expected_horizon}")
         if config.get("loss_unit", "rule-aware-centipawn-equivalent-not-pikafish") != "rule-aware-centipawn-equivalent-not-pikafish":

@@ -51,7 +51,7 @@ def _header_errors(record, tree):
         errors.append("unknown_or_incomplete_defender_policy")
     if (tree.get("initial_fen") != record["fen"] or tree.get("attacker") != attacker
             or tree.get("ruleset") != record.get("ruleset","standard")
-            or tree.get("extension_attacker_moves") != 2):
+            or tree.get("extension_attacker_moves") != 0):
         errors.append("tree_initial_state_rules_or_extension_mismatch")
     root = tree.get("nodes",{}).get(tree.get("root"),{})
     if isinstance(n,int) and not isinstance(n,bool) and n >= 1:
@@ -184,7 +184,7 @@ def build_tree(record: dict, *, max_attacker_moves: int, seconds=30,
                       include_all_defences=include_all_defences)
     result = {"version": VERSION, "task_id": record["id"], "record_key": record_key(record),
               "ruleset": rules, "initial_fen": record["fen"], "attacker": side,
-              "max_attacker_moves": max_attacker_moves, "extension_attacker_moves": 2,
+              "max_attacker_moves": max_attacker_moves, "extension_attacker_moves": 0,
               "complete": False, "forced_mate": None, "shortest_attacker_moves": None,
               "deepest_mate_attacker_moves": None, "root": None, "nodes": {},
               "shortest_certified": False, "requested_max_attacker_moves": max_attacker_moves,
@@ -228,6 +228,9 @@ class TreeSession:
         self.cap, self.shortest = reference_moves, None
         self.tree, self.key = None, None
         self.off_tree, self.off_tree_ply = False, None
+        if record.get("shortest_proof"):
+            from .tree_certificate import preflight_tree_records
+            preflight_tree_records([record], directory)
         if directory is not None:
             path = Path(directory)/f"{record['id']}.json"
             tree = json.loads(path.read_text(encoding="utf-8"))
@@ -262,9 +265,10 @@ class TreeSession:
 
     @property
     def max_plies(self):
-        # +2 is a hard TOTAL allowance for the attacker, never renewed off-tree.
+        # The fixed TOTAL attacker budget starts at the initial position.
+        # Leaving the tree never renews it or grants extra attacker turns.
         shortest = self.shortest if self.shortest is not None else self.cap
-        return 2*(shortest+2)-1
+        return 2*shortest-1
 
     def _node(self, board, side, ply):
         if not self.enabled or self.off_tree:
@@ -316,16 +320,15 @@ class TreeSession:
             "mate_within_shortest_steps": (
                 bool(success and moves is not None and moves <= self.shortest)
                 if known and self.shortest is not None else None),
-            "mate_within_shortest_plus_two_steps": (
-                bool(success and moves is not None and moves <= self.shortest+2)
-                if known and self.shortest is not None else None),
             "solution_tree_metadata": {
                 "enabled": self.enabled, "complete": bool(self.tree and self.tree.get("complete")),
                 "shortest_attacker_moves": self.shortest, "tree_cap_attacker_moves": self.cap,
                 "deepest_mate_attacker_moves": (
                     self.tree.get("deepest_mate_attacker_moves") if self.tree else None),
                 "off_tree": self.off_tree, "first_off_tree_ply": self.off_tree_ply,
-                "fallback_max_attacker_moves": (self.shortest if self.shortest is not None else self.cap)+2,
+                "fallback_max_attacker_moves": self.shortest if self.shortest is not None else self.cap,
+                "fallback_policy": "continue_within_original_total_cap",
+                "move_count_basis": "all attacker moves since the initial position",
                 "horizon_basis": "certified_shortest" if self.shortest else "uncertified_reference",
             },
         }
@@ -335,7 +338,7 @@ def summarize_tree_metrics(results):
     def value(r, key):
         return r.get(key) if isinstance(r, dict) else getattr(r, key, None)
     output = {}
-    for key in ("mate_within_shortest_steps", "mate_within_shortest_plus_two_steps"):
+    for key in ("mate_within_shortest_steps",):
         known = [value(r, key) for r in results if value(r, "status") != "error"
                  and value(r, key) is not None]
         output[key.removesuffix("_steps")+"_rate"] = sum(known)/len(known) if known else None

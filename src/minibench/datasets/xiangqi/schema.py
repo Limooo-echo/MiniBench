@@ -379,8 +379,14 @@ def _validate_rule_record(record: dict[str, Any]) -> None:
             or ("shortest_proof" not in record and record["oracle"].get("mate_in_plies") != reference_plies)):
         raise ValueError(f"{task_id}: inconsistent C2 reference mate distance")
     horizon_plies = 2*stratification_moves-1
-    if analysis.get("max_plies_extension") != 4 or record["max_plies"] != horizon_plies + 4:
-        raise ValueError(f"{task_id}: C2 bounded horizon must add four half-moves")
+    extension = analysis.get("max_plies_extension")
+    # Original source evidence may retain its historical +4 metadata. Current
+    # certified tasks never receive extra turns, even after leaving the tree.
+    allowed_extensions = {0} if "shortest_proof" in record else {0, 4}
+    if (isinstance(extension, bool) or not isinstance(extension, int)
+            or extension not in allowed_extensions
+            or record["max_plies"] != horizon_plies + extension):
+        raise ValueError(f"{task_id}: C2 horizon must match its certified/reference bound")
     pv = analysis.get("principal_variation_uci")
     if (not isinstance(pv, list) or len(pv) != reference_plies
             or any(not isinstance(move, str) or re.fullmatch(r"[a-i][0-9][a-i][0-9]", move) is None for move in pv)):
@@ -433,6 +439,8 @@ def _validate_rule_record(record: dict[str, Any]) -> None:
 
 def _validate_history_record(record: dict[str, Any]) -> None:
     task_id = record["id"]
+    if record.get("ruleset", "standard") != "standard" or record.get("rules"):
+        raise ValueError(f"{task_id}: H2 requires standard rules without overrides")
     analysis = record.get("h2_analysis")
     required = {
         "version", "mate_in_moves", "reference_mate_plies", "verification_depths",
@@ -455,8 +463,11 @@ def _validate_history_record(record: dict[str, Any]) -> None:
         raise ValueError(f"{task_id}: inconsistent H2 reference distance")
     if record["difficulty"] != expected_band:
         raise ValueError(f"{task_id}: H2 difficulty does not match reference distance")
-    if record["max_plies"] != 2*stratification_moves-1 + 4:
-        raise ValueError(f"{task_id}: H2 extended horizon must add four half-moves")
+    horizon_plies = 2*stratification_moves-1
+    allowed_horizons = ({horizon_plies} if "shortest_proof" in record
+                        else {horizon_plies, horizon_plies + 4})
+    if record["max_plies"] not in allowed_horizons:
+        raise ValueError(f"{task_id}: H2 horizon must match its certified/reference bound")
     if analysis.get("requested_depths") != [16, 20] or analysis.get("source_reused") is not False:
         raise ValueError(f"{task_id}: invalid H2 verification metadata")
     runs = analysis.get("validation_runs")

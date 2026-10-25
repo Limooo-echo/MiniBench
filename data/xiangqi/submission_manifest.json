@@ -26,7 +26,7 @@
       },
       "parent_sha256": "e634f6c49e0f0811230a5151428d7bd1a1c70d0d2b94a3e007e560b21c9181b1",
       "path": "data/xiangqi/rule_variants/tasks.jsonl",
-      "sha256": "ac0e39744b36338143b46fc40eb3082306e4240615aa7241fc235994abb2bff0",
+      "sha256": "460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c",
       "task_ids": [
         "xiangqi-rule-variants-c2-r2-004-standard-2f157981fd",
         "xiangqi-rule-variants-c2-r2-005-standard-862d68410f",
@@ -251,7 +251,7 @@
       },
       "parent_sha256": "eda3df0c68447d5f660881f1256194d29bf9d4967916f11d4d6f3062d5e79a3d",
       "path": "data/xiangqi/history/tasks.jsonl",
-      "sha256": "1d2052bedfc6a5af16e7072c7b7b99afd364e909ac6367f0e4fae5e4458a8f27",
+      "sha256": "4f40419611ab1c8fe87c7f8e9769e6536dad3e790bf61ad6cac16717cdfa99a8",
       "task_ids": [
         "xiangqi-history-derived-0dbc6714e1f191ad",
         "xiangqi-history-derived-0efac1424e94a2b2",
@@ -475,10 +475,10 @@
     "h2": "50 certified shortest mate-in-2/3 and 50 mate-in-4/5",
     "m2": "exact D3 positions and output protocol; Chinese images only; D3 is text baseline"
   },
-  "protocol": "shortest-with-two-extra-attacker-moves",
+  "protocol": "certified-shortest-total-attacker-moves-no-extension",
   "record_count_per_family": 100,
   "seed": 42,
   "selection_limitations": "Uniform seeded selection within certified-complete strata, with C2 pair/rule quotas and independent H2 source games. Budget-unknown candidates excluded; this is not the parent population distribution.",
   "source_pool_count_per_family": 250,
-  "version": "xiangqi-shortest-paired100-v2"
+  "version": "xiangqi-shortest-paired100-strict-n-v3"
 }

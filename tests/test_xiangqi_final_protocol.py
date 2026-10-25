@@ -46,7 +46,7 @@ class FinalProtocolTests(unittest.TestCase):
                 self.assertNotIn('max_tokens',config['agent'])
                 if config['task']['family']=='xiangqi-rule-variants':
                     self.assertEqual(config['evaluation']['horizon_policy'],
-                                     'shortest_plus_two_attacker_moves')
+                                     'certified_shortest_attacker_moves')
 
     def test_candidate_tools_cannot_overwrite_release_even_via_alias(self):
         from minibench.datasets.xiangqi.provenance import require_candidate_outputs
@@ -99,6 +99,16 @@ class FinalProtocolTests(unittest.TestCase):
             rows = load_records(FAMILY_PATHS[entry['family']])
             self.assertEqual(len(rows), 100)
             self.assertEqual(entry['task_ids'], [r['id'] for r in rows])
+            if entry['family'] in {'xiangqi-history', 'xiangqi-rule-variants'}:
+                from minibench.datasets.xiangqi.schema import validate_record
+                for row in rows:
+                    self.assertEqual(row['max_plies'], 2*row['shortest_mate_moves']-1)
+                    if entry['family'] == 'xiangqi-rule-variants':
+                        self.assertEqual(row['c2_analysis']['max_plies_extension'], 0)
+                    stale = deepcopy(row)
+                    stale['max_plies'] += 4
+                    with self.assertRaisesRegex(ValueError, 'horizon'):
+                        validate_record(stale)
         self.assertEqual(plan['experiments']['m2']['condition_counts'],
                          {'chinese-piece-image': 100})
         self.assertEqual(plan['experiments']['h2']['condition_counts'],
@@ -167,14 +177,30 @@ class FinalProtocolTests(unittest.TestCase):
         self.assertTrue(proof['valid'],proof)
         self.assertTrue(proof['tree_complete'])
         with tempfile.TemporaryDirectory() as directory:
+            from types import SimpleNamespace
+            from unittest.mock import Mock
+            from minibench.datasets.xiangqi.rule_variants import evaluate_rule_variant_task
+
             changed=json.loads(path.read_text())
             root=changed['nodes'][changed['root']]
             root['edges']['a0a9']='missing'
-            target=Path(directory)/path.name
+            data_root=Path(directory)/'data'/'xiangqi'
+            tree_dir=data_root/'solution_trees'/'c2'
+            tree_dir.mkdir(parents=True)
+            source=data_root/'rule_variants'/'tasks.jsonl'
+            source.parent.mkdir(parents=True)
+            source.write_text(json.dumps(record)+'\n')
+            target=tree_dir/path.name
             target.write_text(json.dumps(changed))
             self.assertFalse(validate_tree_record(record,target)['valid'])
-            with self.assertRaisesRegex(ValueError,'hash'):
-                TreeSession(record,directory)
+            # A real independent report is deliberately absent, so the stronger
+            # gate fails first. Exact hash binding has dedicated proof-gate tests.
+            with self.assertRaisesRegex(ValueError,'Independent shortest-tree verification required'):
+                TreeSession(record,tree_dir)
+            agent=SimpleNamespace(generate=Mock())
+            with self.assertRaisesRegex(ValueError,'Independent shortest-tree verification required'):
+                evaluate_rule_variant_task(runtime_dict(record),agent,solution_tree_dir=tree_dir)
+            agent.generate.assert_not_called()
 
 
 if __name__ == '__main__':
