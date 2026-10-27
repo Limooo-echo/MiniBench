@@ -1,0 +1,16 @@
+dataset: data/zebra/paired-20261027
+output_dir: runs/zebra-paired-qwen38-20261027
+model: qwen3.8-flash
+base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+api_key_env: DASHSCOPE_API_KEY
+agent: direct
+prompt_version: v2
+temperature: 0.0
+thinking_tokens: 7168
+answer_tokens: 1024
+workers: 4
+requests_per_minute: 30
+timeout: 1800
+validation_timeout_ms: 10000
+max_format_repairs: 0
+max_retries: 0
