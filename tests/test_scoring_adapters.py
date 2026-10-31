@@ -33,34 +33,36 @@ class ScoringAdapterTests(unittest.TestCase):
                                       "House 2": {"Name": "wrong", "Pet": "wrong"}}},
                         success=True, score=1, correct_cells=4, total_cells=4)
         result = self.score("zebra", record, task)
-        self.assertEqual((result["y"], result["p"]), (0, .5))
+        self.assertEqual((result["y"], result["p"]), (0, 0))
+        self.assertEqual(result["diagnostics"]["cell_accuracy"], .5)
         self.assertEqual(result["evidence"]["total_cells"], 4)
 
     def test_zebra_uses_saved_counts_but_never_saved_composite(self):
         result = self.score("zebra", {"success": False, "score": 99,
                                       "correct_cells": 8, "total_cells": 10})
-        self.assertEqual(result["p"], .8)
+        self.assertEqual(result["p"], 0)
+        self.assertEqual(result["diagnostics"]["cell_accuracy"], .8)
         self.assertEqual(result["diagnostics"]["legacy_score"], 99)
 
-    def test_missing_partial_preserves_strict_outcome(self):
+    def test_zebra_outcome_does_not_need_process_evidence(self):
         result = self.score("zebra", {"success": False, "cell_accuracy": .9})
         self.assertEqual(result["y"], 0)
-        self.assertIsNone(result["p"])
-        self.assertEqual(result["status"], "missing")
+        self.assertEqual(result["p"], 0)
+        self.assertEqual(result["status"], "ok")
 
     def test_empty_zebra_answer_is_failure_not_absent_run(self):
         result = self.score("zebra", {"parsed": False, "success": False})
         self.assertEqual((result["status"], result["y"], result["p"]), ("invalid", 0, 0))
 
-    def test_graph_extendible_prefix(self):
+    def test_graph_extendible_prefix_does_not_receive_process_credit(self):
         result = self.score("one_stroke", answer({"path": ["A", "B"]}), graph())
-        self.assertEqual((result["y"], result["p"]), (0, .25))
-        self.assertTrue(result["evidence"]["extendible"])
+        self.assertEqual((result["y"], result["p"]), (0, 0))
+        self.assertFalse(result["evidence"]["process_score_applicable"])
 
     def test_graph_stranded_prefix_gets_no_credit(self):
         result = self.score("one_stroke", answer({"path": ["A", "D"]}), graph())
         self.assertEqual(result["p"], 0)
-        self.assertFalse(result["evidence"]["extendible"])
+        self.assertFalse(result["evidence"]["process_score_applicable"])
 
     def test_graph_does_not_repair_invalid_suffix(self):
         result = self.score("one_stroke", answer({"path": ["A", "B", "Q"]}), graph())
@@ -75,7 +77,7 @@ class ScoringAdapterTests(unittest.TestCase):
     def test_parallel_edges_are_counted_separately(self):
         task = graph([["A", "B"], ["A", "B"], ["B", "C"]], start="B", end="C")
         result = self.score("one_stroke", answer({"path": ["B", "A", "B"]}), task)
-        self.assertAlmostEqual(result["p"], 2 / 3)
+        self.assertEqual(result["p"], 0)
 
     def test_history_undo_and_remaining_edge_denominator(self):
         task = graph([["A", "B"], ["A", "B"], ["B", "C"]], start="B", end="C",
@@ -84,8 +86,8 @@ class ScoringAdapterTests(unittest.TestCase):
                          {"action": "undo", "edge_id": "e01", "from": "A", "to": "B"},
                          {"action": "move", "edge_id": "e02", "from": "B", "to": "A"}])
         result = self.score("one_stroke", answer({"path": ["A", "B"]}), task, "H")
-        self.assertEqual((result["y"], result["p"]), (0, .5))
-        self.assertEqual(result["evidence"]["history_remaining_edge_ids"], ["e01", "e03"])
+        self.assertEqual((result["y"], result["p"]), (0, 0))
+        self.assertFalse(result["evidence"]["process_score_applicable"])
 
     def test_history_complete_path_is_only_remaining_path(self):
         task = graph([["A", "B"], ["B", "C"]], start="A", end="C",
@@ -93,13 +95,31 @@ class ScoringAdapterTests(unittest.TestCase):
                          {"action": "move", "edge_id": "e01", "from": "A", "to": "B"}])
         result = self.score("one_stroke", answer({"path": ["B", "C"]}), task, "H")
         self.assertEqual(result["y"], 1)
-        self.assertEqual(result["p"], 1)
+        self.assertEqual(result["p"], 0)
 
     def test_history_zero_remaining_edges(self):
         task = graph([["A", "B"]], start="A", end="B", capability="history_memory",
                      history_events=[{"action": "move", "edge_id": "e01", "from": "A", "to": "B"}])
         result = self.score("one_stroke", answer({"path": ["B"]}), task, "H")
         self.assertEqual((result["y"], result["p"]), (1, 0))
+
+    def test_history_process_credit_uses_only_observed_states(self):
+        record = {"success": False, "history_final_success": False,
+                  "memory_mode": "incremental_state", "history_process_score": .5,
+                  "is_legal": False}
+        result = self.score("one_stroke", record, dimension="H", mode="incremental_state")
+        self.assertEqual((result["y"], result["p"]), (0, .5))
+        self.assertTrue(result["evidence"]["process_score_applicable"])
+        self.assertFalse(result["diagnostics"]["is_legal"])
+        record.pop("history_process_score")
+        missing = self.score("one_stroke", record, dimension="H", mode="incremental_state")
+        self.assertIsNone(missing["p"])
+        self.assertEqual(missing["status"], "missing")
+        record["memory_mode"] = "step_history_only"
+        ack = self.score("one_stroke", record, dimension="H", mode="step_history_only")
+        self.assertEqual(ack["p"], 0)
+        self.assertFalse(ack["evidence"]["process_score_applicable"])
+        self.assertIsNone(ack["diagnostics"]["is_legal"])
 
     def test_unsolvable_graph_is_binary(self):
         task = graph([["A", "B"], ["A", "C"], ["A", "D"]], start=None, end=None,
@@ -112,21 +132,23 @@ class ScoringAdapterTests(unittest.TestCase):
     def test_graph_missing_raw_path_is_not_claimed_empty_path(self):
         missing = self.score("one_stroke", {"success": False}, graph())
         invalid = self.score("one_stroke", {"raw_output": "not json"}, graph())
-        self.assertIsNone(missing["p"])
+        self.assertEqual(missing["p"], 0)
         self.assertEqual((invalid["y"], invalid["p"]), (0, 0))
 
     def test_graph_image_edge_f1_penalizes_extra_and_duplicate_edges(self):
         task = graph([["A", "B"], ["A", "B"], ["B", "C"]], start="B", end="C")
         record = answer({"path": [], "recognized_edges": [["B", "A"], ["B", "C"], ["A", "D"]]})
         result = self.score("one_stroke", record, task, "V", "image")
-        self.assertAlmostEqual(result["p"], 2 / 3)
+        self.assertEqual(result["p"], 0)
+        self.assertAlmostEqual(result["diagnostics"]["edge_f1"], 2 / 3)
         self.assertEqual(result["y"], 0)
 
     def test_graph_image_missing_field_in_answer_is_observed_failure(self):
         observed = self.score("one_stroke", answer({"path": []}), graph(), "V", "image")
         absent = self.score("one_stroke", {"success": False}, graph(), "V", "image")
         self.assertEqual(observed["p"], 0)
-        self.assertIsNone(absent["p"])
+        self.assertEqual(absent["p"], 0)
+        self.assertNotIn("graph_transcription_exact", absent["diagnostics"])
 
     def test_mahjong_wait_set_handles_extra_missing_and_duplicate_tiles(self):
         record = answer({"winning_tiles": ["1m", "1m", "2m", "9s"]}, success=True,

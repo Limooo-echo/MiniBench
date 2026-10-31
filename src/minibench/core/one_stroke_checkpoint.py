@@ -483,6 +483,7 @@ def one_stroke_result_from_dict(raw: dict[str, Any]) -> Any:
         "conversation",
         "tags",
         "history_protocol_reasons",
+        "history_step_audits",
     ):
         value = payload.get(field)
         if isinstance(value, list):

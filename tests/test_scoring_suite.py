@@ -82,7 +82,9 @@ class ScoringSuiteTests(unittest.TestCase):
     def test_verified_answers_produce_hand_checked_task_score_and_fixed_axis_coverage(self):
         self.experiment()
         result = self.run_suite()
-        self.assertAlmostEqual(self.task_score(result, "zebra", "D")["score"], (1 + .25) / 2)
+        self.assertAlmostEqual(self.task_score(result, "zebra", "D")["score"], .5)
+        self.assertEqual(result["scoring_version"], "2.1.0")
+        self.assertEqual(result["diagnostics"][0]["observations"]["accuracy"], .5)
         self.assertAlmostEqual(self.task_score(result, "zebra", "D")["strict_score"], .5)
         direct = self.architecture(result)["dimensions"]["D"]
         self.assertIsNone(direct["score"])
@@ -219,7 +221,7 @@ class ScoringSuiteTests(unittest.TestCase):
             rows = {row["item_id"]: row for row in csv.DictReader(handle)}
         self.assertAlmostEqual(float(rows["z1"]["axis_weight"]), .125)
         self.assertAlmostEqual(float(rows["z1"]["contribution"]), 12.5)
-        self.assertAlmostEqual(float(rows["z2"]["contribution"]), 100 * .125 * .25)
+        self.assertEqual(float(rows["z2"]["contribution"]), 0)
         self.assertEqual(rows["z2"]["y"], "0.0")
 
     def test_unknown_costs_are_null_even_if_legacy_usage_is_zero_filled(self):
@@ -402,7 +404,7 @@ class ScoringSuiteTests(unittest.TestCase):
         exp["runs"][0]["provenance"]["agent_config"] = copy.deepcopy(override)
         result = self.run_suite()
         self.assertEqual(self.task_score(result, "zebra", "D")["coverage"], 1)
-        self.assertAlmostEqual(self.task_score(result, "zebra", "D")["score"], .625)
+        self.assertAlmostEqual(self.task_score(result, "zebra", "D")["score"], .5)
         self.assertNotIn("provenance_mismatch:agent_config", result["diagnostics"][0]["reasons"])
 
     def test_experiment_config_override_rejects_unknown_experiment(self):
@@ -625,6 +627,21 @@ class ScoringSuiteTests(unittest.TestCase):
         self.assertEqual(cell["expected_slots"], 2)
         self.assertAlmostEqual(cell["coverage"], .5)
         self.assertIsNone(cell["score"])
+
+    def test_explicit_zebra_history_pro_is_a_separate_paired_condition(self):
+        task = {**self.zebra_rule_task("h"), "capability": "history_memory", "rule_mode": None,
+                "clue_turns": ["Ada owns the cat."]}
+        modes = ["deferred_reasoning", "incremental_state", "incremental_state_pro"]
+        exp = self.experiment("zebra", "H", tasks=[task], records=[
+            {"task_id": task["id"], "memory_mode": mode,
+             "correct_cells": 4 if mode == "incremental_state_pro" else 0, "total_cells": 4}
+            for mode in modes])
+        exp["protocol"]["evaluation"] = {"memory_modes": modes}
+        exp["runs"][0]["provenance"]["protocol"] = copy.deepcopy(exp["protocol"])
+        result = self.run_suite()
+        cell = self.task_score(result, "zebra", "H")
+        self.assertEqual((cell["expected_slots"], cell["available_slots"]), (3, 3))
+        self.assertAlmostEqual(cell["score"], 1 / 3)
 
     def test_explicit_zebra_history_modes_must_be_supported_and_unique(self):
         for modes in ([], ["incremental_state", "incremental_state"], ["unknown"], "deferred_reasoning"):

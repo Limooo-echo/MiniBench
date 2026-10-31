@@ -89,9 +89,11 @@ def _evaluate(
             show_progress=bool(evaluation_config.get("show_progress", False)),
         )
     if family == "zebra":
+        from minibench.datasets.zebra.evaluation import MEMORY_MODES
+
         memory_modes = evaluation_config.get(
             "memory_modes",
-            ("incremental_state", "deferred_reasoning"),
+            MEMORY_MODES,
         )
         if isinstance(memory_modes, str):
             memory_modes = (memory_modes,)
@@ -100,12 +102,15 @@ def _evaluate(
             tasks,
             agent,
             memory_modes=tuple(memory_modes),
-            state_max_tokens=int(evaluation_config.get("state_max_tokens", 512)),
+            state_max_tokens=int(evaluation_config.get("state_max_tokens", 2048)),
             ack_max_tokens=int(evaluation_config.get("ack_max_tokens", 32)),
             final_max_tokens=(
                 int(final_max_tokens) if final_max_tokens is not None else None
             ),
             show_progress=bool(evaluation_config.get("show_progress", False)),
+            state_validation_timeout_ms=int(
+                evaluation_config.get("state_validation_timeout_ms", 10000)
+            ),
         )
     if family == "mahjong_solo":
         return spec.evaluate_tasks(

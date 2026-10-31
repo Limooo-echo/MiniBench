@@ -18,13 +18,19 @@ from minibench.datasets.zebra.evaluation import (
     zebra_work_key,
 )
 from minibench.datasets.zebra.prompting import build_zebra_prompt
+from minibench.datasets.zebra.state_validation import initial_candidate_state
 
 
 def task_record(**overrides):
     record = {
         "id": "zebra-unit",
         "size": "2*2",
-        "puzzle": "There are two houses. Alice is left of Bob. Alice drinks tea.",
+        "puzzle": (
+            "There are 2 houses, numbered 1 to 2 from left to right, as seen from across the street. "
+            "Each house is occupied by a different person. Each house has a unique attribute for each of the following characteristics:\n"
+            " - Each person has a unique name: `Alice`, `Bob`\n"
+            " - Each person has a unique favorite drink: `tea`, `milk`"
+        ),
         "solution": {
             "header": ["House", "Name", "Drink"],
             "rows": [["1", "Alice", "tea"], ["2", "Bob", "milk"]],
@@ -72,8 +78,8 @@ class RecordingMessageAgent:
         )
         if "Now solve the puzzle" in messages[-1]["content"]:
             return correct_output()
-        if "update and return a compact JSON candidate state" in messages[0]["content"]:
-            return '{"candidate_state":"kept","eliminated":"none"}'
+        if "complete structured candidate state" in messages[0]["content"]:
+            return json.dumps(initial_candidate_state(task))
         turn = sum(message["role"] == "user" for message in messages)
         return json.dumps({"acknowledged": turn})
 
@@ -103,7 +109,7 @@ class PhaseAwareRecordingAgent:
         )
         if phase == "final":
             return correct_output()
-        return '{"state":"kept"}'
+        return json.dumps(initial_candidate_state(task))
 
     def generate_messages(self, messages, task, **kwargs):
         self.legacy_calls += 1
@@ -203,17 +209,44 @@ class ZebraTests(unittest.TestCase):
         self.assertFalse(score["parsed"])
         self.assertTrue(score["no_answer"])
         self.assertEqual(score["cell_accuracy"], 0.0)
+        self.assertIsNone(score["is_legal"])
+
+    def test_legality_detects_multiple_assignments_without_taking_first_answer(self):
+        output = json.loads(correct_output())
+        output["solution"]["House 1"]["Name"] = ["Alice", "Bob"]
+        score = score_zebra_output(zebra_task_from_dict(task_record()), json.dumps(output))
+        self.assertFalse(score["is_legal"])
+        self.assertFalse(score["success"])
+        self.assertEqual(score["correct_cells"], 3)
+
+    def test_legality_detects_repeated_value_in_same_attribute(self):
+        output = json.loads(correct_output())
+        output["solution"]["House 2"]["Name"] = "ALICE"
+        score = score_zebra_output(zebra_task_from_dict(task_record()), json.dumps(output))
+        self.assertFalse(score["is_legal"])
+        self.assertIn("repeated_value:Name/alice:House 1,House 2", score["legality_reasons"])
+
+    def test_wrong_permutation_or_missing_cells_are_not_uniqueness_violations(self):
+        output = {"solution": {
+            "House 1": {"Name": "Bob", "Drink": "milk"},
+            "House 2": {"Name": "Alice"},
+        }}
+        score = score_zebra_output(zebra_task_from_dict(task_record()), json.dumps(output))
+        self.assertFalse(score["success"])
+        self.assertTrue(score["is_legal"])
 
     def test_history_protocols_use_real_role_history_and_equal_rounds(self):
         task = zebra_task_from_dict(
             task_record(
                 capability="history_memory",
-                clue_turns=["Alice is left of Bob.", "Alice drinks tea."],
+                clue_turns=["Alice is in the first house.", "The person who likes milk is in the second house."],
             )
         )
         agent = RecordingMessageAgent()
 
-        results = evaluate_zebra_tasks([task], agent)
+        results = evaluate_zebra_tasks(
+            [task], agent, memory_modes=("incremental_state", "deferred_reasoning"),
+        )
 
         self.assertEqual(len(results), 2)
         self.assertTrue(all(result.success for result in results))
@@ -222,15 +255,18 @@ class ZebraTests(unittest.TestCase):
             "deferred_reasoning",
         ])
         self.assertEqual(len(agent.calls), 6)
-        for result in results:
-            roles = [message["role"] for message in result.conversation]
-            self.assertEqual(
-                roles,
-                ["system", "user", "assistant", "user", "assistant", "user", "assistant"],
-            )
+        self.assertEqual(
+            [message["role"] for message in results[0].conversation],
+            ["system", "user", "assistant"],
+        )
+        self.assertEqual(
+            [message["role"] for message in results[1].conversation],
+            ["system", "user", "assistant", "user", "assistant", "user", "assistant"],
+        )
         second_incremental_call = agent.calls[1]["messages"]
-        self.assertEqual(second_incremental_call[2]["role"], "assistant")
-        self.assertIn("candidate_state", second_incremental_call[2]["content"])
+        self.assertEqual(len(second_incremental_call), 2)
+        self.assertIn('"domains"', second_incremental_call[1]["content"])
+        self.assertIn(task.clue_turns[0], second_incremental_call[1]["content"])
         second_deferred_call = agent.calls[4]["messages"]
         self.assertEqual(second_deferred_call[2]["role"], "assistant")
         self.assertIn("acknowledged", second_deferred_call[2]["content"])
@@ -243,7 +279,7 @@ class ZebraTests(unittest.TestCase):
         task = zebra_task_from_dict(
             task_record(
                 capability="history_memory",
-                clue_turns=["First clue.", "Second clue."],
+                clue_turns=["Alice is in the first house.", "The person who likes milk is in the second house."],
             )
         )
         agent = PhaseAwareRecordingAgent()
@@ -273,7 +309,7 @@ class ZebraTests(unittest.TestCase):
             task_record(
                 id="history-unit",
                 capability="history_memory",
-                clue_turns=["Only clue."],
+                clue_turns=["Alice is in the first house."],
             )
         )
         plan = plan_zebra_work_items(
@@ -294,6 +330,7 @@ class ZebraTests(unittest.TestCase):
         results = evaluate_zebra_tasks(
             [direct, history],
             PhaseAwareRecordingAgent(),
+            memory_modes=("incremental_state", "deferred_reasoning"),
             skip_keys={
                 ("direct-unit", "single"),
                 ("history-unit", "incremental_state"),

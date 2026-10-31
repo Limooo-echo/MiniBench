@@ -177,8 +177,16 @@ def restore_results(plan: list[dict[str, Any]], run_dir: Path,
                     "run_fingerprint": fingerprint, "task_sha256": fingerprint_payload(record)}
         if any(saved.get(key) != value for key, value in required.items()):
             raise ValueError(f"Saved result identity changed: {item['key']}")
-        if saved["result"] != score_zebra_output(zebra_task_from_dict(record), saved["raw_output"]):
+        rescored = score_zebra_output(zebra_task_from_dict(record), saved["raw_output"])
+        expected_saved_score = dict(rescored)
+        if isinstance(saved["result"], dict):
+            for field in ("is_legal", "legality_reasons"):
+                if field not in saved["result"]:
+                    expected_saved_score.pop(field)
+        if saved["result"] != expected_saved_score:
             raise ValueError(f"Saved result score mismatch: {item['key']}")
+        # Enrich legacy records in memory; do not rewrite the original journal.
+        saved["result"] = rescored
         results[item["key"]] = saved
     return results
 

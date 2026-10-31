@@ -165,12 +165,12 @@ def entity_aliases(header: str, value: str) -> list[str]:
     raise ValidationError(f"unsupported attribute {header}")
 
 
-def parse_puzzle(puzzle: str, *, expected_size: str | None = None) -> ParsedPuzzle:
-    marker = "\n\n## Clues:\n"
-    if puzzle.count(marker) != 1:
-        raise ValidationError("expected one complete clue section")
-    background, clue_block = puzzle.split(marker)
+def _parse_background(background: str, expected_size: str | None = None) -> tuple[
+    int, tuple[tuple[str, tuple[str, ...]], ...], dict[str, set[tuple[str, str]]]
+]:
     lines = background.splitlines()
+    if not lines:
+        raise ValidationError("empty background")
     match = re.fullmatch(r"There are ([2-6]) houses, numbered 1 to ([2-6]) from left to right, as seen from across the street\. Each house is occupied by a different person\. Each house has a unique attribute for each of the following characteristics:", lines[0])
     if not match or match[1] != match[2]:
         raise ValidationError("unsupported or inconsistent background")
@@ -197,6 +197,21 @@ def parse_puzzle(puzzle: str, *, expected_size: str | None = None) -> ParsedPuzz
         raise ValidationError("unsupported domain count")
     if expected_size and expected_size != f"{houses}*{len(domains)}":
         raise ValidationError("declared size disagrees with background")
+    return houses, tuple(domains), aliases
+
+
+def parse_background(background: str, *, expected_size: str | None = None) -> ParsedPuzzle:
+    """Parse only public domains, without needing any clue or answer grid."""
+    houses, domains, _ = _parse_background(background, expected_size)
+    return ParsedPuzzle(houses, domains, ())
+
+
+def parse_puzzle(puzzle: str, *, expected_size: str | None = None) -> ParsedPuzzle:
+    marker = "\n\n## Clues:\n"
+    if puzzle.count(marker) != 1:
+        raise ValidationError("expected one complete clue section")
+    background, clue_block = puzzle.split(marker)
+    houses, domains, aliases = _parse_background(background, expected_size)
 
     clauses: list[Clause] = []
     for index, line in enumerate(clue_block.splitlines(), 1):
@@ -212,7 +227,7 @@ def parse_puzzle(puzzle: str, *, expected_size: str | None = None) -> ParsedPuzz
         clauses.append(clause)
     if not clauses:
         raise ValidationError("no clues")
-    return ParsedPuzzle(houses, tuple(domains), tuple(clauses))
+    return ParsedPuzzle(houses, domains, tuple(clauses))
 
 
 def _parse_clue(text: str, index: int, aliases: dict[str, set[tuple[str, str]]]) -> list[Clause]:
@@ -326,8 +341,13 @@ def evaluate_clause(clause: Clause, positions: dict[tuple[str, str], int],
     return not result if clause.negated else result
 
 
-def solve_unique(parsed: ParsedPuzzle, *, override: str | None = None,
-                 gold: dict[str, Any] | None = None, timeout_ms: int = 10000) -> dict[str, Any]:
+def build_solver(parsed: ParsedPuzzle, *, override: str | None = None,
+                 timeout_ms: int = 10000) -> tuple[Any, dict[tuple[str, str], Any], list[int]]:
+    """Compile public rules into a solver; do not assert or inspect a gold grid.
+
+    Unlike ``solve_unique``, this also supports an empty or multi-solution clue
+    prefix. The returned solver has not yet been checked.
+    """
     import z3
     solver = z3.Solver()
     solver.set(timeout=timeout_ms, random_seed=20261013)
@@ -367,6 +387,13 @@ def solve_unique(parsed: ParsedPuzzle, *, override: str | None = None,
         solver.add(z3.Not(predicate) if clause.negated else predicate)
     if override and not affected:
         raise ValidationError("override affects no parsed clauses")
+    return solver, positions, affected
+
+
+def solve_unique(parsed: ParsedPuzzle, *, override: str | None = None,
+                 gold: dict[str, Any] | None = None, timeout_ms: int = 10000) -> dict[str, Any]:
+    import z3
+    solver, positions, affected = build_solver(parsed, override=override, timeout_ms=timeout_ms)
     first = solver.check()
     evidence: dict[str, Any] = {"solver": f"z3 {z3.get_version_string()}", "timeout_ms": timeout_ms,
         "first_check": str(first), "override": override, "affected_clue_indices": affected,

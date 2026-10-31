@@ -13,6 +13,22 @@ runs/
 vis_outputs/
 output/
 outputs/
+# Local experiment records, reports and worktree snapshots must stay off GitHub.
+reports/
+results/
+logs/
+.codex-worktrees/
+# Also cover standard run artifacts when a custom output directory is used.
+predictions.jsonl
+results.json
+summary.txt
+run_state.json
+run_metadata.json
+resolved_config.yaml
+selected_tasks.jsonl
+item_scores.jsonl
+scores.json
+task_scores.csv
 data/*/sample_*.jsonl
 .env
 .DS_Store

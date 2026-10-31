@@ -9,6 +9,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
+from minibench.core.metrics import summarize_observations
 from minibench.scoring import SCORING_VERSION
 from minibench.scoring.manifest import load_suite, load_weights, object_hash
 
@@ -110,6 +111,12 @@ def _diagnostics(rows: list[dict]) -> list[dict]:
         result.append({"profile": key[0], "architecture": key[1], "task": key[2], "dimension": key[3], "mode": key[4],
                        "planned_records": len(items), "statuses": dict(sorted(Counter(r["status"] for r in items).items())),
                        "reasons": dict(sorted(reasons.items())),
+                       "observations": summarize_observations([
+                           {**(row.get("diagnostics") or {}),
+                            "history_final_success": None,
+                            "success": bool(row["y"]) if row.get("y") is not None else None,
+                            "input_mode": row["mode"] if row["dimension"] == "V" else None}
+                           for row in items if row.get("status") != "unverified"]),
                        "metrics": {name: {"mean_per_item": sum(v) / len(v), "observed_items": len(v)} for name, v in sorted(metrics.items())}})
     return result
 
@@ -167,7 +174,7 @@ def _markdown(result: dict) -> str:
     lines = ["# MiniBench 四维离线评分", "", f"实验清单：`{result['suite_id']}`；评分版本：`{SCORING_VERSION}`。", "",
              "本报告只读取已有题目和结果，没有调用模型。维度依次为直接解题 D、规则变化 R、历史信息 H、图像输入 V。", "",
              r"单题公式：$s=Y+(1-Y)P$；每题每个实验条件只运行一次，按题目、难度、题型、模式和任务逐层汇总。", "",
-             "过程分不放缩，κ 固定为 1；各维度内参与任务等权；严格得分仅使用 Y。", "",
+             "Zebra 只按结果计分、格子准确率另报；一笔画仅有历史状态观测时计过程分，其他模式只按结果计分。各维度内参与任务等权；严格得分仅使用 Y。", "",
              "覆盖不足时分数为 —，不补零或重新分配权重。历史和图像维度不代表独立测得了记忆或识图能力。", "",
              "## 四维得分", "", "| 模型组 | 架构 | D | R | H | V |", "|---|---|---:|---:|---:|---:|"]
     for profile, data in result["profiles"].items():
@@ -199,6 +206,16 @@ def _markdown(result: dict) -> str:
                 if s.get("task") == "zebra" and s.get("dimension") == "R":
                     for mode, subscore in s.get("by_rule_mode", {}).items():
                         lines.append(f"| {_cell(profile)} / {_cell(arch)} | {_cell(mode)} | {_number(subscore.get('score'), 4)} | {_number(subscore.get('strict_score'), 4)} | {_number(100*subscore.get('coverage', 0))}% | {subscore['available_slots']}/{subscore['expected_slots']} |")
+    lines += ["", "## 实验观测", "",
+              "识图两项只包含图像输入；缺失观测或条件分母为零时显示 —。精确识别后的准确率以识别正确且有最终判定的记录为分母。", "",
+              "| 模型组 / 架构 / 任务 / 模式 | 准确率 | 合法率 | 图像识别正确率 | 识别正确后的准确率 |",
+              "|---|---:|---:|---:|---:|"]
+    for diag in result["diagnostics"]:
+        observed = diag["observations"]
+        rates = [_number(100 * observed[name]) + "%" if observed[name] is not None else "—"
+                 for name in ("accuracy", "legality_rate", "image_recognition_accuracy", "accuracy_given_correct_recognition")]
+        label = " / ".join(str(diag[name]) for name in ("profile", "architecture", "task", "mode"))
+        lines.append("| " + _cell(label) + " | " + " | ".join(rates) + " |")
     lines += ["", "## 缺失与诊断", "", "诊断量不额外加入主分。unverified_y / unverified_p 仅说明旧记录可读取，来源未核实，不能作为正式比较。", ""]
     for diag in result["diagnostics"]:
         if diag["reasons"] or diag["metrics"]:

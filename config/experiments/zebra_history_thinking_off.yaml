@@ -1,0 +1,43 @@
+task:
+  family: zebra
+  path: data/zebra/history_eval.jsonl
+  limit: null
+  task_ids: []
+
+agent:
+  name: direct
+  prompt_version: v2
+  max_format_repairs: 0
+  final_temperature: 0.0
+  trace: full
+
+provider:
+  name: qwen
+  model: qwen3.8-flash
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key_env: DASHSCOPE_API_KEY
+  temperature: 0.0
+  max_tokens: 4096
+  timeout: 600
+  json_mode: true
+  max_retries: 0
+  extra_body:
+    enable_thinking: false
+    preserve_thinking: false
+    stream: false
+
+evaluation:
+  memory_modes:
+    - deferred_reasoning
+    - incremental_state
+    - incremental_state_pro
+  state_max_tokens: 2048
+  ack_max_tokens: 32
+  final_max_tokens: 4096
+  state_validation_timeout_ms: 10000
+  show_progress: true
+
+run:
+  output_dir: runs
+  run_name: zebra-history-direct-qwen38flash-thinking-off-structured-pro-100-20261027
+  on_existing: error

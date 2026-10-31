@@ -72,6 +72,9 @@ class OneStrokeInstanceResult:
     history_state_exact: bool | None = None
     history_joint_success: bool | None = None
     history_protocol_reasons: tuple[str, ...] = ()
+    is_legal: bool | None = None
+    history_process_score: float | None = None
+    history_step_audits: tuple[dict[str, Any], ...] = ()
 
 
 OneStrokeWorkKey = tuple[str, str]
@@ -86,6 +89,7 @@ class _HistoryProtocolOutcome:
     protocol_valid: bool
     state_exact: bool | None
     reasons: tuple[str, ...]
+    step_audits: tuple[dict[str, Any], ...]
 
 
 def extract_path(output: str) -> list[str] | None:
@@ -408,6 +412,9 @@ def evaluate_one_stroke_tasks(
             history_state_exact: bool | None = None
             history_joint_success: bool | None = None
             history_protocol_reasons: tuple[str, ...] = ()
+            history_step_audits: tuple[dict[str, Any], ...] = ()
+            is_legal: bool | None = None
+            history_process_score: float | None = None
             if input_mode is not None:
                 prompt = build_one_stroke_prompt(task, input_mode=input_mode)
                 if input_mode == "text":
@@ -462,6 +469,16 @@ def evaluate_one_stroke_tasks(
                 history_intermediate_protocol_valid = history_outcome.protocol_valid
                 history_state_exact = history_outcome.state_exact
                 history_protocol_reasons = history_outcome.reasons
+                history_step_audits = history_outcome.step_audits
+                if history_step_audits:
+                    legality_flags = [step["is_legal"] for step in history_step_audits]
+                    is_legal = (
+                        False if False in legality_flags
+                        else None if None in legality_flags else True
+                    )
+                    history_process_score = sum(
+                        int(step["state_exact"]) for step in history_step_audits
+                    ) / len(history_step_audits)
                 scored = {
                     "path": path,
                     "success": success,
@@ -533,6 +550,9 @@ def evaluate_one_stroke_tasks(
                 history_state_exact=history_state_exact,
                 history_joint_success=history_joint_success,
                 history_protocol_reasons=history_protocol_reasons,
+                is_legal=is_legal,
+                history_process_score=history_process_score,
+                history_step_audits=history_step_audits,
             )
             results.append(result)
             if on_result is not None:
@@ -685,6 +705,7 @@ def _run_history_protocol(
     protocol_valid = True
     state_checks: list[bool] = []
     protocol_reasons: list[str] = []
+    state_outputs: list[str] = []
     per_turn_limit = (
         state_max_tokens if memory_mode == "incremental_state" else ack_max_tokens
     )
@@ -703,21 +724,24 @@ def _run_history_protocol(
             max_tokens=per_turn_limit,
             json_mode=True,
         )
-        turn_protocol_valid, turn_state_exact, turn_reasons = (
-            _validate_history_intermediate(
-                task,
-                memory_mode,
-                step_number,
-                response,
+        if memory_mode == "step_history_only":
+            turn_protocol_valid, _, turn_reasons = _validate_history_intermediate(
+                task, memory_mode, step_number, response
             )
-        )
-        protocol_valid = protocol_valid and turn_protocol_valid
-        if turn_state_exact is not None:
-            state_checks.append(turn_state_exact)
-        protocol_reasons.extend(
-            f"step_{step_number}:{reason}" for reason in turn_reasons
-        )
+            protocol_valid = protocol_valid and turn_protocol_valid
+            protocol_reasons.extend(
+                f"step_{step_number}:{reason}" for reason in turn_reasons
+            )
         messages.append({"role": "assistant", "content": response})
+        if memory_mode == "incremental_state":
+            state_outputs.append(response)
+    step_audits = audit_one_stroke_history(task, state_outputs)
+    for audit in step_audits:
+        protocol_valid = protocol_valid and audit["protocol_valid"]
+        state_checks.append(audit["state_exact"])
+        protocol_reasons.extend(
+            f"step_{audit['step']}:{reason}" for reason in audit["state_reasons"]
+        )
     messages.append({"role": "user", "content": history_final_prompt(task)})
     final_output = _generate_messages_for_phase(
         agent,
@@ -734,7 +758,83 @@ def _run_history_protocol(
         protocol_valid=protocol_valid,
         state_exact=all(state_checks) if memory_mode == "incremental_state" else None,
         reasons=tuple(protocol_reasons),
+        step_audits=step_audits,
     )
+
+
+def audit_one_stroke_history(
+    task: OneStrokeTask,
+    outputs: Sequence[str],
+) -> tuple[dict[str, Any], ...]:
+    """Audit observed state transitions, without reconstructing them from the answer.
+
+    Edge lists are sets, not traversal order. Order comes from the change between
+    successive responses. Missing/unparseable states leave legality unobserved;
+    an observed discontinuity remains illegal even if a later state is correct.
+    """
+    if len(outputs) > len(task.history_events):
+        raise ValueError("more state outputs than one-stroke history events")
+    edge_map = dict(zip(one_stroke_edge_ids(task.edges), task.edges))
+    previous: dict[str, Any] | None = {
+        "current_vertex": task.start,
+        "used_edges": [],
+        "remaining_edges": list(edge_map),
+    }
+    # Keep the observed move stack so undo must reverse the latest move.
+    stack: list[tuple[str, str, str]] | None = []
+    audits: list[dict[str, Any]] = []
+    for step_number, output in enumerate(outputs, start=1):
+        protocol_valid, state_exact, state_reasons = _validate_history_intermediate(
+            task, "incremental_state", step_number, output
+        )
+        current = _parse_exact_json_object(output) if protocol_valid else None
+        reasons: list[str] = []
+        legal: bool | None = None
+        if current is not None and previous is not None:
+            used = set(current["used_edges"])
+            remaining = set(current["remaining_edges"])
+            if used & remaining or used | remaining != set(edge_map):
+                reasons.append("invalid_edge_partition")
+            added = used - set(previous["used_edges"])
+            removed = set(previous["used_edges"]) - used
+            action = task.history_events[step_number - 1].action
+            changed = added if action == "move" else removed
+            unexpected = removed if action == "move" else added
+            transition: tuple[str, str, str] | None = None
+            if len(changed) != 1 or unexpected:
+                reasons.append(f"invalid_{action}_edge_change")
+            else:
+                edge_id = next(iter(changed))
+                source, target = previous["current_vertex"], current["current_vertex"]
+                transition = (edge_id, source, target)
+                if (
+                    edge_id not in edge_map
+                    or _canonical_edge(edge_map[edge_id]) != _canonical_edge((source, target))
+                ):
+                    reasons.append(f"disconnected_{action}:{edge_id}:{source}->{target}")
+                if action == "undo" and stack is not None:
+                    if not stack or stack[-1] != (edge_id, target, source):
+                        reasons.append("undo_not_latest_move")
+            legal = not reasons
+            if legal and action == "undo" and stack is None:
+                legal = None  # The preceding missing state hid the move order.
+            if legal and stack is not None and transition is not None:
+                if action == "move":
+                    stack.append(transition)
+                else:
+                    stack.pop()
+        if legal is not True:
+            stack = None
+        audits.append({
+            "step": step_number,
+            "protocol_valid": protocol_valid,
+            "state_exact": bool(state_exact),
+            "is_legal": legal,
+            "legality_reasons": reasons,
+            "state_reasons": list(state_reasons),
+        })
+        previous = current
+    return tuple(audits)
 
 
 def _generate_messages_for_phase(
@@ -910,6 +1010,7 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
             if joint_flags
             else None
         )
+        group.update(_history_observations(selected))
     multimodal_results = [result for result in results if result.input_mode is not None]
     paired_summary = (
         summarize_paired_modes(multimodal_results) if multimodal_results else {}
@@ -1027,6 +1128,7 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
         "total": total,
         "success": success_count,
         "success_rate": success_count / total if total else 0.0,
+        **_history_observations(history_results),
         "by_tag": by_tag,
         "by_difficulty": _group_results(results, "difficulty"),
         "by_capability": _group_results(results, "capability"),
@@ -1101,10 +1203,26 @@ def summarize_one_stroke(results: list[OneStrokeInstanceResult]) -> dict[str, An
     }
 
 
+def _history_observations(
+    results: Sequence[OneStrokeInstanceResult],
+) -> dict[str, int | float | None]:
+    legal = [result.is_legal for result in results if result.is_legal is not None]
+    process = [
+        result.history_process_score for result in results
+        if result.history_process_score is not None
+    ]
+    return {
+        "legality_denominator": len(legal),
+        "legality_rate": sum(legal) / len(legal) if legal else None,
+        "history_process_denominator": len(process),
+        "history_process_score": sum(process) / len(process) if process else None,
+    }
+
+
 def _group_results(
     results: list[OneStrokeInstanceResult],
     field: str,
-) -> dict[str, dict[str, int | float]]:
+) -> dict[str, dict[str, int | float | None]]:
     groups: dict[str, list[OneStrokeInstanceResult]] = {}
     for result in results:
         groups.setdefault(str(getattr(result, field)), []).append(result)

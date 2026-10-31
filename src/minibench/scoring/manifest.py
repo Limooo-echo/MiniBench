@@ -194,7 +194,7 @@ def _condition_modes(exp: dict, family: str, dim: str) -> tuple[str, ...]:
             raise ValueError(f"{exp['id']}: protocol.evaluation must be a mapping")
         if "memory_modes" in evaluation:
             declared = evaluation["memory_modes"]
-            supported = {"incremental_state", "deferred_reasoning"}
+            supported = {"incremental_state", "incremental_state_pro", "deferred_reasoning"}
             if (not isinstance(declared, list) or not declared
                     or not all(isinstance(mode, str) for mode in declared)
                     or len(set(declared)) != len(declared) or set(declared) - supported):

@@ -54,6 +54,11 @@ class ProjectLayoutTests(unittest.TestCase):
         self.assertTrue(paths)
         for path in paths:
             with self.subTest(path=path):
+                if path.name == "zebra_paired_qwen38.yaml":
+                    # The isolated paired runner has its own configuration schema.
+                    from scripts.run_zebra_paired import load_config
+                    self.assertEqual(load_config(path)["agent"], "direct")
+                    continue
                 config = load_experiment_config(path)
                 self.assertNotEqual(config["agent"]["name"], "openai-compatible")
 

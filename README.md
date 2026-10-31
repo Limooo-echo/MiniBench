@@ -16,7 +16,7 @@ minibench score-suite --manifest config/scoring/manifest.example.yaml --weights 
 
 示例清单固定了原题文件及 SHA-256，`runs` 留空，运行后会如实报告缺失覆盖。填入已保存的逐题结果及其原始配置来源后再发布正式比较；不要用当前配置推断旧实验。输出目录须为空或尚不存在。
 
-评分版本 2.0.0 使用 `s = Y + (1 - Y) × P`，过程分不放缩，每题每条件运行一次，维度内任务等权。连续麻将按给定牌墙逐步计算最早和牌动作集，过程分为命中步数 / 总动作步数；麻将图像题与文字题使用相同目标和过程分标准。旧缩放或人工权重配置需要更新。
+评分版本 2.1.0 使用 `s = Y + (1 - Y) × P`，过程分不放缩，每题每条件运行一次，维度内任务等权。Zebra 只按整题结果计主分，另保留格子正确率；一笔画仅历史状态使用可观测的逐步状态过程分，其余模式只计结果分。连续麻将按给定牌墙逐步计算最早和牌动作集，过程分为命中步数 / 总动作步数；麻将图像题与文字题使用相同目标和过程分标准。旧缩放或人工权重配置需要更新。
 
 完整公式、等权说明、逐题评分与清单字段见 [评分设计说明](docs/scoring-design.md)，实施和验收记录见 [评分实施记录](docs/scoring-plan.md)。
 
@@ -42,7 +42,7 @@ python -m pip install --upgrade pip setuptools wheel
 python -m pip install -c constraints/ci-py310.txt -e ".[xiangqi-generation,zebra-generation]"
 ```
 
-完整测试需要 `xiangqi-generation` 中固定版本的独立象棋裁判 `cchess`，以及 `zebra-generation` 中固定版本的独立约束求解器 Z3。普通模型评测不调用 Z3；它用于构建和重新验收 Zebra 题库。
+完整测试需要 `xiangqi-generation` 中固定版本的独立象棋裁判 `cchess`，以及 `zebra-generation` 中固定版本的独立约束求解器 Z3。Z3 用于构建和重新验收 Zebra 题库，也用于 Pro 历史状态的逐轮校验；运行包含 Pro 的 Zebra history 配置前需要安装 `zebra-generation`。普通增量的正确答案排除审计不依赖 Z3。
 
 验证安装：
 
@@ -236,7 +236,8 @@ minibench run-config config/experiments/<name>.yaml
 | `zebra_rule_codebook.yaml` | 100 道 Codebook，逐题复用直接题及答案 |
 | `zebra_rule_counterfactual.yaml` | 100 道唯一可解且答案改变的 Counterfactual |
 | `zebra_rules.yaml` | 合并两种规则模式，200 道分别计分 |
-| `zebra_history.yaml` | 100 道共享源题，两个历史模式共 200 个实例 |
+| `zebra_history.yaml` | 100 道共享源题，延后、结构化增量、结构化增量 Pro 三模式共 300 个实例 |
+| `zebra_history_thinking_on.yaml` / `zebra_history_thinking_off.yaml` | 同一套 100 题、三模式的 Qwen3.8-Flash 原生思考开／关对照 |
 
 各独立题集按 easy/medium/hard 分为 34/33/33 道。Codebook、历史与直接题共用 100 个源 ID；Counterfactual 优先配对，共有 69 个同源 ID，另外 31 个从同一官方题库补入。原题和改规则题均由独立 Z3 求解并证明唯一解，Counterfactual 使用新答案。两种规则的四维评分各占 Zebra 规则模块 50%，同时报告各自分数和覆盖率；比较规则变化的逐题影响时使用真正同源的配对子集。来源、证明和重建方式见 [Zebra 数据说明](data/zebra/README.md)。
 
@@ -248,9 +249,9 @@ minibench run-config config/experiments/zebra_rules.yaml
 minibench run-config config/experiments/zebra_history.yaml
 ```
 
-`zebra_history.yaml` 默认使用 `agent.name: passthrough`，分别运行 `incremental_state` 和 `deferred_reasoning`。前者在每条线索后记录候选状态，后者仅确认收到并在最后推理；两种模式使用相同题目、线索顺序和最终答案。所有实现 phase-aware 消息接口的推理 Agent 也可运行该多轮评测。
+`zebra_history.yaml` 使用 `agent.name: passthrough`，每条线索调用模型一次，最后再求解。`deferred_reasoning` 只确认收到线索；`incremental_state` 已改为结构化候选域；`incremental_state_pro` 另外校验每次更新是否被当前已见线索支持，不通过则保留上次状态。两个增量组使用相同格式和上下文策略，均保留全部已见线索。三模式共享题目、线索顺序和最终答案。状态协议、拒绝日志、离线检查与开／关思考运行命令见 [Zebra 历史 Pro 对照实验](docs/zebra-history-pro.md)。本版增量状态不再使用旧自由文本协议，不能与 1013／1015 旧结果直接归因为单因素变化。
 
-Zebra 与一笔画的正式模式合计 900 个评测实例，可在不调用模型的情况下重新验收题量、唯一解、官方来源、图像配对及历史剩余图：
+20261013 数据发行版的 Zebra 与一笔画原始模式合计 900 个评测实例；本版新增 Zebra Pro 模式后，按默认配置运行合计 1000 个实例。以下命令仍验收原数据发行版的题量、唯一解、官方来源、图像配对及历史剩余图，不调用模型：
 
 ```bash
 python scripts/audit_reasoning_release.py \
@@ -740,6 +741,12 @@ minibench run-task xiangqi-multimodal \
 - `results.json`：汇总指标。
 - `summary.txt`：人类可读摘要。
 - 象棋 v2 额外保存 `selected_tasks.jsonl`、`resolved_config.yaml` 与 `run_metadata.json`，记录精确抽样、数据与配置哈希、schema、renderer、运行环境和 Pikafish 指纹。
+
+汇总的 `metrics.observations` 统一记录准确率、合法率、图像识别正确率、识别正确时的准确率，并附可观测样本数。两项识图指标只纳入实际图像输入；识别正确率要求完整转写正确，条件准确率只以识别正确的题目为分母。无可观测样本时为 `null`，不补零。`metrics.observed_costs` 记录有用量证据的 token、耗时与覆盖情况，原有 `metrics.total` 和 `average_per_task` 保留。
+
+Zebra 的不合法指同一属性的行列匹配出现多个确定元素；候选域保留多个可能位置不属于这种冲突。两个结构增量组均保存每步排除审计，普通组只记录，Pro 继续执行原有线索支持检查。一笔画仅逐步提交历史状态的模式统计合法率和状态过程分：状态必须沿当前端点连续更新；`a→b、c→d、b→c` 不能因最终拼成完整路径而被视为合法。只有 ACK、没有状态观测的历史模式不推断合法性。
+
+本地实验记录保存在 `runs/`、`output/`、`outputs/`、`reports/` 等被 Git 忽略的目录。常见逐题结果、汇总与断点文件名也被忽略，以覆盖自定义输出目录。题库及源码仍正常跟踪；不要使用 `git add -f` 强制加入实验记录。
 
 在 WSL 中查看最近产生的文件：
 

@@ -1,3 +1,4 @@
+from dataclasses import asdict
 import json
 from pathlib import Path
 import tempfile
@@ -18,7 +19,12 @@ def zebra_record(
     return {
         "id": task_id,
         "size": "2*2",
-        "puzzle": "There are two houses. Alice is left of Bob. Alice drinks tea.",
+        "puzzle": (
+            "There are 2 houses, numbered 1 to 2 from left to right, as seen from across the street. "
+            "Each house is occupied by a different person. Each house has a unique attribute for each of the following characteristics:\n"
+            " - Each person has a unique name: `Alice`, `Bob`\n"
+            " - Each person has a unique favorite drink: `tea`, `milk`"
+        ),
         "solution": {
             "header": ["House", "Name", "Drink"],
             "rows": [["1", "Alice", "tea"], ["2", "Bob", "milk"]],
@@ -112,6 +118,37 @@ class HistoryAgent:
 
 
 class ZebraResumeTests(unittest.TestCase):
+    def test_legacy_legality_is_recomputed_before_resaving(self):
+        from minibench.datasets.zebra.dataset import zebra_task_from_dict
+        from minibench.datasets.zebra.evaluation import evaluate_zebra_work_item
+        from minibench.experiments.zebra import _load_zebra_predictions
+
+        task = zebra_task_from_dict(zebra_record("legacy-legality"))
+        result = evaluate_zebra_work_item(
+            task, DirectAgent(), None, state_max_tokens=512,
+            ack_max_tokens=32, final_max_tokens=None,
+        )
+        saved = asdict(result)
+        for field in ("is_legal", "legality_reasons"):
+            saved.pop(field)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            path = root / "predictions.jsonl"
+            path.write_text(json.dumps(saved) + "\n", encoding="utf-8")
+            original = path.read_bytes()
+            kwargs = dict(tasks=[task], work_plan=[(task, None)],
+                          plan_index={(task.id, "single"): 0})
+            restored = _load_zebra_predictions(root, **kwargs)
+            self.assertTrue(restored[0].is_legal)
+            self.assertEqual(path.read_bytes(), original)
+            path.write_text(json.dumps(asdict(restored[0])) + "\n", encoding="utf-8")
+            self.assertEqual(_load_zebra_predictions(root, **kwargs), restored)
+            tampered = asdict(restored[0])
+            tampered["is_legal"] = False
+            path.write_text(json.dumps(tampered) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "inconsistent is_legal"):
+                _load_zebra_predictions(root, **kwargs)
+
     def test_precreated_empty_directory_is_safely_initialized(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -486,7 +523,7 @@ class ZebraResumeTests(unittest.TestCase):
                     zebra_record(
                         "history-task",
                         capability="history_memory",
-                        clue_turns=["Only clue."],
+                        clue_turns=["Alice is in the first house."],
                     )
                 ],
             )

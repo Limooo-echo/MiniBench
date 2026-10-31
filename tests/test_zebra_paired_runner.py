@@ -69,6 +69,44 @@ class ZebraPairedRunnerTests(unittest.TestCase):
             self.assertEqual(result["raw_output"], '{"solution":')
             self.assertEqual(FakeClient.calls, 1)
 
+    def test_resume_fills_only_missing_new_legality_fields(self):
+        task = zebra_task_from_dict(item()["record"])
+        output = json.dumps({"solution": expected_solution_table(task)})
+        for missing_fields in (("is_legal",), ("legality_reasons",), ("is_legal", "legality_reasons")):
+            with self.subTest(missing_fields=missing_fields), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory)
+                result = self.execute(path, output)
+                for field in missing_fields:
+                    result["result"].pop(field)
+                journal = path / "jobs" / item()["key"] / "result.json"
+                atomic_write_json(journal, result)
+                calls_before = FakeClient.calls
+                original_bytes = journal.read_bytes()
+                restored = runner.restore_results([item()], path, "frozen")[item()["key"]]
+                self.assertTrue(restored["result"]["is_legal"])
+                self.assertEqual(restored["result"]["legality_reasons"], [])
+                self.assertEqual(FakeClient.calls, calls_before)
+                self.assertEqual(journal.read_bytes(), original_bytes)
+
+    def test_resume_still_rejects_wrong_new_fields_or_missing_old_fields(self):
+        task = zebra_task_from_dict(item()["record"])
+        output = json.dumps({"solution": expected_solution_table(task)})
+        corruptions = (
+            {"is_legal": False}, {"legality_reasons": ["invented"]},
+            {"unexpected": True}, {"success": False},
+        )
+        for changes in (*corruptions, None):
+            with self.subTest(changes=changes), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory)
+                result = self.execute(path, output)
+                if changes is None:
+                    result["result"].pop("parsed")
+                else:
+                    result["result"].update(changes)
+                atomic_write_json(path / "jobs" / item()["key"] / "result.json", result)
+                with self.assertRaisesRegex(ValueError, "score mismatch"):
+                    runner.restore_results([item()], path, "frozen")
+
     def test_parsed_empty_solution_is_distinguished_from_complete_schema(self):
         with tempfile.TemporaryDirectory() as directory:
             result = self.execute(Path(directory), '{"reasoning":"", "solution":{}}')

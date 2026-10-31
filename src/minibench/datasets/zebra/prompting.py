@@ -72,10 +72,21 @@ def build_zebra_prompt(task: ZebraTask) -> str:
 
 
 def history_system_prompt(task: ZebraTask, mode: str) -> str:
-    if mode == "incremental_state":
+    if mode in {"incremental_state", "incremental_state_pro"}:
         protocol = (
-            "After each clue, update and return a compact JSON candidate state. "
-            "The state will be preserved in the conversation for the next turn."
+            "During intermediate turns, return a complete structured candidate state as JSON "
+            'with exactly the shape {"domains": {attribute: {value: [house_numbers]}}}. '
+            "Include every attribute and every value from the background, with a "
+            "nonempty list of distinct integer house numbers from 1 to the number "
+            "of houses. A list contains the positions still possible for that value. "
+            "Only remove a position when the clues seen so far rule it out. "
+            "Do not guess a single position just because it is possible. "
+            "You may enlarge candidate lists and revise earlier decisions to correct "
+            "mistakes. The supplied previous state is a fallible working note; all "
+            "original clues remain authoritative. Return only the domains object, "
+            "without reasoning text, extra fields, or a final solution grid. "
+            "When explicitly asked to solve the puzzle at the final turn, instead "
+            "return the complete solution in the final request's JSON shape."
         )
     elif mode == "deferred_reasoning":
         protocol = (
@@ -97,14 +108,39 @@ def history_system_prompt(task: ZebraTask, mode: str) -> str:
 def history_clue_prompt(task: ZebraTask, mode: str, index: int) -> str:
     clue = task.clue_turns[index - 1]
     total = len(task.clue_turns)
-    if mode == "incremental_state":
+    if mode in {"incremental_state", "incremental_state_pro"}:
         instruction = (
-            "Use this clue to prune the candidate space. Return only JSON with "
-            'the shape {"candidate_state":"...","eliminated":"..."}. Do not '
-            "give the final grid yet."
+            "Update the complete structured domains state using the clues seen "
+            "so far. Keep all positions that have not been ruled out."
         )
     elif mode == "deferred_reasoning":
         instruction = f'Return only {{"acknowledged":{index}}}.'
     else:
         raise ValueError(f"unknown Zebra history mode: {mode}")
     return f"Clue {index} of {total}:\n{clue}\n\n{instruction}"
+
+
+def structured_history_prompt(
+    task: ZebraTask,
+    clue_count: int,
+    state: dict[str, object],
+    *,
+    final: bool = False,
+) -> str:
+    """Rebuild the same clean, prefix-only context for both state conditions."""
+    clues = "\n".join(
+        f"{index}. {clue}"
+        for index, clue in enumerate(task.clue_turns[:clue_count], start=1)
+    )
+    instruction = (
+        final_solution_instruction(task)
+        if final else
+        "Return the complete updated domains JSON only. You may revise or enlarge "
+        "previous candidate lists; do not output the final grid yet."
+    )
+    return (
+        f"Clues received so far ({clue_count} of {len(task.clue_turns)}):\n{clues}\n\n"
+        "Previous committed candidate state (a fallible working note):\n"
+        f"{json.dumps(state, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        f"{instruction}"
+    )

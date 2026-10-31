@@ -22,6 +22,7 @@ _DIAGNOSTICS = (
     "transcription_exact", "is_legal", "is_optimal", "legality_rate", "optimal_rate",
     "cp_loss", "avg_cp_loss", "first_move_optimal", "answer_correct", "action_errors",
     "move_average_score", "move_median_score", "draws", "discards", "win_score",
+    "history_process_score", "input_mode",
 )
 
 
@@ -107,42 +108,27 @@ def _zebra(record: dict, task: dict | None) -> dict:
         scored = score_zebra_output(zebra_task_from_dict(task), record["raw_output"])
         if not scored["parsed"]:
             return _invalid(record, "invalid_solution_table")
-        return _result(record, float(scored["success"]), scored["cell_accuracy"], evidence={
+        return _result(record, float(scored["success"]), 0.0, evidence={
             "method": "zebra_existing_cell_validator", "correct_cells": scored["correct_cells"],
-            "total_cells": scored["total_cells"], "source": "raw_output_and_original_task"})
+            "total_cells": scored["total_cells"], "source": "raw_output_and_original_task"},
+            diagnostics={"cell_accuracy": scored["cell_accuracy"], "is_legal": scored.get("is_legal")})
     correct, total = record.get("correct_cells"), record.get("total_cells")
     if (isinstance(correct, int) and not isinstance(correct, bool)
             and isinstance(total, int) and not isinstance(total, bool) and 0 <= correct <= total and total > 0):
-        return _result(record, float(correct == total), correct / total, evidence={
-            "method": "zebra_saved_cell_counts", "correct_cells": correct, "total_cells": total})
+        return _result(record, float(correct == total), 0.0, evidence={
+            "method": "zebra_saved_cell_counts", "correct_cells": correct, "total_cells": total},
+            diagnostics={"cell_accuracy": correct / total})
     if record.get("parsed") is False or record.get("no_answer") is True:
         return _invalid(record, "invalid_solution_table")
-    return _unavailable(record, "missing_original_answer_or_cell_counts", _outcome(record))
+    y = _outcome(record)
+    return _result(record, y, 0.0 if y is not None else None,
+                   status="ok" if y is not None else "missing",
+                   evidence={"method": "binary_saved_outcome"})
 
 
-def _path_credit(task: Any, path: list[str], edges: list[tuple[str, str]],
-                 start: str | None) -> tuple[float, dict]:
-    from minibench.datasets.one_stroke.dataset import has_one_stroke_solution
-    denominator = len(edges)
-    evidence: dict = {"method": "extendible_legal_prefix", "required_edges": denominator,
-                      "submitted_edges": max(0, len(path) - 1), "start": start, "end": task.end}
-    if not path or any(v not in task.vertices for v in path) or (start is not None and path[0] != start):
-        return 0.0, {**evidence, "prefix_valid": False}
-    remaining = Counter(tuple(sorted(edge)) for edge in edges)
-    for a, b in zip(path, path[1:]):
-        edge = tuple(sorted((a, b)))
-        if remaining[edge] <= 0:
-            return 0.0, {**evidence, "prefix_valid": False}
-        remaining[edge] -= 1
-    residual = tuple(edge for edge, count in remaining.items() for _ in range(count))
-    extendible = has_one_stroke_solution(task.vertices, residual, start=path[-1], end=task.end)
-    evidence.update({"prefix_valid": True, "extendible": extendible, "remaining_edges": len(residual)})
-    return ((len(path) - 1) / denominator if denominator and extendible else 0.0), evidence
-
-
-def _one_stroke(record: dict, task: dict | None, dimension: str) -> dict:
+def _one_stroke(record: dict, task: dict | None, dimension: str, mode: str) -> dict:
     from minibench.datasets.one_stroke.dataset import (
-        one_stroke_task_from_dict, one_stroke_edge_ids, simulate_one_stroke_history,
+        one_stroke_task_from_dict, simulate_one_stroke_history,
     )
     from minibench.datasets.one_stroke.evaluation import (
         extract_path, extract_no_solution, extract_graph_transcription,
@@ -156,7 +142,8 @@ def _one_stroke(record: dict, task: dict | None, dimension: str) -> dict:
     no_solution = extract_no_solution(raw) if has_raw else record.get("no_solution") is True
     y = _outcome(record, "history_final_success", "success") if dimension == "H" else _outcome(record)
     parsed_task = one_stroke_task_from_dict(task) if task is not None else None
-    evidence: dict = {}
+    evidence: dict = {"method": "binary_path_outcome", "process_score_applicable": False}
+    diagnostics: dict = {}
     if parsed_task is not None and (has_raw or path is not None or no_solution):
         if not parsed_task.solution_exists:
             y = float(no_solution)
@@ -168,46 +155,33 @@ def _one_stroke(record: dict, task: dict | None, dimension: str) -> dict:
         else:
             y = float(validate_one_stroke_path(parsed_task, path)[0])
     if dimension == "V":
-        if has_raw:
-            _, recognized = extract_graph_transcription(raw)
-            if recognized is None:
-                return _result(record, y, 0.0, status="invalid" if y == 0 else "ok",
-                               reasons=["missing_or_invalid_submitted_edges"])
-        else:
-            recognized = record.get("recognized_edges")
+        vertices, recognized = extract_graph_transcription(raw) if has_raw else (
+            record.get("recognized_vertices"), record.get("recognized_edges"))
         predicted = _edge_counter(recognized)
-        if predicted is None:
-            return _unavailable(record, "missing_graph_transcription_log", y)
         expected = _edge_counter(task.get("edges")) if task is not None else None
-        if expected is None:
-            return _unavailable(record, "missing_original_graph", y)
-        p = _counter_f1(predicted, expected)
-        return _result(record, y, p, status="ok" if y is not None else "missing", evidence={
-            "method": "edge_multiset_f1", "matched_edges": sum((predicted & expected).values()),
-            "predicted_edges": sum(predicted.values()), "expected_edges": sum(expected.values())})
-    if (not parsed_task.solution_exists if parsed_task is not None else record.get("solution_exists") is False):
-        return _result(record, y, 0.0, status="ok" if y is not None else "missing",
-                       evidence={"method": "binary_unsolvable"})
-    if no_solution:
-        return _invalid(record, "incorrect_no_solution_claim")
-    if path is None:
-        if has_raw:
-            return _invalid(record, "invalid_or_missing_submitted_path")
-        return _unavailable(record, "missing_path_log", y)
-    if parsed_task is None:
-        return _unavailable(record, "missing_original_graph", y)
-    edges = list(parsed_task.edges)
-    start = parsed_task.start
-    if dimension == "H":
-        state = simulate_one_stroke_history(parsed_task)
-        remaining = set(state.remaining_edge_ids)
-        edges = [edge for edge_id, edge in zip(one_stroke_edge_ids(parsed_task.edges), edges)
-                 if edge_id in remaining]
-        start = state.current_vertex
-        evidence["history_remaining_edge_ids"] = list(state.remaining_edge_ids)
-    p, prefix_evidence = _path_credit(parsed_task, path, edges, start)
-    evidence.update(prefix_evidence)
-    return _result(record, y, p, status="ok" if y is not None else "missing", evidence=evidence)
+        if expected is not None and (predicted is not None or has_raw):
+            diagnostics["edge_f1"] = _counter_f1(predicted, expected) if predicted is not None else 0.0
+            diagnostics["graph_transcription_exact"] = (
+                predicted == expected and isinstance(vertices, list)
+                and all(isinstance(v, str) for v in vertices)
+                and Counter(vertices) == Counter(task["vertices"]))
+    p = 0.0 if y is not None else None
+    if dimension == "H" and (record.get("memory_mode") or mode) == "incremental_state":
+        evidence["process_score_applicable"] = True
+        process = record.get("history_process_score")
+        if _number(process) and 0 <= process <= 1:
+            p = float(process)
+            evidence["method"] = "history_state_accuracy"
+        else:
+            p = None
+            evidence["process_observed"] = False
+    else:
+        diagnostics["is_legal"] = None
+        diagnostics["legality_rate"] = None
+        diagnostics["history_process_score"] = None
+    status = "ok" if y is not None and (y == 1 or p is not None) else "missing"
+    return _result(record, y, p, status=status,
+                   evidence=evidence, diagnostics=diagnostics)
 
 
 def _mahjong(record: dict, task: dict | None, dimension: str) -> dict:
@@ -310,7 +284,7 @@ def score_record(family: str, dimension: str, record: dict, task: dict | None, *
         if family == "zebra":
             result = _zebra(record, task)
         elif family == "one_stroke":
-            result = _one_stroke(record, task, dimension)
+            result = _one_stroke(record, task, dimension, mode)
         elif family == "mahjong":
             result = _mahjong(record, task, dimension)
         elif family in {"mahjong_solo", "mahjong_rule_variants"}:

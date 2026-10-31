@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,8 @@ def _zebra_code_sha256() -> str:
         package_root / "datasets" / "zebra" / "dataset.py",
         package_root / "datasets" / "zebra" / "evaluation.py",
         package_root / "datasets" / "zebra" / "prompting.py",
+        package_root / "datasets" / "zebra" / "state_validation.py",
+        package_root / "datasets" / "zebra" / "validation.py",
         *sorted((package_root / "agents").glob("*.py")),
     ]
     file_hashes = {
@@ -104,6 +107,7 @@ def _run_checkpointed_zebra_experiment(
     run_config: dict[str, Any],
 ) -> tuple[Path, dict[str, Any]]:
     from minibench.datasets.zebra.evaluation import (
+        MEMORY_MODES,
         plan_zebra_work_items,
         write_zebra_snapshot,
         zebra_result_key,
@@ -111,7 +115,7 @@ def _run_checkpointed_zebra_experiment(
 
     memory_modes = evaluation_config.get(
         "memory_modes",
-        ("incremental_state", "deferred_reasoning"),
+        MEMORY_MODES,
     )
     if isinstance(memory_modes, str):
         memory_modes = (memory_modes,)
@@ -367,12 +371,15 @@ def _run_checkpointed_zebra_experiment(
                 tasks,
                 agent,
                 memory_modes=selected_modes,
-                state_max_tokens=int(evaluation_config.get("state_max_tokens", 512)),
+                state_max_tokens=int(evaluation_config.get("state_max_tokens", 2048)),
                 ack_max_tokens=int(evaluation_config.get("ack_max_tokens", 32)),
                 final_max_tokens=(
                     int(final_max_tokens) if final_max_tokens is not None else None
                 ),
                 show_progress=bool(evaluation_config.get("show_progress", False)),
+                state_validation_timeout_ms=int(
+                    evaluation_config.get("state_validation_timeout_ms", 10000)
+                ),
                 skip_keys=completed_keys,
                 on_work_item_start=work_item_started,
                 on_result=checkpoint_result,
@@ -571,6 +578,16 @@ def _load_zebra_predictions(
                     f"predictions.jsonl has inconsistent {field} for "
                     f"{key[0]}/{key[1]}"
                 )
+        for field in ("is_legal", "legality_reasons"):
+            if field in raw_result and getattr(result, field) != rescored[field]:
+                raise ValueError(
+                    f"predictions.jsonl has inconsistent {field} for "
+                    f"{key[0]}/{key[1]}"
+                )
+        # Older rows omit these measurements. Materialize them from the raw
+        # answer before a snapshot makes the dataclass defaults explicit.
+        result = replace(result, is_legal=rescored["is_legal"],
+                         legality_reasons=rescored["legality_reasons"])
         if expected_mode is None and result.conversation:
             raise ValueError(
                 f"predictions.jsonl has a conversation for direct work item "

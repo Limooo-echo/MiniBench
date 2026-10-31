@@ -437,18 +437,89 @@ class EvaluateConfigTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_experiment_config({**base, "provider": provider})
 
-    def test_zebra_history_config_enables_bounded_retry_and_paired_modes(self):
+    def test_zebra_history_config_uses_structured_paired_modes(self):
         config = load_experiment_config("config/experiments/zebra_history.yaml")
 
-        self.assertEqual(config["provider"]["max_retries"], 3)
-        self.assertEqual(config["provider"]["retry_initial_backoff_seconds"], 1.0)
-        self.assertEqual(config["provider"]["retry_max_backoff_seconds"], 30.0)
-        self.assertEqual(config["run"]["run_name"], "zebra-history-both-100-20261013")
+        self.assertEqual(config["provider"]["name"], "deepseek")
+        self.assertEqual(config["provider"]["max_retries"], 0)
+        self.assertEqual(
+            config["run"]["run_name"],
+            "zebra-history-structured-pro-100-20261027",
+        )
         self.assertEqual(config["run"]["on_existing"], "error")
         self.assertEqual(
             config["evaluation"]["memory_modes"],
-            ["incremental_state", "deferred_reasoning"],
+            ["deferred_reasoning", "incremental_state", "incremental_state_pro"],
         )
+        self.assertEqual(config["evaluation"]["state_max_tokens"], 2048)
+        self.assertEqual(config["evaluation"]["state_validation_timeout_ms"], 10000)
+
+    def test_zebra_history_thinking_configs_isolate_thinking_treatment(self):
+        on = load_experiment_config(
+            "config/experiments/zebra_history_thinking_on.yaml"
+        )
+        off = load_experiment_config(
+            "config/experiments/zebra_history_thinking_off.yaml"
+        )
+
+        self.assertEqual(on["task"], off["task"])
+        self.assertEqual(on["task"]["path"], "data/zebra/history_eval.jsonl")
+        self.assertIsNone(on["task"]["limit"])
+        self.assertEqual(on["task"]["task_ids"], [])
+        self.assertEqual(on["agent"], off["agent"])
+        self.assertEqual(on["agent"], {
+            "name": "direct", "prompt_version": "v2", "max_format_repairs": 0,
+            "final_temperature": 0.0, "trace": "full",
+        })
+        self.assertEqual(on["evaluation"], off["evaluation"])
+        self.assertEqual(
+            on["evaluation"]["memory_modes"],
+            ["deferred_reasoning", "incremental_state", "incremental_state_pro"],
+        )
+        for field, expected in (
+            ("state_max_tokens", 2048),
+            ("ack_max_tokens", 32),
+            ("final_max_tokens", 4096),
+            ("state_validation_timeout_ms", 10000),
+        ):
+            with self.subTest(field=field):
+                self.assertEqual(on["evaluation"][field], expected)
+
+        on_provider = dict(on["provider"])
+        off_provider = dict(off["provider"])
+        on_thinking = on_provider.pop("extra_body")
+        off_thinking = off_provider.pop("extra_body")
+        self.assertEqual(on_provider, off_provider)
+        self.assertEqual(on_provider["name"], "qwen")
+        self.assertEqual(on_provider["model"], "qwen3.8-flash")
+        self.assertEqual(
+            on_provider["base_url"],
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+        self.assertEqual(on_provider["temperature"], 0.0)
+        self.assertEqual(on_provider["max_retries"], 0)
+        self.assertEqual(
+            on_thinking,
+            {
+                "enable_thinking": True,
+                "thinking_budget": 7168,
+                "preserve_thinking": False,
+                "stream": False,
+            },
+        )
+        self.assertEqual(
+            off_thinking,
+            {
+                "enable_thinking": False,
+                "preserve_thinking": False,
+                "stream": False,
+            },
+        )
+        on_run = dict(on["run"])
+        off_run = dict(off["run"])
+        self.assertNotEqual(on_run.pop("run_name"), off_run.pop("run_name"))
+        self.assertEqual(on_run, off_run)
+        self.assertEqual(on_run["on_existing"], "error")
 
     def test_missing_section_reports_clear_error(self):
         with self.assertRaisesRegex(ValueError, "missing required section: provider"):

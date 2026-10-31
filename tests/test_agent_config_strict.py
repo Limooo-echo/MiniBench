@@ -17,8 +17,10 @@ def experiment(agent):
 
 
 class StrictAgentConfigTests(unittest.TestCase):
-    def test_all_checked_in_experiment_yamls_validate(self):
-        paths = sorted(Path("config/experiments").glob("*.yaml"))
+    def test_all_unified_experiment_yamls_validate(self):
+        # The paired runner owns a separate schema, checked by test_project_layout.
+        paths = sorted(path for path in Path("config/experiments").glob("*.yaml")
+                       if path.name != "zebra_paired_qwen38.yaml")
         self.assertTrue(paths)
 
         for path in paths:

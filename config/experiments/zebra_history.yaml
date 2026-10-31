@@ -13,21 +13,21 @@ provider:
   max_tokens: 4096
   timeout: 120
   json_mode: true
-  max_retries: 3
-  retry_initial_backoff_seconds: 1.0
-  retry_max_backoff_seconds: 30.0
+  max_retries: 0
 
 evaluation:
   memory_modes:
-    - incremental_state
     - deferred_reasoning
+    - incremental_state
+    - incremental_state_pro
 
-  state_max_tokens: 512
+  state_max_tokens: 2048
   ack_max_tokens: 32
   final_max_tokens: 4096
+  state_validation_timeout_ms: 10000
   show_progress: true
 
 run:
   output_dir: runs
-  run_name: zebra-history-both-100-20261013
+  run_name: zebra-history-structured-pro-100-20261027
   on_existing: error
