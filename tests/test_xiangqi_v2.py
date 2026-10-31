@@ -434,8 +434,30 @@ class XiangqiV2DataTests(unittest.TestCase):
                 with patch(
                     "minibench.experiments.runner.get_task_family_spec",
                     return_value=smoke_spec,
-                ), patch("minibench.experiments.xiangqi._evaluate", return_value=[]):
+                ), patch("minibench.experiments.xiangqi._evaluate", return_value=[]), patch(
+                    "minibench.datasets.xiangqi.engines.pikafish.resolve_pikafish_executable",
+                    return_value=root / "offline-engine-fixture",
+                ) as resolve_engine, patch(
+                    "minibench.datasets.xiangqi.runtime.validate_engine_fingerprint"
+                ) as validate_engine, patch(
+                    "minibench.datasets.xiangqi.engines.pikafish.pikafish_fingerprint",
+                    return_value={"test_fixture": True},
+                ) as fingerprint_engine:
+                    # Exercise config/metadata wiring without an installed engine.
+                    # NativeTransportTests separately enforces fail-closed preflight.
                     run_dir, summary = run_family_experiment(config)
+                if family == "xiangqi-rule-variants":
+                    resolve_engine.assert_not_called()
+                    validate_engine.assert_not_called()
+                    fingerprint_engine.assert_not_called()
+                else:
+                    self.assertEqual(resolve_engine.call_count, 2)
+                    validate_engine.assert_called_once_with(
+                        root / "offline-engine-fixture",
+                        binary_sha256=config["evaluation"]["pikafish_binary_sha256"],
+                        nnue_sha256=config["evaluation"]["pikafish_nnue_sha256"],
+                    )
+                    fingerprint_engine.assert_called_once_with(root / "offline-engine-fixture")
                 self.assertEqual(summary["total"], 1)
                 self.assertTrue((run_dir / "resolved_config.yaml").is_file())
                 self.assertTrue((run_dir / "run_metadata.json").is_file())

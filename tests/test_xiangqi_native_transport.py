@@ -65,6 +65,29 @@ class NativeTransportTests(unittest.TestCase):
                 self.assertEqual(state["completed_results"],0)
                 self.assertEqual((root/"run/predictions.jsonl").read_text(),"")
 
+    def test_missing_engine_blocks_pinned_run_before_agent_construction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(xiangqi, "_write_xiangqi_selected_tasks", return_value=root / "selected.jsonl"), \
+                 patch("minibench.datasets.xiangqi.engines.pikafish.find_pikafish_executable", return_value=None), \
+                 patch.object(xiangqi, "_write_xiangqi_run_metadata") as metadata, \
+                 patch.object(xiangqi, "make_agent_from_config") as make_agent, \
+                 patch.object(xiangqi, "_evaluate") as evaluate:
+                with self.assertRaisesRegex(ValueError, "Pikafish executable was not found"):
+                    xiangqi._run_checkpointed_xiangqi_experiment(
+                        Mock(), [{"id": "fixture"}], {"agent": {"name": "direct"}},
+                        root / "tasks.jsonl", "xiangqi-history",
+                        {"pikafish_binary_sha256": "pinned-judge"},
+                        {"output_dir": str(root), "run_name": "run"},
+                    )
+                metadata.assert_not_called()
+                make_agent.assert_not_called()
+                evaluate.assert_not_called()
+            state = json.loads((root / "run/run_state.json").read_text())
+            self.assertEqual(state["status"], "error")
+            self.assertEqual(state["completed_results"], 0)
+            self.assertEqual((root / "run/predictions.jsonl").read_text(), "")
+
     def test_pinned_engine_mismatch_propagates_before_agent_stage(self):
         with patch("minibench.datasets.xiangqi.engines.pikafish.resolve_pikafish_executable",return_value=Path("/fixture")) as resolve, patch("minibench.datasets.xiangqi.runtime.validate_engine_fingerprint",side_effect=ValueError("stale judge")) as validate:
             with self.assertRaisesRegex(ValueError,"stale judge"):
