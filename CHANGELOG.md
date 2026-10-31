@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased — C2 100 paired positions and separate group accounting
+
+- Expand C2 to 100 standard conditions and 100 same-position focus variants.
+  Keep 50 short/50 medium baseline positions; independently certify each
+  variant's real distance rather than forcing the same band or mating line.
+- Prioritize changes to retained optimal strategies, first moves and mate
+  distance; preserve paired impact evidence and trace every derived position.
+  Only complete independently re-proved trees may pass the publishing gate.
+- Separate H2 full-state/history and C2 standard/variant outcomes, tokens, time
+  and configured-price estimates. Preserve per-rule detail and physical API
+  retry/error accounting without counting replay as another billed request.
+- Export condition-metrics JSON/CSV beside comparison charts. Full nine-Agent
+  runs contain 5,400 conditions; the 30-condition direct pilot is unchanged.
+
+## Unreleased — H2/C2 whole-episode legality conditioning
+
+- Add mate within the certified shortest bound conditional on every Agent
+  decision returning a legal move. Keep legal non-mating games in the denominator
+  and preserve the original mate and move-legality metrics.
+- Persist exact decision counts and expose numerator, denominator, eligible
+  coverage and unknown evidence in native, browser and cloud reports/plots.
+  Infrastructure errors are excluded; empty denominators remain N/A.
+
+## Unreleased — paired D3/M2 perception-gated metrics
+
+- Preserve raw mate, legality, transcription and model-output evidence. Apply
+  the same exact full-board transcription and true-board legality gate to both
+  the D3 text condition and M2 image condition.
+- Add checkmate conditional on that gate and joint success over all scorable
+  conditions, with explicit numerators, denominators and eligible counts.
+  Empty denominators and unavailable legacy evidence remain unknown, not zero.
+- Expose the additional metrics in native/API and browser summaries and cloud
+  comparison tables/plots without replacing the original scores or prompts.
+
 ## 2026-10-24 — independent Xiangqi strategy verification
 
 - Add an independent bounded solver using the production rules backend rather

@@ -237,9 +237,10 @@ class CloudPlanTests(unittest.TestCase):
             self.assertTrue(all(r["value"] is None and r["completed"] == 0 for r in rows))
             c2 = [r for r in rows if r["task"] == "c2"]
             self.assertEqual({r["mode"] for r in c2},
-                             {"all", "standard", "horse-no-leg-block", "chariot-no-center", "soldier-free-retreat"})
+                             {"all", "standard", "variant", "horse-no-leg-block", "chariot-no-center", "soldier-free-retreat"})
             self.assertTrue(all(r["metric"] != "avg_cp_loss" for r in c2))
-            self.assertEqual(sum(r["planned"] for r in c2 if r["metric"] == "mate_within_shortest_rate" and r["mode"] != "all"), 6)
+            self.assertEqual(sum(r["planned"] for r in c2 if r["metric"] == "mate" and r["mode"] in {"standard", "variant"}), 6)
+            self.assertEqual(sum(r["planned"] for r in c2 if r["metric"] == "mate" and r["mode"] in {"horse-no-leg-block", "chariot-no-center", "soldier-free-retreat"}), 3)
 
     def test_credentials_are_rejected_before_preparation(self):
         for value in ({"api_key": "private"}, {"extra_body": {"headers": {}}},
@@ -260,8 +261,8 @@ class CloudPlanTests(unittest.TestCase):
             with warnings.catch_warnings():
                 warnings.simplefilter("error", UserWarning)
                 charts = plot_suite(suite)
-            self.assertEqual(len(list(charts.glob("*.png"))), 2)
-            self.assertEqual(len(list(charts.glob("*.svg"))), 2)
+            self.assertEqual(len(list(charts.glob("*.png"))), 5)  # D3 current five-field public vector
+            self.assertEqual(len(list(charts.glob("*.svg"))), 5)
             self.assertTrue((charts / "comparison.csv").is_file())
 
     def test_c2_changed_tree_is_explicitly_blocked_without_paid_calls(self):
@@ -283,7 +284,7 @@ class CloudPlanTests(unittest.TestCase):
             cfg = root / "formal.yaml"
             cfg.write_text(yaml.safe_dump(raw))
             plan = cloud.prepare(cfg, root / "formal")
-            self.assertEqual(plan["planned_jobs"], 4500)
+            self.assertEqual(plan["planned_jobs"], 5400)
             self.assertEqual(len(plan["agents"]), 9)
             raw["agents"] = ["direct"]
             raw["pilot_count"] = 1
@@ -437,9 +438,32 @@ class CloudHTTPIntegrationTests(unittest.TestCase):
             self.assertEqual(state["forced_worker_pids"], [])
             self.assertEqual({p.pid for p in mp.active_children()}, children_before)
             summary = json.loads((parallel_suite / "summary.json").read_text())
-            self.assertEqual(summary["usage"]["known_total_tokens"],
-                             summary["usage"]["known_success_tokens"] + summary["usage"]["known_failed_tokens"])
-            self.assertGreaterEqual(summary["usage"]["attempts_without_usage"], 1)
+            # The 503 wins a race against .15s successful responses. Cleanup may
+            # finish before ANY usage is durably saved; unknown totals must not
+            # become free/zero usage. Derive the expected subtotal independently
+            # from this fixture's actual physical journals, not completed jobs.
+            attempts = [attempt for job in parallel_plan["jobs"]
+                        for attempt in cloud.call_attempts(parallel_suite / "jobs" / job["key"] / "calls")]
+            known = []
+            for attempt in attempts:
+                tokens = (attempt.get("usage") or {}).get("total_tokens")
+                if type(tokens) is int:
+                    self.assertEqual(tokens, 7)  # This HTTP fixture always emits 7.
+                    self.assertNotEqual((attempt.get("usage_validation") or {}).get("status"), "invalid")
+                    known.append((attempt["status"], tokens))
+            usage = summary["usage"]
+            self.assertEqual(usage["started_attempts"], len(attempts))
+            self.assertEqual(usage["attempts_without_usage"], len(attempts) - len(known))
+            self.assertGreaterEqual(usage["attempts_without_usage"], 1)
+            self.assertFalse(usage["usage_complete"])
+            self.assertIsNone(usage["total_tokens"])
+            if known:
+                self.assertEqual(usage["known_success_tokens"], sum(n for status, n in known if status == "success"))
+                self.assertEqual(usage["known_failed_tokens"], sum(n for status, n in known if status != "success"))
+                self.assertEqual(usage["known_total_tokens"], sum(n for _, n in known))
+            else:
+                for key in ("known_success_tokens", "known_failed_tokens", "known_total_tokens"):
+                    self.assertIsNone(usage[key])
 
 
 if __name__ == "__main__":

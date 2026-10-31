@@ -222,7 +222,7 @@ class RuntimeErrorsTests(unittest.TestCase):
         self.assertEqual(result.error["stage"], "opponent_engine")
         self.assertEqual(result.steps[0]["uci"], "a8a7")
 
-    def test_h2_complete_history_reaches_second_turn(self):
+    def test_h2_lagged_one_round_reaches_second_turn_without_old_chat(self):
         class SequenceAgent(FixedAgent):
             def generate(self, *_args):
                 self.calls += 1
@@ -234,9 +234,19 @@ class RuntimeErrorsTests(unittest.TestCase):
             result = h2.evaluate_history_tasks([task_fixture(board=board_fixture(with_pawn=True))], agent)[0]
         self.assertEqual(result.status, "ok")
         self.assertEqual(len(agent.messages), 2)
-        self.assertEqual([m["role"] for m in agent.messages[1]], ["system", "user", "assistant", "user"])
-        self.assertEqual(agent.messages[1][1], agent.messages[0][1])
-        self.assertIn("a6a5", agent.messages[1][-1]["content"])
+        for messages in agent.messages:
+            self.assertEqual([m["role"] for m in messages], ["system", "user"])
+        self.assertNotEqual(agent.messages[1][1], agent.messages[0][1])
+        prompt = agent.messages[1][-1]["content"]
+        self.assertIn("Mode: LAGGED STATE", prompt)
+        self.assertIn(h2.board_state_text(board_fixture(with_pawn=True)), prompt)
+        self.assertIn("a8a7", prompt)
+        self.assertIn("a6a5", prompt)
+        current = VariantBoard(board_fixture(with_pawn=True), [])
+        for side, uci in ((1, "a8a7"), (-1, "a6a5")):
+            current.apply(next(move for move in current.legal_moves(side) if move.to_uci() == uci))
+        self.assertNotIn(h2.board_state_text(current.board), prompt)
+        self.assertEqual(result.history_transport, "lagged_one_round_chat")
 
     def test_m2_no_extra_image_answer_and_reset_each_condition(self):
         agent = FixedAgent("first invalid answer")
@@ -338,26 +348,67 @@ class RuntimeErrorsTests(unittest.TestCase):
             )
         self.assertTrue(first.success)
         self.assertTrue(second.success)
-        self.assertTrue(first.steps[0]["is_optimal"])
-        self.assertTrue(second.steps[0]["is_optimal"])
-        self.assertEqual(first.avg_variant_loss, 0.0)
-        self.assertEqual(second.avg_variant_loss, 0.0)
+        for result in (first, second):
+            self.assertIsNone(result.steps[0]["is_optimal"])
+            self.assertIsNone(result.avg_variant_loss)
+            self.assertEqual(result.outcome_labels["mate"], 1)
+            self.assertEqual(result.outcome_labels["legal"], 1)
         self.assertEqual((wrong.status, wrong.success), ("ok", False))
         self.assertEqual(wrong.legality_rate, 1.0)
-        self.assertEqual(wrong.avg_variant_loss, 10.0)
-        self.assertEqual(oracle.call_args.kwargs["depth"], 3)
+        self.assertIsNone(wrong.avg_variant_loss)
+        self.assertEqual(wrong.outcome_labels["mate"], 0)
+        oracle.assert_not_called()  # No opponent turn and no loss-only search.
         with self.assertRaisesRegex(ValueError, "search_depth=3"):
             c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent(), search_depth=2)
 
     def test_c2_judge_and_model_errors_are_missing(self):
-        with patch.object(c2, "score_moves_cpe", side_effect=RuntimeError("judge crashed")):
-            judge = c2.evaluate_rule_variant_task(dict_fixture(), FixedAgent())
+        with patch.object(c2, "score_moves_cpe", side_effect=RuntimeError("judge crashed")) as search:
+            judge = c2.evaluate_rule_variant_task(
+                dict_fixture(board=board_fixture(with_pawn=True), oracle={"mate_in_plies": 3}),
+                FixedAgent('{"move":"a8a7"}'),
+            )
+        search.assert_called_once()
+        self.assertEqual(search.call_args.args[1], -1)
+        self.assertEqual(search.call_args.kwargs["depth"], 3)
+        self.assertEqual(judge.steps[0]["uci"], "a8a7")
+        self.assertTrue(judge.steps[0]["is_legal"])
+        self.assertEqual((judge.status, judge.success), ("error", None))
+        self.assertEqual(judge.error["stage"], "opponent_search")
         provider = c2.evaluate_rule_variant_task(
             dict_fixture(), FixedAgent(error=TimeoutError("timeout"))
         )
-        self.assertEqual(judge.error["stage"], "judge")
         self.assertEqual(provider.error["stage"], "model")
         self.assertIsNone(c2.summarize_rule_variants([judge, provider])["mate_rate"])
+
+    def test_c2_certified_tree_game_does_not_run_loss_or_fallback_search(self):
+        from minibench.core.checkpoint import atomic_write_json
+        from minibench.datasets.xiangqi.schema import fen_to_board
+        from minibench.datasets.xiangqi.solution_tree import build_tree
+        fen = "5ab2/3ka4/1NN6/p7p/2R3R2/2B1C4/2P3P2/9/4K4/3A1A3 w - - 0 1"
+        record = {"id": "fixture", "fen": fen, "oracle": {"mate_in_plies": 3}}
+        tree = build_tree(record, max_attacker_moves=2, seconds=10)
+        self.assertTrue(tree["shortest_certified"])
+        first = "c7d5"
+        defender = tree["nodes"][tree["nodes"][tree["root"]]["edges"][first]]
+        reply = min(defender["edges"])
+        second = min(tree["nodes"][defender["edges"][reply]]["edges"])
+        class SequenceAgent(FixedAgent):
+            def generate(self, *_args):
+                self.calls += 1
+                return json.dumps({"move": first if self.calls == 1 else second})
+        board, _ = fen_to_board(fen)
+        task = dict_fixture(**record, board=board, max_plies=3)
+        with tempfile.TemporaryDirectory() as directory:
+            atomic_write_json(Path(directory) / "fixture.json", tree)
+            with patch.object(c2, "score_moves_cpe", side_effect=AssertionError("on-tree play must not search")) as search:
+                result = c2.evaluate_rule_variant_task(task, SequenceAgent(), solution_tree_dir=directory)
+        search.assert_not_called()
+        self.assertEqual((result.status, result.success), ("ok", True))
+        self.assertEqual([step["uci"] for step in result.steps], [first, reply, second])
+        self.assertEqual(result.steps[1]["opponent_source"], "certified-tree")
+        self.assertIsNone(result.avg_variant_loss)
+        self.assertEqual(result.outcome_labels["mate"], 1)
+        self.assertNotIn("recognition_exact", result.outcome_labels)
 
     def test_architecture_format_repair_failure_is_invalid_in_every_family(self):
         for family in ("d3", "h2", "c2", "m2"):

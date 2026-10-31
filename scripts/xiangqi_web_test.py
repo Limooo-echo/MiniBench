@@ -24,10 +24,14 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from minibench.core.agent import ChatMessage
+from minibench.cloud import code_hash
 from minibench.core.multimodal import ImageAttachment
 from minibench.core.prompts import FINAL_ANSWER_SYSTEM_PROMPT, direct_prompt
 from minibench.datasets.xiangqi.engines.pikafish import resolve_pikafish_executable, pikafish_fingerprint
 from minibench.datasets.xiangqi.runtime import PROTOCOL_VERSION
+from minibench.datasets.xiangqi.legal_episode_metrics import legal_episode_summary_line
+from minibench.datasets.xiangqi.tree_prefix_metrics import tree_prefix_summary_line
+from minibench.datasets.xiangqi.outcome_labels import task_outcome_labels, task_label_keys, project_task_summary
 from minibench.factory.config import load_experiment_config
 from minibench.experiments.dispatch import _evaluate
 from minibench.experiments.registry import get_task_family_spec
@@ -92,6 +96,8 @@ class ManualWebAgent:
 
         print("\n" + "=" * 88)
         print(f"WEB CALL {self.call_index} | task={task_id} | transport={transport}")
+        if transport == "lagged-round-stateless":
+            print("H2 rolling reconstruction: start a NEW chat for EVERY decision; keep the running game here, not the old model conversation.")
         if messages is not None:
             if not persistent or task_call == 1:
                 print("Open a NEW browser chat and send the following conversation:")
@@ -175,11 +181,13 @@ class ManualWebAgent:
                     f"{message['content']}\n\n{FINAL_ANSWER_SYSTEM_PROMPT}"
                 )
                 break
+        lagged = any("Mode: LAGGED STATE" in str(message.get("content", ""))
+                     for message in prepared)
         return self._read_response(
             task=task,
-            transport="persistent-chat",
+            transport="lagged-round-stateless" if lagged else "persistent-chat",
             messages=prepared,
-            persistent=True,
+            persistent=not lagged,
         )
 
     def metrics_snapshot(self) -> dict[str, Any]:
@@ -239,74 +247,80 @@ def _move_trace(record: dict[str, Any]) -> str:
     return f"agent:{move}" if move else "none"
 
 
+def _perception_summary(summary: dict[str, Any]) -> str:
+    """Show the numerator and denominator without filling absent evidence."""
+    counts = summary.get("perception_gating") or {}
+    conditional_value = summary.get("mate_rate_given_recognition_and_legal")
+    strict_value = summary.get("strict_joint_success_rate")
+    conditional = ("N/A" if conditional_value is None or counts.get("conditional_denominator") == 0
+                   else _display(conditional_value, percent=True))
+    strict = ("N/A" if strict_value is None or counts.get("strict_joint_denominator") == 0
+              else _display(strict_value, percent=True))
+    eligible = _display(counts.get("conditional_denominator"))
+    numerator = _display(counts.get("conditional_numerator"))
+    joint = _display(counts.get("strict_joint_numerator"))
+    scorable = _display(counts.get("strict_joint_denominator"))
+    unknown_gate = counts.get("unknown_gate_count")
+    unknown_joint = counts.get("unknown_joint_count")
+    gate_incomplete = unknown_gate is None or unknown_gate > 0
+    joint_incomplete = unknown_joint is None or unknown_joint > 0
+    conditional_counts = (f"known subtotal {numerator}/{eligible}; unknown_gate={_display(unknown_gate)}"
+                          if gate_incomplete else f"{numerator}/{eligible}")
+    strict_counts = (f"known subtotal {joint}/{scorable}; unknown_joint={_display(unknown_joint)}"
+                     if joint_incomplete else f"{joint}/{scorable}")
+    eligible_label = "known_eligible" if gate_incomplete else "eligible"
+    return (f"mate_given_recognition_legal={conditional}({conditional_counts}) "
+            f"strict_joint={strict}({strict_counts}) {eligible_label}={eligible}")
+
+
 def _print_item_result(key: str, record: dict[str, Any]) -> None:
     task_id = record.get("task_id") or record.get("id") or "unknown"
-    legal = record.get("legality_rate", record.get("is_legal"))
-    mode = record.get("history_mode") or record.get("mode") or record.get("ruleset")
-    fields = [f"RESULT task={task_id}"]
+    mode = record.get("history_mode") or record.get("input_mode") or record.get("mode") or record.get("ruleset")
+    labels = task_outcome_labels(record, task=key)
+    payload = {"task_id": task_id, "labels": labels,
+               "money_currency": ((record.get("metrics") or {}).get("cost") or {}).get("currency") or "NA"}
     if mode:
-        fields.append(f"mode={mode}")
-    if key == "h2":
-        fields.extend([
-            f"mate_shortest={_display(record.get('mate_within_shortest_steps'))}",
-            f"legal={_display(legal, percent=True)}",
-            f"cp_loss={_display(record.get('avg_cp_loss'))}",
-        ])
-    elif key in {"d3", "m2"}:
-        fields.extend([
-            f"mate={_display(record.get('success'))}",
-            f"legal={_display(legal, percent=True)}",
-        ])
-    elif key == "c2":
-        fields.extend([
-            f"mate_shortest={_display(record.get('mate_within_shortest_steps'))}",
-            f"legal={_display(legal, percent=True)}",
-            f"variant_loss={_display(record.get('avg_variant_loss'))}",
-        ])
-    else:
-        fields.extend([
-            f"mate={_display(record.get('success'))}",
-            f"legal={_display(legal, percent=True)}",
-        ])
-    if key == "m2":
-        fields.append(f"recognition={_display(record.get('recognition_accuracy'), percent=True)}")
-    fields.append(f"moves={_move_trace(record)}")
-    print(" ".join(fields), flush=True)
+        payload["group"] = mode
+    diagnostics = {"moves": _move_trace(record)}
+    if key in {"h2", "c2"}:
+        prefix = record.get("solution_tree_prefix_metrics") or {}
+        diagnostics["solution_tree_prefix_rate"] = record.get("solution_tree_prefix_rate") if record.get("solution_tree_prefix_rate") is not None else "NA"
+        diagnostics["in_tree_attacker_moves"] = prefix.get("in_tree_attacker_moves", "NA")
+        diagnostics["shortest_attacker_moves"] = prefix.get("shortest_attacker_moves", "NA")
+    payload["diagnostics"] = diagnostics
+    print("RESULT " + json.dumps(payload, ensure_ascii=False, separators=(",", ":")), flush=True)
 
 
 def _print_family_summary(key: str, summary: dict[str, Any]) -> None:
-    if key == "d3":
-        print(
-            "SUMMARY D3 "
-            f"mate={_display(summary.get('mate_rate'), percent=True)} "
-            f"legal={_display(summary.get('legality_rate'), percent=True)}",
-            flush=True,
-        )
-    elif key == "h2":
-        print(
-            "SUMMARY H2 "
-            f"mate_shortest={_display(summary.get('mate_within_shortest_rate'), percent=True)} "
-            f"legal={_display(summary.get('legality_rate'), percent=True)} "
-            f"cp_loss={_display(summary.get('avg_cp_loss'))}",
-            flush=True,
-        )
-    elif key == "c2":
-        print(
-            "SUMMARY C2 "
-            f"mate_shortest={_display(summary.get('mate_within_shortest_rate'), percent=True)} "
-            f"legal={_display(summary.get('legality_rate'), percent=True)} "
-            f"variant_loss={_display(summary.get('avg_variant_loss'))}",
-            flush=True,
-        )
-    else:
-        for mode, values in summary.get("by_input_mode", {}).items():
-            print(
-                f"SUMMARY M2 mode={mode} "
-                f"mate={_display(values.get('mate_rate'), percent=True)} "
-                f"legal={_display(values.get('legality_rate'), percent=True)} "
-                f"recognition={_display(values.get('recognition_accuracy'), percent=True)}",
-                flush=True,
-            )
+    def emit(values, group=None):
+        primary = values.get("outcome_labels_summary") or {}
+        if primary.get("labels") is not None:
+            primary = project_task_summary(primary, task=key, group=group, prefix=values)
+        keys = task_label_keys(key, group)
+        public = {field: (primary.get("labels") or {}).get(field, "NA") for field in keys}
+        if "solution_tree_prefix_rate" in keys:
+            public["solution_tree_prefix_rate"] = values.get("solution_tree_prefix_rate") if values.get("solution_tree_prefix_rate") is not None else "NA"
+        if "mate_given_recognition_and_legal" in keys:
+            public["mate_given_recognition_and_legal"] = primary.get("conditional_success_rate", "NA")
+        payload = {"task": key.upper(), "labels": public,
+                   "money_currency": primary.get("money_currency", "NA"),
+                   "conditional_success_rate": primary.get("conditional_success_rate", "NA"),
+                   "conditional_success_count": primary.get("conditional_success_count", "NA"),
+                   "conditional_eligible_count": primary.get("conditional_eligible_count", "NA"),
+                   "conditional_unknown_count": primary.get("conditional_unknown_count", "NA"),
+                   "mate_given_all_legal_rate": primary.get("mate_given_all_legal_rate", "NA"),
+                   "all_legal_eligible_count": primary.get("all_legal_eligible_count", "NA")}
+        if group is not None:
+            payload["group"] = group
+        if key in {"h2", "c2"}:
+            payload["diagnostics"] = {"solution_tree_prefix_rate": values.get("solution_tree_prefix_rate") if values.get("solution_tree_prefix_rate") is not None else "NA"}
+        print("SUMMARY " + json.dumps(payload, ensure_ascii=False, separators=(",", ":")), flush=True)
+    if key not in {"h2", "c2"}:
+        emit(summary)
+    group_key = {"h2": "by_mode", "c2": "by_condition", "m2": "by_input_mode"}.get(key)
+    if group_key:
+        for group, values in summary.get(group_key, {}).items():
+            emit(values, group)
 
 
 def prepare_web_session(suite_dir: Path, session_dir: Path, names: list[str], *,
@@ -318,7 +332,10 @@ def prepare_web_session(suite_dir: Path, session_dir: Path, names: list[str], *,
         raise ValueError("manual sessions require a prepared current-protocol smoke suite")
     session_dir.mkdir(parents=True, exist_ok=False)
     prepared = {}
+    runtime_source_sha256 = code_hash()
+    h2_input_protocol = "lagged-one-round-with-current-transcription-v1"
     plan = {"protocol_version": PROTOCOL_VERSION, "source_suite_dir": str(suite_dir),
+            "runtime_source_sha256": runtime_source_sha256, "h2_input_protocol": h2_input_protocol,
             "agent_adapter": "manual-web using direct prompts without automatic format repair",
             "status": "prepared", "tasks": {}}
     for key in names:
@@ -357,6 +374,8 @@ def prepare_web_session(suite_dir: Path, session_dir: Path, names: list[str], *,
         _write_json(run_dir / "resolved_config.json", config)
         _write_json(run_dir / "run_metadata.json", {
             "protocol_version": PROTOCOL_VERSION, "agent_adapter": plan["agent_adapter"],
+            "runtime_source_sha256": runtime_source_sha256,
+            "h2_input_protocol": h2_input_protocol if key == "h2" else "NA",
             "source_sha256": entry["source_sha256"], "selection_sha256": entry["sample_sha256"],
             "engine": actual_engine, "evaluation": evaluation,
         })

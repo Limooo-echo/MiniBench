@@ -1,5 +1,5 @@
 """Offline durability and common-roster checks for the Xiangqi factory path."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import tempfile
@@ -18,6 +18,7 @@ class SavedResult:
     success: bool | None = True
     input_mode: str = "text"
     status: str = "ok"
+    diagnostics: list[dict] = field(default_factory=list)
 
 
 class XiangqiFactoryCheckpointTests(unittest.TestCase):
@@ -98,6 +99,45 @@ class XiangqiFactoryCheckpointTests(unittest.TestCase):
         state = json.loads((directory / "run_state.json").read_text())
         self.assertEqual((state["status"], state["completed_results"]), ("completed", 2))
         self.writer.assert_called_once()
+
+    def test_saved_infrastructure_error_cannot_be_reported_as_clean_completion(self):
+        results = [SavedResult("task-1", success=None, status="error"), SavedResult("task-2")]
+        def evaluator(*args, on_result, **kwargs):
+            for result in results:
+                on_result(result)
+            return results
+        directory, summary = self.run_experiment(evaluator)
+        state = json.loads((directory / "run_state.json").read_text())
+        self.assertEqual(state["status"], "completed_with_errors")
+        self.assertEqual(summary["run_status"], "completed_with_errors")
+        self.assertEqual(summary["infrastructure_error_count"], 1)
+        self.assertEqual(state["completed_results"], 2)
+        saved = [json.loads(line) for line in (directory / "predictions.jsonl").read_text().splitlines()]
+        self.assertIsNone(saved[0]["success"])
+        self.assertTrue(saved[1]["success"])
+
+    def test_engine_diagnostic_failure_is_visible_without_overwriting_model_score(self):
+        result = SavedResult("task-1", success=True)
+        result.diagnostics = [{"stage": "diagnostic_engine_start", "message": "fixture engine failure"}]
+        def evaluator(*args, on_result, **kwargs):
+            on_result(result)
+            return [result]
+        directory, summary = self.run_experiment(evaluator)
+        state = json.loads((directory / "run_state.json").read_text())
+        self.assertEqual(state["status"], "completed_with_errors")
+        self.assertEqual(summary["infrastructure_error_count"], 0)
+        self.assertEqual(summary["diagnostic_result_count"], 1)
+        self.assertTrue(json.loads((directory / "predictions.jsonl").read_text())["success"])
+
+    def test_model_invalid_answer_remains_scored_failure_not_infrastructure_fault(self):
+        results = [SavedResult("task-1", success=False, status="invalid")]
+        def evaluator(*args, on_result, **kwargs):
+            on_result(results[0])
+            return results
+        directory, summary = self.run_experiment(evaluator)
+        state = json.loads((directory / "run_state.json").read_text())
+        self.assertEqual(state["status"], "completed")
+        self.assertEqual(summary["infrastructure_error_count"], 0)
 
     def test_runtime_exception_marks_error_without_erasing_previous_result(self):
         def evaluator(*args, on_result, **kwargs):

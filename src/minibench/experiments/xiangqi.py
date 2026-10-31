@@ -61,6 +61,47 @@ def _select_frozen_xiangqi_tasks(
     return [indexed[r["id"]] for r in records]
 
 
+def _preflight_xiangqi_engine(family: str, evaluation: dict[str, Any]) -> None:
+    """Reject stale pinned judges before constructing or charging an Agent."""
+    if family not in {"xiangqi-mate-in-one", "xiangqi-history", "xiangqi-multimodal"}:
+        return
+    binary = evaluation.get("pikafish_binary_sha256")
+    nnue = evaluation.get("pikafish_nnue_sha256")
+    if binary is None and nnue is None:
+        return
+    from minibench.datasets.xiangqi.engines.pikafish import resolve_pikafish_executable
+    from minibench.datasets.xiangqi.runtime import validate_engine_fingerprint
+    executable = resolve_pikafish_executable(evaluation.get("pikafish_path"), start_dir=Path.cwd())
+    validate_engine_fingerprint(executable, binary_sha256=binary, nnue_sha256=nnue)
+
+
+def _xiangqi_transport(agent, provider: dict[str, Any], run_dir: Path):
+    """Reuse the cloud SSE journal for native Xiangqi when explicitly enabled."""
+    if (provider.get("extra_body") or {}).get("stream") is not True:
+        return agent
+    from minibench.factory.providers import OpenAICompatibleClient
+    from minibench.core.streaming import JournalClient, append_json
+    previous = getattr(agent, "client", None)
+    if not isinstance(previous, OpenAICompatibleClient):
+        return agent  # Saved predictions / offline fixtures do not call a service.
+    def event(value):
+        if value["kind"] != "stream_progress":
+            append_json(run_dir / "model_events.jsonl", value)
+        atomic_write_json(run_dir / "model_progress.json", value)
+    client = JournalClient(
+        run_dir / "calls", event, model=previous.model, base_url=previous.base_url,
+        api_key_env=previous.api_key_env, temperature=previous.temperature,
+        max_tokens=previous.max_tokens, omit_max_tokens=previous.omit_max_tokens,
+        timeout=previous.timeout, json_mode=previous.json_mode,
+        extra_body=previous.extra_body, default_system_prompt=previous.default_system_prompt,
+        max_retries=0,
+    )
+    # Reconstruct rather than changing .client alone: reasoning Agents also
+    # retain that reference inside AgentRuntime.
+    return (type(agent)(client, agent.config) if hasattr(agent, "config")
+            else type(agent)(client))
+
+
 def _run_checkpointed_xiangqi_experiment(
     spec: TaskFamilySpec, tasks: list[Any], config: dict[str, Any], data_path: Path,
     family: str, evaluation_config: dict[str, Any], run_config: dict[str, Any],
@@ -92,6 +133,7 @@ def _run_checkpointed_xiangqi_experiment(
         selected_path = _write_xiangqi_selected_tasks(
             run_dir, tasks=tasks, data_path=data_path, family=family
         )
+        _preflight_xiangqi_engine(family, evaluation_config)
         _write_xiangqi_run_metadata(
             run_dir, config=config, data_path=data_path, family=family,
             selected_tasks_path=selected_path,
@@ -100,6 +142,7 @@ def _run_checkpointed_xiangqi_experiment(
         agent = make_agent_from_config(
             config["agent"], config.get("provider", {}), system_prompt=spec.system_prompt
         )
+        agent = _xiangqi_transport(agent, config.get("provider", {}), run_dir)
 
         def persist(result: Any) -> None:
             record = asdict(result) if is_dataclass(result) else dict(result)
@@ -123,8 +166,19 @@ def _run_checkpointed_xiangqi_experiment(
         # Writers retain their native summaries while leaving the durable JSONL intact.
         spec.write_run(results, run_dir.parent, run_dir.name, write_predictions=False)
         summary = spec.summarize(results)
-        save_state("completed")
-        return run_dir, summary
+        counts = {
+            "infrastructure_error_count": sum(
+                (result.get("status") if isinstance(result, dict) else getattr(result, "status", None)) == "error"
+                for result in completed
+            ),
+            "diagnostic_result_count": sum(
+                bool(result.get("diagnostics") if isinstance(result, dict) else getattr(result, "diagnostics", None))
+                for result in completed
+            ),
+        }
+        status = "completed_with_errors" if any(counts.values()) else "completed"
+        save_state(status, **counts)
+        return run_dir, {**summary, "run_status": status, **counts}
     except BaseException as exc:
         save_state("interrupted" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "error",
                    error_type=type(exc).__name__, error=str(exc))

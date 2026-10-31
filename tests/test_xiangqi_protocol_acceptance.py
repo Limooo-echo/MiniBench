@@ -21,28 +21,47 @@ class ProtocolAcceptanceTests(unittest.TestCase):
                 run_acceptance(Path(directory), Path("engine-not-used"), ["d3"])
             self.assertEqual(list(Path(directory).iterdir()), [])
 
-    def test_scripted_h2_agent_replays_identical_full_and_message_history(self):
+    def test_scripted_h2_agent_supports_fresh_lagged_requests_and_current_transcription(self):
+        from tests.test_xiangqi_h2_lagged import fixture, LINE, transcription
+        from minibench.datasets.xiangqi import history
+        from minibench.datasets.xiangqi.engines.pikafish import board_to_pikafish_fen
+        from minibench.datasets.xiangqi.text_encoding import board_state_text
+        task, states, _ = fixture()
+        answers = {board_to_pikafish_fen(board, side_to_move="ally"): LINE[2*i]
+                   for i, board in enumerate(states)}
         class Engine:
             def __init__(self):
                 self.seen = []
             def analyze_fen(self, fen, *, depth):
                 self.seen.append((fen, depth))
-                return SimpleNamespace(bestmove="a7a8")
+                return SimpleNamespace(bestmove=answers[fen])
         engine = Engine()
-        agent = CorrectAgent(engine)
-        task = task_fixture(board=board_fixture(with_pawn=True), family="xiangqi-history")
-        full = agent.generate("Move history:\nagent: a8a7\npikafish: a6a5", task)
-        historical = agent.generate_messages([
-            {"role": "system", "content": "test"},
-            {"role": "user", "content": "initial board"},
-            {"role": "assistant", "content": '{"move":"a8a7"}'},
-            {"role": "user", "content": "Previous turn: You played a8a7; the opponent replied with a6a5."},
-        ], task)
-        self.assertEqual(json.loads(full), {"move": "a7a8"})
-        self.assertEqual(full, historical)
-        self.assertEqual(engine.seen[0], engine.seen[1])
-        self.assertEqual(engine.seen[0][1], 20)
-        self.assertIn(" w ", engine.seen[0][0])
+        full, lagged = CorrectAgent(engine), CorrectAgent(engine)
+        full_answers = []
+        for turn in range(3):
+            moves = "\n".join(f"{'agent' if i % 2 == 0 else 'pikafish'}: {uci}"
+                              for i, uci in enumerate(LINE[:2*turn]))
+            full_answers.append(json.loads(full.generate("Move history:\n" + moves, task)))
+        for turn in range(3):
+            anchor = states[max(0, turn-1)]
+            options = ({"agent_uci": LINE[2*turn-2], "opponent_uci": LINE[2*turn-1]}
+                       if turn else {})
+            messages = history._lagged_state_messages(task, board_state_text(anchor),
+                                                     turn_number=turn+1, **options)
+            reply = json.loads(lagged.generate_messages(messages, task))
+            self.assertEqual(reply, full_answers[turn])
+            self.assertEqual(reply["pieces"], transcription(states[turn]))
+            self.assertEqual(reply["move"], LINE[2*turn])
+        self.assertEqual(engine.seen[:3], engine.seen[3:])
+        self.assertTrue(all(depth == 20 for _, depth in engine.seen))
+        lagged.reset()
+        self.assertEqual(lagged._lagged_moves, [])
+
+    def test_failure_control_does_not_parse_its_own_intentionally_invalid_answer(self):
+        agent = acceptance.FixedAgent("intentionally malformed")
+        answer = agent.generate_messages([], task_fixture())
+        self.assertEqual(answer, "intentionally malformed")
+        self.assertEqual(agent.calls, 1)
 
     def test_scripted_agent_rejects_corrupt_replay(self):
         with self.assertRaisesRegex(ValueError, "illegal move"):

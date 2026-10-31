@@ -94,10 +94,10 @@ class FinalProtocolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / 'cloud.yaml'; cfg.write_text(yaml.safe_dump(raw))
             plan = cloud.prepare(cfg, Path(tmp) / 'suite')
-        self.assertEqual(plan['planned_jobs'], 4500)
+        self.assertEqual(plan['planned_jobs'], 5400)
         for entry in plan['experiments'].values():
             rows = load_records(FAMILY_PATHS[entry['family']])
-            self.assertEqual(len(rows), 100)
+            self.assertEqual(len(rows), 200 if entry['family'] == 'xiangqi-rule-variants' else 100)
             self.assertEqual(entry['task_ids'], [r['id'] for r in rows])
             if entry['family'] in {'xiangqi-history', 'xiangqi-rule-variants'}:
                 from minibench.datasets.xiangqi.schema import validate_record

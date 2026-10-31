@@ -1,4 +1,4 @@
-# Entire submitted 100-row stratified corpora; no new draw per agent or run.
+# Entire submitted corpora: D3/H2/M2=100 rows; C2=100 pairs/200 rows.
 # Run the direct pilot before scaling up; C2 requires a current certificate.
 version: 1
 workers: 8
@@ -21,8 +21,8 @@ accounts:
           enable_thinking: true
     limits:
       max_in_flight: 8
-      requests_per_minute: null
-      tokens_per_minute: null
+      requests_per_minute: 10
+      tokens_per_minute: 300000
       reserve_tokens: 32768
       total_token_budget: null
 experiments:

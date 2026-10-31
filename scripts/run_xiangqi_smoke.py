@@ -108,8 +108,9 @@ def prepare_suite(suite_dir: Path, tasks: list[str], *, model: str | None = None
             evaluation["history_mode"] = "paired"
         elif key == "c2":
             evaluation.update(search_depth=3,
-                horizon_policy="reference_mate_plies_plus_4",
-                loss_unit="rule-aware-centipawn-equivalent-not-pikafish")
+                horizon_policy=("certified_shortest_attacker_moves" if evaluation.get("solution_tree_dir")
+                                else "reference_mate_plies"))
+            evaluation.pop("loss_unit", None)  # No loss is evaluated in the current protocol.
         elif key == "m2":
             evaluation.update(verify_with_pikafish=True, step_dir=str(suite_dir / "m2-input-images"))
         config = validate_experiment_config(config)
@@ -156,6 +157,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Starting frozen {key.upper()} smoke", flush=True)
             try:
                 outcomes[key] = run_experiment(prepared[key])
+                result = outcomes[key]
+                if (result.get("run_status") == "completed_with_errors"
+                        or result.get("missing", 0) > 0
+                        or result.get("infrastructure_error_count", 0) > 0
+                        or result.get("diagnostic_result_count", 0) > 0):
+                    failures[key] = (
+                        "Persisted infrastructure/engine diagnostic errors; "
+                        f"see {result.get('run_dir', suite_dir / key)}"
+                    )
             except Exception as exc:
                 failures[key] = f"{type(exc).__name__}: {exc}"
             _write_json(suite_dir / "suite_results.json", report)

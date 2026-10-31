@@ -17,7 +17,7 @@ bash scripts/cloud_run.sh config/cloud/xiangqi-pilot.yaml runs/cloud-pilot-8 --w
 ```
 
 完整安装、暂停续跑、全 Agent 配置、用量边界与文件职责见 [云端运行说明](docs/cloud-run.md)。
-四个象棋数据库各100条；所有Agent使用同一名单。H2/C2采用经认证的最短杀步数与完整最短策略树，树外分别由Pikafish/规则感知depth-3兜底；范围及限制见象棋协议。M2与D3同题且仅测中文图片。顶级LICENSE尚待团队确定。
+D3/H2/M2各100条；C2为100个同局面配对，共200条条件。所有Agent使用同一名单。H2/C2采用经认证的最短杀步数与完整最短策略树，树外分别由Pikafish/规则感知depth-3兜底；范围及限制见象棋协议。M2与D3同题且仅测中文图片。顶级LICENSE尚待团队确定。
 
 ## 离线四维评分
 
@@ -31,7 +31,7 @@ minibench score-suite --manifest config/scoring/manifest.example.yaml --weights 
 
 评分版本 2.0.0 使用 `s = Y + (1 - Y) × P`，过程分不放缩，每题每条件运行一次，维度内任务等权。连续麻将按给定牌墙逐步计算最早和牌动作集，过程分为命中步数 / 总动作步数；麻将图像题与文字题使用相同目标和过程分标准。旧缩放或人工权重配置需要更新。
 
-完整公式、等权说明、逐题评分与清单字段见 [评分设计说明](docs/scoring-design.md)，实施和验收记录见 [评分实施记录](docs/scoring-plan.md)。
+完整公式、等权说明、逐题评分与清单字段见 [评分设计说明](docs/scoring-design.md)。
 
 ## 1. 在 WSL Ubuntu 中安装
 
@@ -275,10 +275,11 @@ python scripts/audit_reasoning_release.py \
 
 ### 4.2 象棋 schema v2
 
-当前提交题库为 `xiangqi-shortest-paired100-v2`，schema保持v2。
-四类各100条；seed=42，D3/M2的easy/medium/hard为34/33/33且局面完全配对；
-H2与C2各有50条最短2–3步杀、50条最短4–5步杀。C2为50个标准/变体配对场景，
-每个场景只分配一种变体，覆盖车17对、马17对、兵16对；两个规则条件分别认证最短步数。
+当前提交题库见 `submission_manifest.json`，schema保持v2。
+D3/H2/M2各100条；D3/M2的easy/medium/hard为34/33/33且局面完全配对；
+H2有50条最短2–3步杀、50条最短4–5步杀。C2为100个标准/变体配对场景、200条条件；
+标准组按50道2–3步和50道4–5步分层，变体按当前规则重新认证，允许跨档。
+每个场景只分配一种变体，优先选择最短杀法发生变化的局面；规则配额及影响数量见生成报告。
 题号、父题池及当前文件哈希见 `data/xiangqi/submission_manifest.json`；
 记录约束见 `src/minibench/datasets/xiangqi/schema.py`，配置与方法边界见
 [云服务器运行说明](docs/cloud-run.md)。
@@ -290,15 +291,19 @@ FEN 数据。旧吃将题、残局生存、通用对局、Gym action-index 接�
 | 配置 | 公开 family | 内容 |
 | --- | --- | --- |
 | `xiangqi_mate_in_one.yaml` | `xiangqi-mate-in-one` | 严格一步将死，接受全部合法将杀着 |
-| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 标准/变体配对，最短策略树对弈，规则感知depth-3树外兜底/CPE loss |
-| `xiangqi_history.yaml` | `xiangqi-history` | 两档最短杀，完整棋盘/纯行棋历史对照，策略树对弈/Pikafish树外兜底及CP loss |
+| `xiangqi_rule_variants.yaml` | `xiangqi-rule-variants` | 标准/变体配对，最短策略树对弈，规则感知depth-3树外兜底，分任务标签 |
+| `xiangqi_history.yaml` | `xiangqi-history` | 两档最短杀，当前棋盘/单轮滞后棋盘复原对照，策略树对弈/Pikafish树外兜底，分任务标签 |
 | `xiangqi_multimodal.yaml` | `xiangqi-multimodal` | 与D3同局面的中文图片组；一步将杀、合法率、识图准确率 |
 
+D3/M2保留原始成绩，同时按相同整盘转录与合法性门槛报告条件将杀率、严格联合成功率及有效样本数，
+定义见[配对识图门槛指标](docs/cloud-run.md#象棋逐题标签与历史交互)。
+H2/C2另报告“全程合法时的最短步数内将杀率”及分子、分母和全程合法覆盖数；
+合法但未将杀的对局仍计入条件分母，定义见[全程合法条件指标](docs/cloud-run.md#象棋逐题标签与历史交互)。
 D3/M2用精确棋规判定将死，Pikafish提供独立诊断。H2/C2树内使用认证策略，
 合法树外着分别由Pikafish和规则感知depth-3对手继续应手；总上限是认证最短步数n次攻方落子，
 从开局累计且偏离不重置，每次落子后检查是否将死。达到n步仍未将死即失败，不再延长两步。
-C2的CPE loss不能与H2的Pikafish CP loss混为同一单位。最短证明与树的边界见
-[象棋新版协议](docs/xiangqi-shortest-protocol.md)。
+H2/C2已停用loss评分；当前分任务/分组输出见[逐题标签与H2协议](docs/cloud-run.md#象棋逐题标签与历史交互)。最短证明与树的边界见
+[象棋新版协议](docs/cloud-run.md#象棋逐题标签与历史交互)。
 参考引擎与 NNUE 指纹在 `data/xiangqi/provenance.json`。云端入口采用
 `engine_binding: runtime`，冻结服务器实际编译的引擎与 NNUE 指纹；续跑前重新核验，
 不会把 Linux 编译结果冒充历史 Windows 引擎。新服务器按以下流程安装与准备：
@@ -321,10 +326,10 @@ python -B -m minibench.cloud prepare --config config/cloud/xiangqi-pilot.yaml --
 
 云端 pilot 冻结 D3/H2/M2 各 6 条、C2 三个配对场景（6 条）；仅 direct，
 H2 两组、M2 仅中文图片，共 30 个条件。M2 与 D3 使用相同的100个局面，不再额外测文字组。
-全 Agent 云端配置使用提交题库的全部 100 条，九 Agent 共 4,500 个条件，
+全 Agent 云端配置使用完整提交题库，九 Agent 共 5,400 个条件，
 各 Agent 和各组使用同一名单，不再重新抽题。每次完整 Agent 决策最多900秒，
 思考流和内部中间答案不重置计时；没有最终走法则该题判负，继续其他题。
-`evaluation_samples/formal` 与当前四库各100条完全一致；smoke名单才是小样本探针。
+`evaluation_samples/formal` 与当前提交库完全一致：D3/H2/M2各100条、C2为200条；smoke名单才是小样本探针。
 8 路 pilot 后再用相同小样本的新目录测试 16 路；同时调整 workers 和账号 max_in_flight。
 完整运行、限流、原生思考及断点恢复见 [云服务器运行说明](docs/cloud-run.md)。
 
@@ -345,12 +350,13 @@ minibench run-config config/experiments/xiangqi_multimodal.yaml
 同名结果禁止覆盖，下一次实验应使用新的 run_name 或输出目录。
 
 当前配置只填写实际生效的参数：H2/C2通过`solution_tree_dir`加载认证树；
-C2的`search_depth: 3`用于规则感知树外对手和CPE评分；H2的Pikafish用于树外对手及CP评分。
+C2的`search_depth: 3`和H2的Pikafish只用于树外对手，不再执行loss专用评分。
 D3/M2引擎参数用于诊断；M2正式配置仅`chinese-piece-image`，文字对照由同题D3承担。
 拉丁图片仍是可选接口，但不在本轮配置或默认全 Agent 实验中。
 回合上限来自题目本身，不能用 `evaluation.max_plies` 或 CLI 覆盖。
 旧 `oracle_depth`、`opponent_depth`、`optimal_depth`、旧图片模式名等会直接报错。
-正式 YAML 运行固定提交题库的全部 100 条；smoke YAML 引用冻结的小样本名单。
+正式 YAML 运行固定提交题库的全部记录（C2为200条，其余各100条）；smoke YAML 引用冻结的小样本名单。
+H2两组和C2两组分别统计成绩、token、时间与费用；云端图表目录的`condition-metrics.csv/json`提供逐Agent对照表。
 
 代码职责也收拢到一条链路：`schema.py` / `dataset.py` 加载当前数据；
 `mate_in_one.py`、`rule_variants.py`、`history.py`、`multimodal.py` 各管一类评测；
@@ -358,7 +364,8 @@ D3/M2引擎参数用于诊断；M2正式配置仅`chinese-piece-image`，文字�
 `reference.py` / `validation.py` 管独立复验，`presentation.py` 管查看与离线图库。
 `visualization/xiangqi_vis.py` 的单题与轨迹 PNG/GIF 复用 M2 绘图，图表使用当前
 难度名，并将缺失诊断标为 missing，不当成零分。
-当前发布选题入口是`scripts/prepare_xiangqi_shortest_release.py`；最短树导出由
+D3/H2初始选题入口是`scripts/prepare_xiangqi_shortest_release.py`；C2的100对扩容由
+`scripts/expand_xiangqi_c2_pairs.py`负责；最短树导出由
 `scripts/build_xiangqi_solution_trees.py`负责，独立验证器为`scripts/verify_xiangqi_mate.py`。
 仍被新版生成流程依赖的候选工具保留作来源与复现用途，其CLI禁止写入`data/xiangqi`，
 只能输出到候选工作目录；旧v1选库和不再依赖的筛选脚本已移出发布版。

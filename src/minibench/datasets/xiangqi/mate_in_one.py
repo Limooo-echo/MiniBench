@@ -6,17 +6,22 @@ A provider or judge failure is missing; an answered invalid move is a failure.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 import statistics
 from time import strftime
 from typing import Any, Callable
 
 from minibench.core.agent import Agent
+from minibench.datasets.xiangqi.outcome_labels import task_outcome_labels, summarize_task_outcomes, write_outcome_files
 from minibench.datasets.xiangqi.deadline import (
     FINAL_MOVE_TIMEOUT_SECONDS, FinalMoveTimeout, call_agent_move, validate_move_timeout,
 )
 from minibench.datasets.xiangqi.resources import start_task_metrics, finish_task_metrics, summarize_metrics
+from minibench.datasets.xiangqi.perception_metrics import (
+    PERCEPTION_METRICS_VERSION, perception_outcomes, perception_summary_lines,
+    score_board_recognition, summarize_perception_gating,
+)
 from minibench.datasets.xiangqi.runtime import (
     validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, error_detail, extract_strict_uci_move, reset_agent, mean_or_none, rounded, status_counts, display,
 )
@@ -62,6 +67,13 @@ class MateInOneResult:
     metrics: dict[str, Any] = field(default_factory=dict)
     termination_reason: str = ""
     protocol_version: str = "xiangqi-paired-one-move-v3"
+    recognition_accuracy: float | None = None
+    recognition_exact: bool | None = None
+    recognition_status: str = "unavailable"
+    recognition_and_legal: bool | None = None
+    strict_joint_success: bool | None = None
+    perception_metrics_version: str = PERCEPTION_METRICS_VERSION
+    outcome_labels: dict[str, Any] = field(default_factory=dict)
 
 
 MATE_IN_ONE_SYSTEM_PROMPT = """You are solving a Xiangqi
@@ -271,6 +283,12 @@ def evaluate_mate_in_one_tasks(
                     stage = "format"
                 error = error_detail(stage, exc)
                 termination = "final_move_timeout" if timed_out else stage + "_error"
+            recognition = {"recognition_accuracy": None, "recognition_exact": None,
+                           "recognition_status": "unavailable"}
+            if status != "error":
+                recognition = score_board_recognition(raw_output, task.board)
+                if termination == "final_move_timeout":
+                    recognition["recognition_status"] = "timeout"
             result = MateInOneResult(
                 task_id=task.id or f"xiangqi-mate-in-one-{i + 1:04d}", difficulty=task.difficulty,
                 is_legal=is_legal, is_optimal=is_optimal, goal_achieved=goal_achieved,
@@ -282,7 +300,12 @@ def evaluate_mate_in_one_tasks(
                 quality_score=quality_score, normalized_score=rounded(normalized_score),
                 status=status, success=goal_achieved, error=error, diagnostics=diagnostics,
                 metrics=finish_task_metrics(agent, start), termination_reason=termination,
+                **recognition,
+                **perception_outcomes(recognition_exact=recognition["recognition_exact"],
+                                      is_legal=is_legal if status != "error" else None,
+                                      success=goal_achieved),
             )
+            result = replace(result, outcome_labels=task_outcome_labels(result, task="d3"))
             results.append(result)
             if on_result is not None:
                 on_result(result)
@@ -310,6 +333,8 @@ def summarize_mate_in_one(results: list[MateInOneResult]) -> dict[str, Any]:
             **status_counts(items),
             "mate_rate": mean_or_none(r.goal_achieved for r in valid),
             "legality_rate": mean_or_none(r.is_legal for r in valid),
+            **summarize_perception_gating(items),
+            **{"outcome_labels_summary": summarize_task_outcomes(items, task="d3")},
         }
     summary = bucket(results)
     return {
@@ -332,10 +357,5 @@ def write_mate_in_one_run(
                 handle.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
     summary = summarize_mate_in_one(results)
     (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    lines = ["Xiangqi Mate-in-One Evaluation", f"Total: {summary['total']} Evaluated: {summary['evaluated']} Missing: {summary['missing']}",
-             f"Mate@1: {display(summary['mate_rate'], '.1%')}",
-             f"Legality: {display(summary['legality_rate'], '.1%')}"]
-    from minibench.datasets.xiangqi.resources import resource_summary_lines
-    lines.extend(resource_summary_lines(summary["metrics"]))
-    (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_outcome_files(run_dir, results, summary, task="d3", recognition_applicable=True, multimove=False)
     return run_dir

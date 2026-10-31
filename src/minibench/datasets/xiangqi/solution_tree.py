@@ -105,11 +105,17 @@ class Builder:
         key = state, turn, remaining
         if key in self.cache:
             return self.cache[key]
+        if remaining <= 0:
+            # At the horizon only an already checkmated defender can win.
+            # A non-check position cannot be mate, so avoid generating all its
+            # legal replies. This changes cost, never the candidate move set.
+            value = (turn != self.attacker and reference.in_check(state, turn, self.rules)
+                     and not self.legal(state, turn))
+            self.cache[key] = value
+            return value
         moves = self.legal(state, turn)
         if not moves:
             value = turn == -self.attacker and reference.in_check(state, turn, self.rules)
-        elif remaining <= 0:
-            value = False
         else:
             # History ordering only: no move is removed and truth values do not
             # depend on the ordering. Reuse successful refutations in siblings.

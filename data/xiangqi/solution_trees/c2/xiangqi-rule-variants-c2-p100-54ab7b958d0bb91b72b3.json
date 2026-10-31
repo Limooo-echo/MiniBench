@@ -1,0 +1,617 @@
+{
+  "attacker": 1,
+  "complete": true,
+  "deepest_mate_attacker_moves": 4,
+  "defender_coverage": "all_optimal",
+  "extension_attacker_moves": 0,
+  "forced_mate": true,
+  "initial_fen": "3k2b2/4PR3/9/9/2p6/1p7/5n3/4BA3/4AKr2/9 w - - 0 1",
+  "max_attacker_moves": 4,
+  "nodes": {
+    "0f9517146b7010e9869105e08d193ff8": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1R3/4P4/8b/9/2p6/1p7/9/4BA1n1/4A4/5K3 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "164ffd1ce3a47620d9b2fee605053438": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1Rb2/4P4/9/9/2p6/1p6n/9/4BA3/4A4/5K3 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "2008645f14714ea7b3e7f18a52365f00": {
+      "dtm_plies": 7,
+      "edges": {
+        "f1f0": "71823527f124d70333bd8fd762fa27d0"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p7/5n3/4BA3/4AKr2/9 w - - 0 1",
+      "legal_moves": [
+        "f1f0"
+      ],
+      "longest_mate_plies": 7,
+      "remaining_plies": 7,
+      "terminal": false,
+      "turn": 1
+    },
+    "3aae47ffe7f3dcbdd10f5023be957ee9": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "92a57cba4a589d1d9b655fac3d5485fd"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/2p6/9/4BA1n1/4A4/5K3 w - - 0 1",
+      "legal_moves": [
+        "e8d8",
+        "e8e9",
+        "f8f9",
+        "e2c4",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2g0",
+        "e2g4",
+        "f0e0",
+        "f8f3",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "3e28ab988e35ad0f63d6509af5d78d74": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1Rb2/4P4/9/9/2p6/1p7/5n3/4BA3/4A4/5K3 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "469820738e6100c20e8002853c210303": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "c764e92adcfd79461ab6010652d7f4bb"
+      },
+      "fen": "3k2b2/4PR3/9/9/9/1pp6/9/4BA1n1/4A4/5K3 w - - 0 1",
+      "legal_moves": [
+        "e8d8",
+        "e8e9",
+        "f8f9",
+        "e2c4",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2g0",
+        "e2g4",
+        "f0e0",
+        "f8f3",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "47954fb5e6e36fffb78c8b6fcbd4a050": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "d3204ac9234b9a933ceeefa97c21677b"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p4n2/9/4BA3/4A4/5K3 w - - 0 1",
+      "legal_moves": [
+        "e8d8",
+        "e8e9",
+        "f8f9",
+        "e2g4",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2c4",
+        "e2g0",
+        "f0e0",
+        "f0f1",
+        "f8f3",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "484ce93901ad65f14a8a9fa6b45cce42": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "bd58f8bf9754a5ca4b9cb344d9bb951e"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p7/9/4BA3/4A4/5Kn2 w - - 0 1",
+      "legal_moves": [
+        "f8f9",
+        "e8d8",
+        "e8e9",
+        "e2g0",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2c4",
+        "e2g4",
+        "f0e0",
+        "f0f1",
+        "f8f3",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "4c95fb5ee2d1433d535046606db0018c": {
+      "dtm_plies": 4,
+      "edges": {
+        "f3h2": "d09311a674ef054acdf6b5eb05515411"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p7/5n3/4BA3/4AK3/9 b - - 0 1",
+      "legal_moves": [
+        "f3h2",
+        "b4a4",
+        "b4b3",
+        "b4c4",
+        "c5c4",
+        "f3d2",
+        "f3d4",
+        "f3e5",
+        "f3g5",
+        "f3h4",
+        "g9i7"
+      ],
+      "longest_mate_plies": 4,
+      "remaining_plies": 4,
+      "terminal": false,
+      "turn": -1
+    },
+    "5602df3adfe2cd1459a593c0a6d12a54": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "3e28ab988e35ad0f63d6509af5d78d74"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p7/5n3/4BA3/4A4/5K3 w - - 0 1",
+      "legal_moves": [
+        "e8d8",
+        "e8e9",
+        "f8f9",
+        "f8f3",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2c4",
+        "e2g0",
+        "f0e0",
+        "f0f1",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "5fa61fc77c87c92fb30813c4bf11ea6d": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "de9adfdeb31233f639100de2c9b180ab"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/9/1p7/4BA1n1/4A4/5K3 w - - 0 1",
+      "legal_moves": [
+        "e8d8",
+        "e8e9",
+        "f8f9",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2c4",
+        "e2g0",
+        "e2g4",
+        "f0e0",
+        "f8f3",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "71823527f124d70333bd8fd762fa27d0": {
+      "dtm_plies": 6,
+      "edges": {
+        "g1f1": "7c68e0b8cab966360d574aaa5b2d842b"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p7/5n3/4BA3/4A1r2/5K3 b - - 0 1",
+      "legal_moves": [
+        "g1f1",
+        "g1g0",
+        "g1e1",
+        "b4a4",
+        "b4b3",
+        "b4c4",
+        "c5c4",
+        "f3d2",
+        "f3d4",
+        "f3e5",
+        "f3g5",
+        "f3h2",
+        "f3h4",
+        "g1g2",
+        "g1g3",
+        "g1g4",
+        "g1g5",
+        "g1g6",
+        "g1g7",
+        "g1g8",
+        "g1h1",
+        "g1i1",
+        "g9i7"
+      ],
+      "longest_mate_plies": 6,
+      "remaining_plies": 6,
+      "terminal": false,
+      "turn": -1
+    },
+    "7c68e0b8cab966360d574aaa5b2d842b": {
+      "dtm_plies": 5,
+      "edges": {
+        "f0f1": "4c95fb5ee2d1433d535046606db0018c"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p7/5n3/4BA3/4Ar3/5K3 w - - 0 1",
+      "legal_moves": [
+        "f0f1",
+        "f0e0"
+      ],
+      "longest_mate_plies": 5,
+      "remaining_plies": 5,
+      "terminal": false,
+      "turn": 1
+    },
+    "8879e9b387e8bea63ff004cdb0609361": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "fc7a18dbf2d43b906d3bddf53c341163"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p7/9/4BA3/4A4/5K2n w - - 0 1",
+      "legal_moves": [
+        "e8d8",
+        "e8e9",
+        "f8f9",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2c4",
+        "e2g0",
+        "e2g4",
+        "f0e0",
+        "f0f1",
+        "f8f3",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "92a57cba4a589d1d9b655fac3d5485fd": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1Rb2/4P4/9/9/2p6/2p6/9/4BA1n1/4A4/5K3 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "977bcfb7cd2421684db5523fd96a6213": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "0f9517146b7010e9869105e08d193ff8"
+      },
+      "fen": "3k5/4PR3/8b/9/2p6/1p7/9/4BA1n1/4A4/5K3 w - - 0 1",
+      "legal_moves": [
+        "e8d8",
+        "e8e9",
+        "f8f9",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2c4",
+        "e2g0",
+        "e2g4",
+        "f0e0",
+        "f8f3",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "9a4007fa0d90ad10f5a8bb173e21b0ba": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "fe85c0b12c7fc5abac3337e8f1eee96b"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/p8/9/4BA1n1/4A4/5K3 w - - 0 1",
+      "legal_moves": [
+        "e8d8",
+        "e8e9",
+        "f8f9",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2c4",
+        "e2g0",
+        "e2g4",
+        "f0e0",
+        "f8f3",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "a226cd08dde3334ea5a4c957b6cef1f1": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1Rb2/4P4/9/9/2p6/1p7/9/4BA3/4An3/5K3 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "b447fa041c5e76722043ebb3c4238904": {
+      "dtm_plies": 2,
+      "edges": {
+        "b4a4": "9a4007fa0d90ad10f5a8bb173e21b0ba",
+        "b4b3": "5fa61fc77c87c92fb30813c4bf11ea6d",
+        "b4c4": "3aae47ffe7f3dcbdd10f5023be957ee9",
+        "c5c4": "469820738e6100c20e8002853c210303",
+        "g9i7": "977bcfb7cd2421684db5523fd96a6213",
+        "h2f1": "e0c157556b8aa94dfd11c4604a3a9982",
+        "h2f3": "5602df3adfe2cd1459a593c0a6d12a54",
+        "h2g0": "484ce93901ad65f14a8a9fa6b45cce42",
+        "h2g4": "47954fb5e6e36fffb78c8b6fcbd4a050",
+        "h2i0": "8879e9b387e8bea63ff004cdb0609361",
+        "h2i4": "bcec099724c3adab7ac02ff06f5b5f4a"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p7/9/4BA1n1/4A4/5K3 b - - 0 1",
+      "legal_moves": [
+        "h2g0",
+        "b4a4",
+        "b4b3",
+        "b4c4",
+        "c5c4",
+        "g9i7",
+        "h2f1",
+        "h2f3",
+        "h2g4",
+        "h2i0",
+        "h2i4"
+      ],
+      "longest_mate_plies": 2,
+      "remaining_plies": 2,
+      "terminal": false,
+      "turn": -1
+    },
+    "bcec099724c3adab7ac02ff06f5b5f4a": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "164ffd1ce3a47620d9b2fee605053438"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p6n/9/4BA3/4A4/5K3 w - - 0 1",
+      "legal_moves": [
+        "e8d8",
+        "e8e9",
+        "f8f9",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2c4",
+        "e2g0",
+        "e2g4",
+        "f0e0",
+        "f0f1",
+        "f8f3",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "bd58f8bf9754a5ca4b9cb344d9bb951e": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1Rb2/4P4/9/9/2p6/1p7/9/4BA3/4A4/5Kn2 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "c764e92adcfd79461ab6010652d7f4bb": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1Rb2/4P4/9/9/9/1pp6/9/4BA1n1/4A4/5K3 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "d09311a674ef054acdf6b5eb05515411": {
+      "dtm_plies": 3,
+      "edges": {
+        "f1f0": "b447fa041c5e76722043ebb3c4238904"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p7/9/4BA1n1/4AK3/9 w - - 0 1",
+      "legal_moves": [
+        "f1f0"
+      ],
+      "longest_mate_plies": 3,
+      "remaining_plies": 3,
+      "terminal": false,
+      "turn": 1
+    },
+    "d3204ac9234b9a933ceeefa97c21677b": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1Rb2/4P4/9/9/2p6/1p4n2/9/4BA3/4A4/5K3 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "de9adfdeb31233f639100de2c9b180ab": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1Rb2/4P4/9/9/2p6/9/1p7/4BA1n1/4A4/5K3 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "e0c157556b8aa94dfd11c4604a3a9982": {
+      "dtm_plies": 1,
+      "edges": {
+        "f8f9": "a226cd08dde3334ea5a4c957b6cef1f1"
+      },
+      "fen": "3k2b2/4PR3/9/9/2p6/1p7/9/4BA3/4An3/5K3 w - - 0 1",
+      "legal_moves": [
+        "e8d8",
+        "e8e9",
+        "f8f9",
+        "f0f1",
+        "e1d0",
+        "e1d2",
+        "e2c0",
+        "e2c4",
+        "e2g4",
+        "f0e0",
+        "f8f3",
+        "f8f4",
+        "f8f5",
+        "f8f6",
+        "f8f7",
+        "f8g8",
+        "f8h8",
+        "f8i8"
+      ],
+      "longest_mate_plies": 1,
+      "remaining_plies": 1,
+      "terminal": false,
+      "turn": 1
+    },
+    "fc7a18dbf2d43b906d3bddf53c341163": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1Rb2/4P4/9/9/2p6/1p7/9/4BA3/4A4/5K2n b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    },
+    "fe85c0b12c7fc5abac3337e8f1eee96b": {
+      "dtm_plies": 0,
+      "edges": {},
+      "fen": "3k1Rb2/4P4/9/9/2p6/p8/9/4BA1n1/4A4/5K3 b - - 0 1",
+      "legal_moves": [],
+      "longest_mate_plies": 0,
+      "remaining_plies": 0,
+      "terminal": true,
+      "turn": -1
+    }
+  },
+  "proof_defender_coverage": "all_legal",
+  "record_key": "7f3655b55d09ab6af509082fdc520db325a8e7a572200971a4791ff2a22fbb33",
+  "requested_max_attacker_moves": 5,
+  "root": "2008645f14714ea7b3e7f18a52365f00",
+  "ruleset": "standard",
+  "scope": "bounded legal play; no official long-check/chase adjudication",
+  "seconds": 0.067961,
+  "shortest_attacker_moves": 4,
+  "shortest_certified": true,
+  "solution_set": "all locally shortest forced-mate attacker choices",
+  "task_id": "xiangqi-rule-variants-c2-p100-54ab7b958d0bb91b72b3",
+  "version": "xiangqi-shortest-solution-dag-v2",
+  "visits": 620
+}

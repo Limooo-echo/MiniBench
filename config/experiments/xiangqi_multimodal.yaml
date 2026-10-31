@@ -15,6 +15,7 @@ provider:
   max_retries: 0
   json_mode: false
   extra_body:
+    stream: true
     enable_thinking: true
 evaluation:
   final_move_timeout_seconds: 900
@@ -23,8 +24,8 @@ evaluation:
   verify_with_pikafish: true
   pikafish_depth: 8
   pikafish_timeout: 60.0
-  pikafish_binary_sha256: 0d57d64c212e78f96cba9e5e4f140d8872f8faa42ea631a27ab6c5db08509da3
-  pikafish_nnue_sha256: 7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e
+  pikafish_binary_sha256: be284d9532bb2cf3515a1a9c61395268d437a5c625a920f01be9fb2107f81c11
+  pikafish_nnue_sha256: a2f41d4d0b9f59c5b5ecb3ca129fe24e3a722ea2f00ee252ae14d5dc08899f6a
   pricing: null
 run:
   output_dir: runs

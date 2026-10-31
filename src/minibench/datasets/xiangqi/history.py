@@ -1,11 +1,9 @@
-"""Paired Xiangqi H2 evaluation using the shared VariantBoard engine.
+"""Paired H2 current-state versus one-round-lagged board reconstruction.
 
-Each sampled initial position is evaluated twice: once with the current board
-visible every agent turn and once with only the initial board plus chronological
-UCI move history. The model must generate a legal UCI move itself in both
-conditions; no legal-move candidates are disclosed. A certified shortest tree
-supplies opponent replies on-tree; Pikafish supplies fallback replies and the
-centipawn oracle.
+Both groups transcribe the current board and freely generate a UCI move. The
+lagged group receives only the board before its previous move plus that round's
+two moves, in a fresh request. Certified trees supply replies; Pikafish is used
+only for off-tree opponent replies. Multimove loss is no longer evaluated.
 """
 from __future__ import annotations
 
@@ -21,6 +19,14 @@ from minibench.datasets.xiangqi.deadline import (
     FINAL_MOVE_TIMEOUT_SECONDS, FinalMoveTimeout, call_agent_move, validate_move_timeout,
 )
 from minibench.datasets.xiangqi.solution_tree import TreeSession, summarize_tree_metrics
+from minibench.datasets.xiangqi.perception_metrics import score_board_recognition
+from minibench.datasets.xiangqi.outcome_labels import task_outcome_labels, summarize_task_outcomes, write_outcome_files
+from minibench.datasets.xiangqi.tree_prefix_metrics import (
+    tree_prefix_fields, summarize_tree_prefix, tree_prefix_summary_line,
+)
+from minibench.datasets.xiangqi.legal_episode_metrics import (
+    episode_legality_fields, summarize_legal_episodes, legal_episode_summary_line,
+)
 from minibench.datasets.xiangqi.runtime import (
     validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, error_detail, extract_strict_uci_move, reset_agent, mean_or_none, rounded, status_counts, display,
 )
@@ -68,6 +74,18 @@ class HistoryResult:
     protocol_version: str = PROTOCOL_VERSION
     mate_within_shortest_steps: bool | None = None
     solution_tree_metadata: dict[str, Any] = field(default_factory=dict)
+    recognition_exact: bool | None = None
+    recognition_status: str = "unavailable"
+    history_input_protocol: str = "lagged-one-round-with-current-transcription-v1"
+    outcome_labels: dict[str, Any] = field(default_factory=dict)
+    solution_tree_prefix_rate: float | None = None
+    solution_tree_prefix_metrics: dict[str, Any] = field(default_factory=dict)
+    all_agent_moves_legal: bool | None = None
+    agent_decision_count: int | None = None
+    legal_agent_decision_count: int | None = None
+    invalid_agent_decision_count: int | None = None
+    unknown_agent_decision_count: int | None = None
+    legal_episode_metrics_version: str | None = None
 
 
 MATE_SCORE_CP = 100_000
@@ -91,7 +109,29 @@ Before selecting the current move, internally consider the opponent's strongest 
 Prefer forcing checks and mating nets when they exist; do not repeat moves or chase material unless that is necessary to force mate. Re-evaluate this plan after every opponent reply.
 Before emitting your JSON, silently verify that the origin square contains one of your pieces, the destination is not occupied by your own piece, the move obeys that piece's movement and path rules, and your own general is not left in check or facing the opposing general.
 Generate one legal UCI coordinate move yourself.
-Return exactly one JSON object with schema {"move": "<uci_move>"}.
+Standard palace rules apply to BOTH sides and EVERY hypothetical reply:
+- Red's general and advisors must stay on files d/e/f and ranks 0/1/2.
+- Black's general and advisors must stay on files d/e/f and ranks 7/8/9.
+- A general moves one square orthogonally; an advisor moves one square diagonally.
+Neither piece may leave its OWN palace, even to escape check or block a line.
+Do not invent defensive replies outside these palace squares.
+For EVERY hypothetical continuation, update the board before judging legality:
+remove the moving piece from its origin, remove any captured enemy, then place the mover.
+Recompute attacks on this resulting board; the mover's old square is now empty and cannot block a line.
+A chariot moves/captures orthogonally with NO intervening pieces.
+A cannon moves without capture only over an empty path; a capture requires EXACTLY ONE intervening piece.
+In particular, a cannon cannot capture an adjacent piece with zero intervening pieces.
+A horse moves one orthogonal step then one diagonal step; its adjacent orthogonal leg square must be empty.
+An elephant moves two squares diagonally with an empty eye and must remain on its own side of the river.
+A Red soldier advances toward increasing ranks; a Black soldier toward decreasing ranks.
+After crossing the river (Red ranks 5-9; Black ranks 0-4), a soldier can also move one square sideways, including on the last rank. It never moves backward.
+A defensive reply must remove the current check; merely checking the other general is not sufficient.
+A mate-in-n plan is judged at the end of the allowed continuation: an earlier checking piece being captured does not itself refute the plan.
+The shortest bound is supplied; you need not re-prove its minimality or enumerate every possible attacking plan.
+If you cannot verify a forced mating plan, still choose your best legal move and return the required answer instead of restarting indefinitely.
+Once a legal plan has been verified against legal replies, finalize the requested JSON without restarting the same completed search.
+Return exactly one JSON object with schema {"pieces": {"<square>": "<piece_symbol>"}, "move": "<uci_move>"}.
+The pieces object must transcribe the CURRENT position immediately BEFORE your move, including every occupied square, piece type and side, with no omissions or additions.
 Do not include markdown fences, candidate lists, analysis, or explanations."""
 
 def _side_name(side: int) -> str:
@@ -99,7 +139,14 @@ def _side_name(side: int) -> str:
 
 
 def _extract_history_uci(raw_output: str) -> str | None:
-    return extract_strict_uci_move(raw_output)
+    try:
+        payload = json.loads(raw_output)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict) or "move" not in payload or set(payload) - {"move", "pieces"}:
+        return None
+    # A missing/bad transcription fails recognition independently of move legality.
+    return extract_strict_uci_move(json.dumps({"move": payload["move"]}))
 
 
 def _ensure_engine(engine: PikafishEngine) -> None:
@@ -159,59 +206,49 @@ def _task_objective_hint(task: XiangqiTask) -> str:
     )
 
 
-def _history_turn_message(
-    *,
-    agent_uci: str | None,
-    opponent_uci: str | None,
-) -> str:
-    if opponent_uci is None:
-        prefix = "You move first."
-    elif agent_uci is None:
-        prefix = (
-            f"The opponent opened with {opponent_uci}. "
-            "Reconstruct the updated board from the conversation."
-        )
-    else:
-        prefix = (
-            f"Previous turn: You played {agent_uci}; the opponent replied with "
-            f"{opponent_uci}. Reconstruct the updated board from the conversation."
-        )
-    return f"""{prefix}
-
-Do not expect a current-board diagram or a legal-move list: the initial board and
-this chronological chat history are the only state information you receive.
-Generate one legal current move in Xiangqi UCI coordinate notation.
-
-Return exactly:
-{{"move": "<uci_move>"}}"""
+def _history_turn_message(*, agent_uci: str | None, opponent_uci: str | None) -> str:
+    if agent_uci is None and opponent_uci is None:
+        return "No previous round. Use the supplied starting board as the current board."
+    if agent_uci is None:
+        return f"The opponent opened with {opponent_uci}. Apply this move to the supplied anchor board."
+    return (f"Previous round: You played {agent_uci}; the opponent replied with {opponent_uci}. "
+            "Apply those two moves IN THAT ORDER to the supplied anchor board to reconstruct the current board.")
 
 
-def _initial_move_history_messages(
-    task: XiangqiTask,
-    initial_board_text: str,
-    *,
-    opening_opponent_uci: str | None = None,
-) -> list[ChatMessage]:
+def _lagged_state_messages(task: XiangqiTask, board_text: str, *,
+                           agent_uci: str | None = None, opponent_uci: str | None = None,
+                           turn_number: int = 1) -> list[ChatMessage]:
     return [
         {"role": "system", "content": HISTORY_SYSTEM_PROMPT},
-        {"role": "user", "content": f"""Mode: MEMORY. You receive the initial board once. After each of your moves,
-you receive only the opponent reply; no intermediate board position or candidate
-move list will be shown. Reconstruct the current position from the chronological
-conversation before generating your move.
+        {"role": "user", "content": f"""Mode: LAGGED STATE. This is your move number {turn_number}.
+You receive a single-round reconstruction problem, not accumulated conversation history.
+From your second move onward, the anchor board is the position immediately BEFORE
+YOUR PREVIOUS move. It is NOT the current board. Only the previous round's two moves follow.
+On your first move, with no previous round, the supplied starting board is current.
 
 You control: {task.agent_color or task.agent_side}.
 {BOARD_ENCODING}
 
 Task objective: {_task_objective_hint(task)}
 
-Initial board (start of game):
-{initial_board_text}
+Anchor board (before the previous round; starting/current board on your first move):
+{board_text}
 
-{_history_turn_message(
-    agent_uci=None,
-    opponent_uci=opening_opponent_uci,
-)}"""},
+{_history_turn_message(agent_uci=agent_uci, opponent_uci=opponent_uci)}
+
+First reconstruct the CURRENT position immediately before your new move.
+Return every CURRENT occupied square in pieces, then choose your move on that position.
+Do not return the old anchor position or the position after your proposed move.
+Return exactly one JSON object:
+{{"pieces": {{"<square>": "<piece_symbol>"}}, "move": "<uci_move>"}}"""},
     ]
+
+
+def _initial_move_history_messages(task: XiangqiTask, initial_board_text: str, *,
+                                    opening_opponent_uci: str | None = None) -> list[ChatMessage]:
+    # Compatibility wrapper; the evaluator builds a fresh lagged request every turn.
+    return _lagged_state_messages(task, initial_board_text,
+                                   opponent_uci=opening_opponent_uci)
 
 
 def _full_state_prompt(
@@ -220,11 +257,12 @@ def _full_state_prompt(
     history: Sequence[dict[str, Any]],
 ) -> str:
     chronological_history = "\n".join(
-        f"{step['actor']}: {step['uci']}" for step in history
+        f"{step['actor']}: {step['uci']}" for step in history[-2:]
     ) or "(initial position)"
+    turn_number = 1 + sum(step.get("actor") == "agent" for step in history)
     return f"""{HISTORY_SYSTEM_PROMPT}
 
-Mode: FULL STATE. The current board is shown every turn, but no legal-move list
+Mode: FULL STATE. This is your move number {turn_number}. The current board is shown every turn, but no legal-move list
 is provided. Generate the move yourself.
 
 You control: {task.agent_color or task.agent_side}.
@@ -235,11 +273,12 @@ Task objective: {_task_objective_hint(task)}
 Current board:
 {board_state_text(board.board)}
 
-Move history:
+Previous round moves (already reflected in the current board):
 {chronological_history}
 
+Transcribe the CURRENT board immediately before your move, then choose your move.
 Return exactly:
-{{"move": "<uci_move>"}}"""
+{{"pieces": {{"<square>": "<piece_symbol>"}}, "move": "<uci_move>"}}"""
 
 
 def _generate_history_turn(
@@ -247,8 +286,8 @@ def _generate_history_turn(
 ) -> tuple[str, str]:
     generate_messages = getattr(agent, "generate_messages", None)
     if callable(generate_messages):
-        return generate_messages(messages, task, json_mode=True), "multi_turn_chat"
-    raise ValueError("H2 move-history-only requires generate_messages() with complete history")
+        return generate_messages(messages, task, json_mode=True), "lagged_one_round_chat"
+    raise ValueError("H2 lagged-state requires generate_messages() for a fresh one-round request")
 
 
 def _move_by_uci(moves: Sequence[Move], uci: str | None) -> Move | None:
@@ -312,19 +351,18 @@ def evaluate_history_tasks(
             status, error, mate_success = "ok", None, False
             checkmate_ply = None
             history_transport = "not_applicable"
+            lagged_board_text = None
+            last_round_agent_uci = last_round_opponent_uci = None
             stage = "agent_reset"
             try:
                 reset_agent(agent)
                 stage = "configuration"
                 if history_mode == "move-history-only" and not callable(getattr(agent, "generate_messages", None)):
-                    raise ValueError("H2 move-history-only requires generate_messages() with complete history")
+                    raise ValueError("H2 lagged-state requires generate_messages() for a fresh one-round request")
                 stage = "judge"
                 agent_side = 1 if (task.agent_color or ("red" if task.agent_side == "ally" else "black")) == "red" else -1
                 side = 1 if task.side_to_move == "ally" else -1
                 board = VariantBoard(task.board, [])
-                initial_board = board_state_text(board.board)
-                messages = None
-                last_agent_uci = None
                 reference_plies = (task.oracle or {}).get("mate_in_plies")
                 if not isinstance(reference_plies, int) or reference_plies < 1:
                     reference_plies = task.max_steps
@@ -340,24 +378,17 @@ def evaluate_history_tasks(
                         reasons.append("agent_checkmated_opponent" if mate_success else "stalemate" if not board._is_in_check(side) else "agent_was_checkmated")
                         break
                     is_agent = side == agent_side
-                    analysis_error = None
-                    try:
-                        optimal_uci, cp_before = _pikafish_analysis(
-                            engine, board, side,
-                            perspective_side=agent_side,
-                            depth=pikafish_depth,
-                        )
-                    except Exception as exc:
-                        optimal_uci, cp_before = None, None
-                        analysis_error = exc
-                        if is_agent:
-                            diagnostics.append(error_detail("diagnostic_engine_before", exc))
                     if is_agent:
                         stage = "model"
+                        current_board_text = board_state_text(board.board)
+                        turn_number = 1 + sum(step["actor"] == "agent" for step in steps)
+                        anchor_text = lagged_board_text if lagged_board_text is not None else current_board_text
+                        previous_agent = last_round_agent_uci if lagged_board_text is not None else None
+                        previous_opponent = last_round_opponent_uci if lagged_board_text is not None else None
                         if history_mode == "move-history-only":
-                            if messages is None:
-                                opening = steps[-1]["uci"] if steps and steps[-1]["actor"] == "pikafish" else None
-                                messages = _initial_move_history_messages(task, initial_board, opening_opponent_uci=opening)
+                            messages = _lagged_state_messages(
+                                task, anchor_text, agent_uci=previous_agent,
+                                opponent_uci=previous_opponent, turn_number=turn_number)
                             raw, history_transport = call_agent_move(
                                 _generate_history_turn, agent, messages, task,
                                 timeout_seconds=final_move_timeout_seconds)
@@ -369,9 +400,18 @@ def evaluate_history_tasks(
                         move = _move_by_uci(legal_moves, generated_uci)
                         step = {"step_idx": step_index, "actor": "agent", "raw_output": raw,
                                 "action": None, "uci": generated_uci or "PARSE_FAIL", "is_legal": move is not None,
-                                "optimal_uci": optimal_uci, "is_optimal": bool(optimal_uci and generated_uci == optimal_uci),
-                                "cp_before": rounded(cp_before), "cp_after": None, "cp_loss": None}
+                                "optimal_uci": None, "is_optimal": False,
+                                "cp_before": None, "cp_after": None, "cp_loss": None,
+                                "current_board_fen": board_to_pikafish_fen(board.board, side_to_move=_side_name(side)),
+                                "input_anchor_board_text": anchor_text if history_mode == "move-history-only" else current_board_text,
+                                "input_previous_agent_uci": previous_agent,
+                                "input_previous_opponent_uci": previous_opponent,
+                                **score_board_recognition(raw, board.board)}
                         steps.append(step)
+                        if move is not None:
+                            lagged_board_text = current_board_text
+                            last_round_agent_uci = move.to_uci()
+                            last_round_opponent_uci = None
                         if move is None:
                             status = "invalid"
                             reasons.append("invalid_or_illegal_uci")
@@ -379,14 +419,16 @@ def evaluate_history_tasks(
                     else:
                         stage = "opponent_engine"
                         tree_uci = session.opponent_move(board.board, side, step_index)
-                        if analysis_error is not None and tree_uci is None:
-                            raise analysis_error
+                        optimal_uci = None
+                        if tree_uci is None:
+                            optimal_uci, _ = _pikafish_analysis(
+                                engine, board, side, perspective_side=agent_side, depth=pikafish_depth)
                         move = _move_by_uci(legal_moves, tree_uci or optimal_uci)
                         if move is None:
                             raise RuntimeError(f"Pikafish returned no legal opponent move: {optimal_uci!r}")
                         step = {"step_idx": step_index, "actor": "pikafish", "opponent_source": "certified-tree" if tree_uci else "pikafish-fallback", "raw_output": "", "action": None,
                                 "uci": move.to_uci(), "is_legal": True, "is_optimal": optimal_uci==move.to_uci(),
-                                "optimal_uci": optimal_uci, "cp_before": rounded(cp_before), "cp_after": None, "cp_loss": None}
+                                "optimal_uci": optimal_uci, "cp_before": None, "cp_after": None, "cp_loss": None}
                         steps.append(step)
                     stage = "judge"
                     uci = move.to_uci()
@@ -394,7 +436,6 @@ def evaluate_history_tasks(
                     board.apply(move)
                     next_side = -side
                     terminal = False
-                    cp_after = None
                     if board.find_general(next_side) is None:
                         # Capturing a general is not the strict checkmate objective.
                         terminal = True
@@ -405,25 +446,8 @@ def evaluate_history_tasks(
                         mate_success = next_side != agent_side and checked
                         checkmate_ply = step_index + 1 if mate_success else None
                         reasons.append("agent_checkmated_opponent" if mate_success else "agent_was_checkmated" if checked else "stalemate")
-                        if checked:
-                            cp_after = float(MATE_SCORE_CP if next_side != agent_side else -MATE_SCORE_CP)
-                    else:
-                        try:
-                            _, cp_after = _pikafish_analysis(
-                                engine, board, next_side,
-                                perspective_side=agent_side,
-                                depth=pikafish_depth,
-                            )
-                        except Exception as exc:
-                            diagnostics.append(error_detail("diagnostic_engine_after", exc))
-                    step["cp_after"] = rounded(cp_after)
-                    step["cp_loss"] = rounded(max(0.0, cp_before - cp_after)) if cp_before is not None and cp_after is not None else None
-                    if is_agent:
-                        last_agent_uci = uci
-                        if messages is not None:
-                            messages.append({"role": "assistant", "content": raw})
-                    elif messages is not None and not terminal:
-                        messages.append({"role": "user", "content": _history_turn_message(agent_uci=last_agent_uci, opponent_uci=uci)})
+                    if not is_agent:
+                        last_round_opponent_uci = uci
                     if terminal:
                         break
                     side = next_side
@@ -438,7 +462,8 @@ def evaluate_history_tasks(
                     steps.append({"step_idx": len(steps), "actor": "agent",
                                   "raw_output": "" if timed_out else exc.raw_output or "",
                                   "uci": "TIMEOUT" if timed_out else "PARSE_FAIL", "is_legal": False, "is_optimal": False,
-                                  "cp_before": None, "cp_after": None, "cp_loss": None})
+                                  "cp_before": None, "cp_after": None, "cp_loss": None,
+                                  **score_board_recognition("" if timed_out else exc.raw_output or "", board.board)})
                 error = error_detail(stage, exc)
                 reasons.append("final_move_timeout" if timed_out else stage + "_error")
             agent_steps = [step for step in steps if step["actor"] == "agent"]
@@ -455,6 +480,11 @@ def evaluate_history_tasks(
             ))
             if mate_success and not strict_success:
                 reasons.append("checkmate_after_reference_horizon")
+            recognition_values = [step.get("recognition_exact") for step in agent_steps]
+            recognition_exact = (None if status == "error" else
+                                 False if any(value is False for value in recognition_values) else
+                                 True if recognition_values and all(value is True for value in recognition_values) else None)
+            tree_scores = session.scores(mate_success, checkmate_ply)
             result = HistoryResult(
                 task_id=task.id, difficulty=task.difficulty, history_mode=history_mode,
                 success=mate_success, goal_achieved=mate_success,
@@ -468,8 +498,14 @@ def evaluate_history_tasks(
                 mate_in_plies=(task.oracle or {}).get("mate_in_plies"), status=status, error=error,
                 diagnostics=diagnostics, metrics=finish_task_metrics(agent, start), termination_reason=reasons[-1],
                 protocol_version=PROTOCOL_VERSION,
-                **session.scores(mate_success, checkmate_ply),
+                recognition_exact=recognition_exact,
+                recognition_status="all_turns_exact" if recognition_exact is True else "transcription_mismatch" if recognition_exact is False else "unavailable",
+                **tree_scores,
+                **tree_prefix_fields(steps, tree_scores["solution_tree_metadata"],
+                                     status=status, termination_reason=reasons[-1]),
+                **episode_legality_fields(steps, status=status, termination_reason=reasons[-1]),
             )
+            result.outcome_labels = task_outcome_labels(result, task="h2")
             results.append(result)
             if on_result is not None:
                 on_result(result)
@@ -524,6 +560,10 @@ def summarize_history(results: list[HistoryResult]) -> dict[str, Any]:
             "avg_cp_loss": mean_or_none((r.avg_cp_loss for r in valid), 1),
             "legality_rate": mean_or_none((r.legality_rate for r in valid), 3),
             **summarize_tree_metrics(valid),
+            **{"outcome_labels_summary": summarize_task_outcomes(items, task="h2")},
+            **summarize_tree_prefix(items),
+            **summarize_legal_episodes(items),
+            "metrics": summarize_metrics(items),
         }
     summary = bucket(results)
     by_diff = {difficulty: bucket([r for r in results if r.difficulty == difficulty]) for difficulty in sorted({r.difficulty for r in results})}
@@ -534,8 +574,11 @@ def summarize_history(results: list[HistoryResult]) -> dict[str, Any]:
     return {
         **summary, "unique_tasks": len({r.task_id for r in results}),
         "primary_metric": "mate_within_shortest_rate",
-        "opponent_policy": "shortest strategy DAG when enabled; Pikafish fallback and CP oracle",
-        "cp_loss_unit": "Pikafish centipawns from the agent perspective; mate scores use a distance-aware 100,000 scale",
+        "opponent_policy": "shortest strategy DAG when enabled; Pikafish fallback only; loss disabled",
+        "history_input_protocol": "lagged-one-round-with-current-transcription-v1",
+        "history_mode_compatibility": "move-history-only now means one-round lagged board reconstruction, not full accumulated history",
+        "loss_evaluation": "disabled",
+        "cp_loss_unit": None,
         "paired_comparison": _paired_history_comparison(results),
         "by_mode": {mode: bucket([r for r in results if r.history_mode == mode]) for mode in sorted({r.history_mode for r in results})},
         "mate_horizon_metadata": horizons, "by_difficulty": by_diff, "by_legacy_difficulty_metadata": by_diff,
@@ -552,17 +595,6 @@ def write_history_run(results, output_dir="runs", run_name=None, *, write_predic
                 handle.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
     summary = summarize_history(results)
     (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    lines = ["Xiangqi History Evaluation", f"Total: {summary['total']} Missing: {summary['missing']}",
-             f"Mate within shortest: {display(summary['mate_within_shortest_rate'], '.1%')}",
-             f"Legality: {display(summary['legality_rate'], '.1%')}",
-             f"Average CP loss: {display(summary['avg_cp_loss'])}"]
-    for mode, values in summary["by_mode"].items():
-        lines.append(
-            f"{mode}: mate_shortest={display(values['mate_within_shortest_rate'], '.1%')} "
-            f"legal={display(values['legality_rate'], '.1%')} "
-            f"cp_loss={display(values['avg_cp_loss'])} missing={values['missing']}"
-        )
-    from minibench.datasets.xiangqi.resources import resource_summary_lines
-    lines.extend(resource_summary_lines(summary["metrics"]))
-    (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_outcome_files(run_dir, results, summary, task="h2", recognition_applicable=True,
+                        multimove=True, groups=summary["by_mode"])
     return run_dir

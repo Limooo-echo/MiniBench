@@ -5,7 +5,9 @@ import unittest
 
 from minibench.core.checkpoint import atomic_write_json
 from minibench.scoring.adapters import score_record
-from minibench.visualization.xiangqi_suite import comparison_rows
+from minibench.datasets.xiangqi.legal_episode_metrics import CONDITIONAL_METRIC
+from minibench.datasets.xiangqi.outcome_labels import task_label_keys
+from minibench.visualization.xiangqi_suite import LABEL_KEYS, TREE_PREFIX_METRIC, comparison_rows
 
 
 class StrictNReportingTests(unittest.TestCase):
@@ -56,12 +58,13 @@ class StrictNReportingTests(unittest.TestCase):
                               {"by_mode": {"full-state": summary}})
             atomic_write_json(suite / "results/c2/direct/results.json", summary)
             rows = comparison_rows(suite)
-            self.assertEqual(len(rows), 6)
+            self.assertEqual(len(rows), 14)
             self.assertEqual({row["metric"] for row in rows if row["task"] == "h2"},
-                             {"mate_within_shortest_rate", "legality_rate", "avg_cp_loss"})
+                             set(task_label_keys("h2","full-state"))|{CONDITIONAL_METRIC})
             self.assertEqual({row["metric"] for row in rows if row["task"] == "c2"},
-                             {"mate_within_shortest_rate", "legality_rate", "avg_variant_loss"})
-            self.assertTrue(all("plus_two" not in row["metric"] for row in rows))
+                             set(task_label_keys("c2"))|{CONDITIONAL_METRIC})
+            self.assertTrue(all(row["value"] is None for row in rows if row["metric"] == CONDITIONAL_METRIC))
+            self.assertTrue(all("plus_two" not in row["metric"] and "loss" not in row["metric"] for row in rows))
 
 
 if __name__ == "__main__":

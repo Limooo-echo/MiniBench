@@ -378,6 +378,12 @@ def expand_foci(parent,work):
 
 def publish(parent, work, *, seed=42, engine_path=None):
     """Publish selected, certified records; never infer a missing proof."""
+    current_c2 = ROOT / "data/xiangqi/rule_variants/tasks.jsonl"
+    if current_c2.exists() and len(load_records(current_c2)) == 200:
+        raise ValueError(
+            "The legacy combined publisher cannot replace the 100-pair C2 release; "
+            "use expand_xiangqi_c2_pairs.py publish for the current C2 protocol"
+        )
     expanded=work/"h2-expanded-originals.jsonl"
     h2=load_records(expanded if expanded.exists() else parent/"history/tasks.jsonl")
     c2=load_records(work/"c2-candidates.jsonl")

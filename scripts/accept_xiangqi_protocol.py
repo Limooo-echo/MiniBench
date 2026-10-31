@@ -28,7 +28,7 @@ from minibench.datasets.xiangqi.schema import FAMILY_PATHS, runtime_dict, valida
 from minibench.datasets.xiangqi.solution_tree import TreeSession
 from minibench.datasets.xiangqi.variants.board import VariantBoard
 from minibench.datasets.xiangqi.variants.rules import Rule
-from minibench.datasets.xiangqi.text_encoding import FILES, piece_symbol
+from minibench.datasets.xiangqi.text_encoding import FILES, piece_symbol, board_state_text
 
 FAMILIES = {"d3": "xiangqi-mate-in-one", "c2": "xiangqi-rule-variants", "h2": "xiangqi-history", "m2": "xiangqi-multimodal"}
 
@@ -50,9 +50,11 @@ class CorrectAgent:
         self.engine, self.calls, self.resets = engine, 0, 0
         self.tree_records = tree_records or {}
         self.solution_tree_dirs = solution_tree_dirs or {}
+        self._lagged_moves: list[str] = []
 
     def reset(self):
         self.resets += 1
+        self._lagged_moves = []
 
     def _tree_move(self, task, moves):
         """Replay actual history into the certified tree, never a cached PV."""
@@ -80,8 +82,8 @@ class CorrectAgent:
         self.calls += 1
         task_id = task.id if isinstance(task, XiangqiTask) else task["id"]
         if task_id in self.tree_records:
-            return json.dumps({"move": self._tree_move(task, moves)})
-        if isinstance(task, XiangqiTask):
+            uci = self._tree_move(task, moves)
+        elif isinstance(task, XiangqiTask):
             side = 1 if task.side_to_move == "ally" else -1
             if task.family == "xiangqi-history":
                 if self.engine is None:
@@ -96,8 +98,11 @@ class CorrectAgent:
         else:
             uci = d3.enumerate_mate_in_one_moves(task["board"], m2._agent_side(task))[0]
         if (isinstance(task, dict) and task.get("family") == "xiangqi-multimodal") or (
-                isinstance(task, XiangqiTask) and task.family == "xiangqi-mate-in-one"):
+                isinstance(task, XiangqiTask) and task.family in {"xiangqi-mate-in-one", "xiangqi-history"}):
             board = task.board if isinstance(task, XiangqiTask) else task["board"]
+            if isinstance(task, XiangqiTask) and task.family == "xiangqi-history":
+                initial_side = 1 if task.side_to_move == "ally" else -1
+                board = replay_history(board, initial_side, list(moves))[0].board
             pieces = {f"{FILES[c]}{9-r}": piece_symbol(p)
                       for r, row in enumerate(board) for c, p in enumerate(row) if p}
             return json.dumps({"move": uci, "pieces": pieces})
@@ -112,16 +117,35 @@ class CorrectAgent:
         return self._answer(task, moves)
 
     def generate_messages(self, messages, task, **_kwargs):
-        moves = []
-        for message in messages:
-            content = str(message["content"])
-            if message["role"] == "assistant":
-                moves.append(json.loads(content)["move"])
-            elif message["role"] == "user":
-                match = re.search(r"opponent (?:replied with|opened with) ([a-i][0-9][a-i][0-9])", content)
-                if match:
-                    moves.append(match.group(1))
-        return self._answer(task, moves)
+        # The current H2 request is fresh: one lagged board plus one move pair,
+        # with no assistant messages or accumulated chat to replay.
+        if [message["role"] for message in messages] != ["system", "user"]:
+            raise ValueError("scripted H2 acceptance requires one fresh lagged request")
+        content = str(messages[-1]["content"])
+        turn_match = re.search(r"This is your move number ([0-9]+)", content)
+        if turn_match is None:
+            raise ValueError("scripted H2 acceptance is missing its turn number")
+        turn = int(turn_match.group(1))
+        pair = re.search(
+            r"Previous round: You played ([a-i][0-9][a-i][0-9]); "
+            r"the opponent replied with ([a-i][0-9][a-i][0-9])", content)
+        if turn == 1:
+            if self._lagged_moves or pair is not None:
+                raise ValueError("scripted H2 first round contains stale history")
+            anchor_moves = []
+        else:
+            if (pair is None or len(self._lagged_moves) != 2*turn-3
+                    or self._lagged_moves[-1] != pair.group(1)):
+                raise ValueError("scripted H2 previous pair does not match actual play")
+            anchor_moves = self._lagged_moves[:-1]
+            self._lagged_moves.append(pair.group(2))
+        side = 1 if task.side_to_move == "ally" else -1
+        anchor = replay_history(task.board, side, anchor_moves)[0].board
+        if board_state_text(anchor) not in content:
+            raise ValueError("scripted H2 anchor is not the board before the previous round")
+        answer = self._answer(task, self._lagged_moves)
+        self._lagged_moves.append(json.loads(answer)["move"])
+        return answer
 
     def generate_multimodal(self, _prompt, task, *, images):
         return self._answer(task)
@@ -137,6 +161,11 @@ class FixedAgent(CorrectAgent):
         if self.timeout:
             raise TimeoutError("intentional offline acceptance timeout")
         return self.output
+
+    def generate_messages(self, _messages, task, **_kwargs):
+        # Failure controls must return their intentional malformed payload
+        # verbatim, without the correct oracle's JSON/history bookkeeping.
+        return self._answer(task)
 
 
 def legal_non_mate(task: XiangqiTask, *, require_reply=False, exclude_moves=()) -> str:
@@ -179,7 +208,7 @@ def run_acceptance(output_dir: Path, engine_path: Path, families: list[str], *, 
         "protocol_version": PROTOCOL_VERSION, "kind": "scripted_offline_acceptance", "uses_language_model": False,
         "created_at": datetime.now(timezone.utc).isoformat(), "families": families,
         "scope": "one selected position per family; not full-dataset validation or model performance",
-        "engine": pikafish_fingerprint(engine_path), "depths": {"d3_m2_diagnostic": 8, "h2_cp_oracle_and_fallback": 16},
+        "engine": pikafish_fingerprint(engine_path), "depths": {"d3_m2_diagnostic": 8, "h2_reference_and_fallback": 16},
         "multi_ply_policy": "certified shortest trees for both scripted attacker and tree defender; not a historical PV or depth-3 witness",
         "sources": sources,
     }
@@ -237,6 +266,8 @@ def run_acceptance(output_dir: Path, engine_path: Path, families: list[str], *, 
             for family in families:
                 results = run_case(family, "correct_scripted_agent", CorrectAgent(reference_engine, tree_records=tree_records, solution_tree_dirs=tree_dirs))
                 checks[family + ".correct"] = all(r["status"] == "ok" and r["success"] is True for r in results)
+                if family == "h2":
+                    checks["h2.recognition"] = all(r["recognition_exact"] is True for r in results)
                 if family == "m2":
                     checks["m2.recognition"] = all(r["recognition_accuracy"] == 1 for r in results)
                     checks["m2.image_only"] = len(results) == 1 and all(r["input_mode"] == "chinese-piece-image" for r in results)

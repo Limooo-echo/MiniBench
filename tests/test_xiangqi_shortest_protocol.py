@@ -346,7 +346,7 @@ class TreeGameTests(unittest.TestCase):
             self.assertEqual(c.status,"ok",c)
             self.assertTrue(c.mate_within_shortest_steps)
             self.assertEqual(c.checkmate_ply,3)
-            self.assertIsNotNone(c.avg_variant_loss)
+            self.assertIsNone(c.avg_variant_loss)  # Multimove loss is disabled by the seven-label protocol.
             self.assertEqual([s["uci"] for s in c.steps],[first,reply,second])
 
 

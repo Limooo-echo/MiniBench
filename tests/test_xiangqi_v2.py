@@ -66,10 +66,10 @@ class XiangqiV2DataTests(unittest.TestCase):
 
     def test_all_submitted_records_validate_and_fen_round_trips(self):
         all_records = [record for records in self.by_family.values() for record in records]
-        self.assertEqual(len(all_records), 400)
-        self.assertEqual(len({record["id"] for record in all_records}), 400)
+        self.assertEqual(len(all_records), 500)
+        self.assertEqual(len({record["id"] for record in all_records}), 500)
         for family, records in self.by_family.items():
-            self.assertEqual(len(records), 100)
+            self.assertEqual(len(records), 200 if family == "xiangqi-rule-variants" else 100)
             for record in records:
                 board, active = fen_to_board(record["fen"])
                 self.assertEqual(
@@ -94,7 +94,7 @@ class XiangqiV2DataTests(unittest.TestCase):
         self.assertEqual(report["expected_h2_c2_overlap_count"],expected_overlap)
         self.assertEqual(report["unexpected_cross_family_overlap_count"], 0)
         c2_audit = report["per_family"]["xiangqi-rule-variants"]
-        self.assertEqual(c2_audit["unique_fen_count"], 50)
+        self.assertEqual(c2_audit["unique_fen_count"], 100)
         self.assertFalse(c2_audit["unexpected_duplicate_fens_within_family"])
 
     def test_d3_has_exact_mate_sets_and_reproducible_composite_difficulty(self):
@@ -133,7 +133,7 @@ class XiangqiV2DataTests(unittest.TestCase):
         self.assertEqual(_extract_history_uci('{"move": "H5H9"}'), "h5h9")
         self.assertIsNone(_extract_history_uci('{"action": 12}'))
         message = _history_turn_message(agent_uci="a0a1", opponent_uci="i9i8")
-        self.assertIn('"move": "<uci_move>"', message)
+        self.assertIn("Apply those two moves IN THAT ORDER", message)
         self.assertNotIn("Candidate moves", message)
         self.assertNotIn("one_number_from_the_candidate_list", message)
 
@@ -143,6 +143,8 @@ class XiangqiV2DataTests(unittest.TestCase):
         )[0]
         board, _ = fen_to_board(record["fen"])
         prompt = _full_state_prompt(task, VariantBoard(board, []), [])
+        self.assertIn('"pieces"', prompt)
+        self.assertIn('"move": "<uci_move>"', prompt)
         self.assertIn("R/r = Chariot", prompt)
         self.assertIn("Exact piece-coordinate list", prompt)
         self.assertNotIn("Candidate moves", prompt)
@@ -207,7 +209,7 @@ class XiangqiV2DataTests(unittest.TestCase):
         records = self.by_family["xiangqi-rule-variants"]
         self.assertEqual({record["ruleset"] for record in records}, set(RULESETS))
         scenario_ids = {record["scenario_id"] for record in records}
-        self.assertEqual(len(scenario_ids), 50)
+        self.assertEqual(len(scenario_ids), 100)
         grouped = {}
         for record in records:
             grouped.setdefault(record["scenario_id"], []).append(record)
@@ -276,7 +278,9 @@ class XiangqiV2DataTests(unittest.TestCase):
         self.assertEqual(summary["mate_within_prescribed_rate"], 1.0)
         self.assertEqual(summary["legality_rate"], 1.0)
         self.assertEqual(summary["avg_variant_loss"], 62.5)
-        self.assertIn("not Pikafish", summary["variant_loss_unit"])
+        self.assertIsNone(summary["variant_loss_unit"])
+        self.assertEqual(summary["loss_evaluation"], "disabled")
+        self.assertNotIn("avg_variant_loss", summary["outcome_labels_summary"]["labels"])
 
     def test_c2_free_uci_prompt_has_explicit_coordinates_and_no_candidates(self):
         task = runtime_dict(self.by_family["xiangqi-rule-variants"][0])
@@ -374,7 +378,7 @@ class XiangqiV2DataTests(unittest.TestCase):
             self.assertEqual(config["task"]["prompt_version"], expected_prompt)
             self.assertNotIn("sampling", config["task"])
             self.assertNotIn("selection", config["task"])
-            self.assertEqual(config["task"]["limit"], 100)
+            self.assertEqual(config["task"]["limit"], 200 if family == "xiangqi-rule-variants" else 100)
             evidence = submission["datasets"][keys[family]]
             self.assertEqual(sha256(Path(evidence["path"]).read_bytes()).hexdigest(), evidence["sha256"])
             if family == "xiangqi-history":
@@ -386,10 +390,7 @@ class XiangqiV2DataTests(unittest.TestCase):
                     config["evaluation"]["horizon_policy"],
                     "certified_shortest_attacker_moves",
                 )
-                self.assertEqual(
-                    config["evaluation"]["loss_unit"],
-                    "rule-aware-centipawn-equivalent-not-pikafish",
-                )
+                self.assertNotIn("loss_unit", config["evaluation"])
             if family == "xiangqi-multimodal":
                 self.assertNotIn("max_plies", config["evaluation"])
                 self.assertTrue(config["evaluation"]["verify_with_pikafish"])
@@ -469,7 +470,7 @@ class XiangqiV2PresentationAndMigrationTests(unittest.TestCase):
             output = build_gallery(Path(directory) / "gallery.html")
             text = output.read_text(encoding="utf-8")
         self.assertIn("data:font/otf;base64", text)
-        self.assertEqual(text.count('"schema_version":2'), 400)
+        self.assertEqual(text.count('"schema_version":2'), 500)
         for path in FAMILY_PATHS.values():
             records = load_records(path)
             self.assertTrue(all(record["id"] in text for record in records))

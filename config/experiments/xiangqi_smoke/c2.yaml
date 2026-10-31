@@ -4,7 +4,7 @@ task:
   path: data/xiangqi/rule_variants/tasks.jsonl
   selection:
     path: data/xiangqi/evaluation_samples/smoke/c2.jsonl
-    sha256: c710a980a41ee978fb7a1747a233f6963852901f3115ecbe5f32421eb074d7ca
+    sha256: e19b0ec68f015b9df5867dd4b12737ac32706115c2901aa2872590caab09a0ad
 agent:
   name: direct
   max_format_repairs: 0
@@ -17,12 +17,12 @@ provider:
   max_retries: 0
   json_mode: false
   extra_body:
+    stream: true
     enable_thinking: true
 evaluation:
   final_move_timeout_seconds: 900
   search_depth: 3
   horizon_policy: certified_shortest_attacker_moves
-  loss_unit: rule-aware-centipawn-equivalent-not-pikafish
   pricing: null
   solution_tree_dir: data/xiangqi/solution_trees/c2
 run:

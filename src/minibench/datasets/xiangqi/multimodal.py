@@ -20,6 +20,11 @@ from minibench.datasets.xiangqi.deadline import (
     FINAL_MOVE_TIMEOUT_SECONDS, FinalMoveTimeout, call_agent_move, validate_move_timeout,
 )
 from minibench.datasets.xiangqi.mate_in_one import enumerate_mate_in_one_moves
+from minibench.datasets.xiangqi.outcome_labels import task_outcome_labels, summarize_task_outcomes, write_outcome_files
+from minibench.datasets.xiangqi.perception_metrics import (
+    perception_outcomes, perception_summary_lines, score_board_recognition,
+    summarize_perception_gating,
+)
 from minibench.datasets.xiangqi.runtime import (
     validate_engine_fingerprint, StrictJSONObjectError, PROTOCOL_VERSION, EvaluationFailure, error_detail, extract_strict_uci_move, reset_agent, mean_or_none, rounded, status_counts, display,
 )
@@ -249,7 +254,8 @@ def evaluate_xiangqi_multimodal_tasks(
                         stage = "format"
                         steps = [{"step": 0, "actor": "agent", "raw": cause.raw_output or "",
                                   "raw_output": cause.raw_output or "", "uci": "PARSE_FAIL",
-                                  "is_legal": False, "is_opt": False, "engine_cp_loss": None}]
+                                  "is_legal": False, "is_opt": False, "engine_cp_loss": None,
+                                  **score_board_recognition(cause.raw_output or "", task["board"])}]
                     error = error_detail(stage, cause)
                     reasons = ["final_move_timeout" if timed_out else stage + "_error"]
                 agent_steps = [step for step in steps if step["actor"] == "agent"]
@@ -262,6 +268,7 @@ def evaluate_xiangqi_multimodal_tasks(
                     "recognition_accuracy": step.get("recognition_accuracy", 0.0) if status != "error" else None,
                     "recognition_exact": step.get("recognition_exact", False) if status != "error" else None,
                     "recognition_status": step.get("recognition_status", "unavailable"),
+                    "is_legal": step.get("is_legal", False) if status != "error" else None,
                     "legality_rate": mean_or_none(step["is_legal"] for step in agent_steps) if status != "error" else None,
                     "opt_rate": mean_or_none(step["is_opt"] for step in agent_steps) if status != "error" else None,
                     "score": float(success) if success is not None else None,
@@ -270,7 +277,12 @@ def evaluate_xiangqi_multimodal_tasks(
                     "pikafish_preferred_match": bool(step.get("uci") == initial_analysis.bestmove) if initial_analysis else None,
                     "engine_cp_loss": step.get("engine_cp_loss"), "reasons": reasons, "steps": steps,
                     "termination_reason": reasons[-1], "metrics": finish_task_metrics(agent, metrics_start),
+                    **perception_outcomes(
+                        recognition_exact=step.get("recognition_exact", False) if status != "error" else None,
+                        is_legal=step.get("is_legal", False) if status != "error" else None,
+                        success=success),
                 }
+                result["outcome_labels"] = task_outcome_labels(result, task="m2")
                 results.append(result)
                 if on_result is not None:
                     on_result(result)
@@ -336,9 +348,13 @@ def summarize_xiangqi_multimodal(results: Sequence[dict[str, Any]]) -> dict[str,
             "mate_rate": mean_or_none(item["success"] for item in known),
             "legality_rate": mean_or_none(item["legality_rate"] for item in known),
             "recognition_accuracy": mean_or_none(item.get("recognition_accuracy") for item in known),
+            **summarize_perception_gating(items),
+            **{"outcome_labels_summary": summarize_task_outcomes(items, task="m2")},
         }
     return {
         **status_counts(results), "unique_tasks": len({item["source_task_id"] for item in results}),
+        **summarize_perception_gating(results),
+        **{"outcome_labels_summary": summarize_task_outcomes(results, task="m2")},
         "primary_metric": "paired_mate_in_one_success", "oracle_policy": "exact strict checkmate; Pikafish is diagnostic only",
         "difficulty_policy": "same structural D3 strata in every input mode", "by_input_mode": mode_summary,
         "recognition_metric": "correct piece type/color/square divided by union of occupied predicted/true squares; missing transcription=0; text is a transcription control",
@@ -358,16 +374,8 @@ def write_xiangqi_multimodal_run(
                 handle.write(json.dumps(result, ensure_ascii=False) + "\n")
     summary = summarize_xiangqi_multimodal(results)
     (run_dir / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    lines = ["Xiangqi Multimodal Evaluation", f"Total: {summary['total']} Missing: {summary['missing']}"]
-    for mode, values in summary["by_input_mode"].items():
-        lines.append(
-            f"{mode}: mate={display(values['mate_rate'], '.1%')} "
-            f"legal={display(values['legality_rate'], '.1%')} missing={values['missing']}"
-            f" recognition={display(values['recognition_accuracy'], '.1%')}"
-        )
-    from minibench.datasets.xiangqi.resources import resource_summary_lines
-    lines.extend(resource_summary_lines(summary["metrics"]))
-    (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_outcome_files(run_dir, results, summary, task="m2", recognition_applicable=True,
+                        multimove=False, groups=summary["by_input_mode"])
     return run_dir
 
 
@@ -495,30 +503,6 @@ def _extract_uci(raw: str) -> str | None:
         return None
     # Perception mistakes must not be confused with move illegality.
     return extract_strict_uci_move(json.dumps({"move": payload["move"]}))
-
-
-def score_board_recognition(raw: str, board: Sequence[Sequence[int]]) -> dict[str, Any]:
-    """Score explicit model transcription, never infer perception from its move."""
-    import re
-    truth = {f"{FILES[c]}{9-r}": piece_symbol(p)
-             for r, row in enumerate(board) for c, p in enumerate(row) if p}
-    try:
-        payload = json.loads(raw)
-        predicted = payload.get("pieces") if isinstance(payload, dict) else None
-    except (json.JSONDecodeError, TypeError):
-        predicted = None
-    if not isinstance(predicted, dict):
-        return {"recognition_accuracy": 0.0, "recognition_exact": False,
-                "recognition_status": "missing_or_malformed_transcription"}
-    if any(not isinstance(k, str) or re.fullmatch(r"[a-i][0-9]", k) is None
-           or not isinstance(v, str) or v not in "KABNRCPkabnrcp" or len(v) != 1
-           for k, v in predicted.items()):
-        return {"recognition_accuracy": 0.0, "recognition_exact": False,
-                "recognition_status": "invalid_square_or_piece_symbol"}
-    union = set(truth) | set(predicted)
-    correct = sum(predicted.get(k) == truth.get(k) for k in union)
-    return {"recognition_accuracy": correct / len(union) if union else 1.0,
-            "recognition_exact": predicted == truth, "recognition_status": "scored"}
 
 
 def _move_by_uci(moves: Sequence[Move], uci: str | None) -> Move | None:

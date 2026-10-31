@@ -88,7 +88,7 @@ class CurrentInterfaceTests(unittest.TestCase):
                 if path.parent.name == "xiangqi_smoke":
                     self.assertIn("selection", config["task"])
                 else:
-                    self.assertEqual(config["task"]["limit"], 100)
+                    self.assertEqual(config["task"]["limit"], 200 if config["task"]["family"] == "xiangqi-rule-variants" else 100)
                     self.assertNotIn("selection", config["task"])
                 self.assertNotIn("max_plies", config["evaluation"])
 

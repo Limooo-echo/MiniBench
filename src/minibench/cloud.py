@@ -332,7 +332,7 @@ def prepare(config_path: Path, suite: Path, *, pilot_count: int | None = None):
             modes = ["native"]
         condition_counts = {mode: len(tasks) for mode in modes}
         if family == "xiangqi-rule-variants":
-            condition_counts = {"all": len(tasks)}
+            condition_counts = {"all": len(tasks), "variant": sum(t["ruleset"] != "standard" for t in tasks)}
             for t in tasks:
                 condition_counts[t["ruleset"]] = condition_counts.get(t["ruleset"], 0) + 1
         plan["experiments"][name]["condition_counts"] = condition_counts
@@ -345,6 +345,7 @@ def prepare(config_path: Path, suite: Path, *, pilot_count: int | None = None):
                          "experiment": name, "agent": agent_name, "task_id": task_id(t), "mode": mode}
                     if family == "xiangqi-rule-variants":
                         job["c2_phase"] = "standard" if t["ruleset"]=="standard" else "variant"
+                        job["ruleset"] = t["ruleset"]
                     plan["jobs"].append(job)
     plan["planned_jobs"] = len(plan["jobs"])
     plan["plan_sha256"] = fingerprint_payload(plan)
@@ -591,7 +592,7 @@ def report(suite, plan, completed):
     from minibench.datasets.xiangqi.resources import (
         physical_bucket, add_physical_attempt, finish_physical_bucket, assess_attempt_usage,
     )
-    resources = {}
+    resources, condition_resources, agent_condition_resources = {}, {}, {}
     for job in plan["jobs"]:
         calls = suite / "jobs" / job["key"] / "calls"
         for attempt in call_attempts(calls):
@@ -600,6 +601,20 @@ def report(suite, plan, completed):
                 bucket = resources.setdefault(job["experiment"],physical_bucket())
                 pricing = experiment["configs"][job["agent"]].get("evaluation",{}).get("pricing")
                 add_physical_attempt(bucket,attempt,pricing)
+                family = experiment["family"]
+                condition = job["mode"]
+                if family == "xiangqi-rule-variants":
+                    condition = job.get("c2_phase")
+                    if condition not in {"standard", "variant"}:
+                        ruleset = job.get("ruleset")
+                        saved_rows = (completed.get(job["key"]) or {}).get("records") or []
+                        if not ruleset and saved_rows:
+                            ruleset = saved_rows[0].get("ruleset")
+                        condition = ("standard" if ruleset == "standard" else "variant" if ruleset else "unknown")
+                conditions = condition_resources.setdefault(job["experiment"], {})
+                add_physical_attempt(conditions.setdefault(condition, physical_bucket()), attempt, pricing)
+                agent_conditions = agent_condition_resources.setdefault(job["experiment"], {}).setdefault(job["agent"], {})
+                add_physical_attempt(agent_conditions.setdefault(condition, physical_bucket()), attempt, pricing)
             success = attempt["status"] == "success"
             usages["started_attempts"] += 1
             usages["saved_successful_calls" if success else "unfinished_attempts"] += 1
@@ -624,6 +639,13 @@ def report(suite, plan, completed):
                "by_experiment_latency": totals, "usage": usages,
                "by_experiment_resources": {name:finish_physical_bucket(value)
                                            for name,value in resources.items()},
+               "by_experiment_condition_resources": {
+                   name: {condition: finish_physical_bucket(value) for condition, value in groups.items()}
+                   for name, groups in condition_resources.items()},
+               "by_experiment_agent_condition_resources": {
+                   name: {agent: {condition: finish_physical_bucket(value) for condition, value in groups.items()}
+                          for agent, groups in agents.items()}
+                   for name, agents in agent_condition_resources.items()},
                "note": "Unknown/incomplete request usage is not zero; this is not an account balance."}
     atomic_write_json(suite / "summary.json", summary)
     return summary

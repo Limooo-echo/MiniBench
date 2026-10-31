@@ -1,19 +1,37 @@
 {
-  "certification": "shortest full-width AND/OR, all legal defences",
-  "derived_sources": 18,
-  "difficulty_counts": {
+  "impact_counts": {
+    "optimal_first_moves_changed": 31,
+    "optimal_first_moves_disjoint": 9,
+    "optimal_strategy_changed": 82,
+    "shortest_distance_changed": 21
+  },
+  "independent_verification_required": true,
+  "pairs": 100,
+  "record_count": 200,
+  "rule_coverage": "each rule 20..40 percent; impact priority",
+  "rules": {
+    "chariot-no-center": 20,
+    "horse-no-leg-block": 40,
+    "soldier-free-retreat": 40
+  },
+  "ruleset_counts": {
+    "chariot-no-center": 20,
+    "horse-no-leg-block": 40,
+    "soldier-free-retreat": 40,
+    "standard": 100
+  },
+  "scenario_count": 100,
+  "selection_optimality": "feasible reviewed roster; one budget-unknown proof replaced; global impact optimum not claimed",
+  "source_games": 72,
+  "source_policy": "old MiniBench pool and traced legal intermediates; derived sources freshly checked at depth16/20",
+  "standard_bands": {
     "medium": 50,
     "short": 50
   },
-  "protocol": "certified-shortest-total-attacker-moves-no-extension",
-  "record_count": 100,
-  "ruleset_counts": {
-    "chariot-no-center": 17,
-    "horse-no-leg-block": 17,
-    "soldier-free-retreat": 16,
-    "standard": 50
+  "variant_bands": {
+    "medium": 38,
+    "short": 62
   },
-  "scenario_count": 50,
-  "stored_defences": "optimal replies only, unless header says all_legal",
-  "version": "xiangqi-shortest-paired100-strict-n-v3"
+  "variant_difficulty_policy": "recomputed; not forced to match baseline distribution",
+  "version": "c2-paired100-impact-priority-v1"
 }

@@ -277,8 +277,9 @@ def _c2_details(record, board, side, reasons, skip_search):
                 recomputed_sensitive or set(standard_moves) != set(focus_moves)
             )
             if uci not in standard_moves or uci not in focus_moves:
-                reasons.append(f"c2_standard_focus_pair_replay_failed_at_ply:{index}")
-                sensitivity_replay_valid = False
+                # A rule-specific mating line may be illegal under the other
+                # condition. That is rule impact, not an invalid paired puzzle.
+                recomputed_sensitive = True
                 break
             standard_state.apply(standard_moves[uci])
             focus_state.apply(focus_moves[uci])
@@ -344,8 +345,9 @@ def _audit_payload(payload):
 
 def audit_collection(family: str, records: Sequence[dict]) -> list[str]:
     reasons = []
-    if len(records) not in (100, 250):
-        reasons.append(f"expected_100_submitted_or_250_parent_records_got_{len(records)}")
+    allowed_sizes = (100, 200, 250) if family == "xiangqi-rule-variants" else (100, 250)
+    if len(records) not in allowed_sizes:
+        reasons.append(f"unexpected_record_count:{len(records)}")
     ids = [record.get("id") for record in records]
     if len(ids) != len(set(ids)):
         reasons.append("duplicate_task_ids")
@@ -391,8 +393,7 @@ def audit_collection(family: str, records: Sequence[dict]) -> list[str]:
             if (len(group) != 2 or set(by_rule) != {"standard", focus}
                     or len({record.get("fen") for record in group}) != 1
                     or len({record.get("source_task_id") for record in group}) != 1
-                    or len({tuple(record.get("c2_analysis", {}).get("principal_variation_uci", [])) for record in group}) != 1
-                    or len({record.get("c2_analysis", {}).get("rule_sensitive_along_reference") for record in group}) != 1):
+                    ):
                 reasons.append(f"{scenario}:incomplete_or_mismatched_standard_focus_pair")
                 continue
             strata[focus] += 1
@@ -404,15 +405,22 @@ def audit_collection(family: str, records: Sequence[dict]) -> list[str]:
                         or analysis.get("pair_rulesets") != ["standard", focus]
                         or analysis.get("source_task_id") != record.get("source_task_id")):
                     reasons.append(f"{record.get('id')}:paired_metadata_mismatch")
-        target_pairs = 50 if len(records) == 100 else 125
+        target_pairs = len(records) // 2
         if pairs != target_pairs:
             reasons.append(f"c2_requires_{target_pairs}_standard_focus_pairs_got_{pairs}")
         expected_strata = ({"horse-no-leg-block": 17, "chariot-no-center": 17,
                             "soldier-free-retreat": 16} if len(records) == 100 else
+                           dict(strata) if len(records) == 200 else
                            {"horse-no-leg-block": 42, "chariot-no-center": 42,
                             "soldier-free-retreat": 41})
         if dict(strata) != expected_strata:
             reasons.append(f"c2_focus_counts_mismatch:{dict(strata)}")
+        if len(records) == 200:
+            if set(strata) != set(FOCI) or any(not 20 <= strata[focus] <= 40 for focus in FOCI):
+                reasons.append(f"c2_each_rule_requires_20_to_40_pairs:{dict(strata)}")
+            baseline = Counter(r.get("difficulty") for r in records if r.get("ruleset") == "standard")
+            if dict(baseline) != {"short": 50, "medium": 50}:
+                reasons.append(f"c2_standard_requires_50_short_50_medium:{dict(baseline)}")
         if within_five <= len(records) // 2:
             reasons.append(f"c2_requires_majority_within_five_moves:{within_five}")
         if any(sensitive[focus] < (4 if len(records) == 100 else 8) for focus in FOCI):
@@ -422,6 +430,28 @@ def audit_collection(family: str, records: Sequence[dict]) -> list[str]:
         if any(len(scenarios) != 1 for scenarios in source_scenarios.values()):
             reasons.append("c2_h2_source_reused_across_scenarios")
     return reasons
+
+
+def audit_c2_pair_impact(records, data_root):
+    from minibench.datasets.xiangqi.rule_effects import paired_impact
+    groups = defaultdict(list)
+    reasons, counts = [], Counter()
+    for row in records:
+        groups[row["scenario_id"]].append(row)
+    for scenario, pair in groups.items():
+        if len(pair) != 2 or not any("paired_rule_impact" in row for row in pair):
+            continue
+        try:
+            standard = next(r for r in pair if r["ruleset"] == "standard")
+            variant = next(r for r in pair if r["ruleset"] != "standard")
+            trees = [json.loads((data_root / "solution_trees/c2" / f"{row['id']}.json").read_text()) for row in (standard, variant)]
+            impact = paired_impact(*trees)
+            if any(row.get("paired_rule_impact") != impact for row in pair):
+                reasons.append(f"{scenario}:paired_rule_impact_mismatch")
+            counts.update(key for key, value in impact.items() if value is True)
+        except (OSError, ValueError, KeyError, StopIteration) as exc:
+            reasons.append(f"{scenario}:paired_rule_impact_unavailable:{type(exc).__name__}")
+    return {"valid": not reasons, "reasons": reasons, "impact_counts": dict(counts)}
 
 
 def audit_sampling(family: str, records: Sequence[dict]) -> dict[str, Any]:
@@ -591,7 +621,7 @@ def audit_frozen_samples(data_root: Path, datasets: dict[str, Sequence[dict]], i
         sources = {family: {record["id"]: record for record in rows} for family, rows in datasets.items()}
         formal_new = manifest.get("protocol_version") in {"xiangqi-shortest-tree-v1", "xiangqi-shortest-tree-strict-n-v2"}
         for size, seed, count, c2count in (("smoke",20260909,6,3),
-                                          ("formal",42,100 if formal_new else 30,50 if formal_new else 10)):
+                                          ("formal",42,100 if formal_new else 30,len(datasets[ALIASES["c2"]])//2 if formal_new else 10)):
             sample = manifest.get("samples", {}).get(size, {})
             current = {"valid": False, "reasons": [], "tasks": {}}
             report["samples"][size] = current
@@ -718,6 +748,7 @@ def audit_release(
             ROOT / "src/minibench/datasets/xiangqi/solution_tree.py",
             ROOT / "src/minibench/datasets/xiangqi/tree_verification.py",
             ROOT / "src/minibench/datasets/xiangqi/tree_certificate.py",
+            ROOT / "src/minibench/datasets/xiangqi/rule_effects.py",
             ROOT / "scripts/verify_xiangqi_mate.py",
             ROOT / "src/minibench/datasets/xiangqi/rule_variants.py")},
         "limitations": ["PV checks validate the supplied lines, not all possible defences or shortest mate distance.",
@@ -730,6 +761,8 @@ def audit_release(
         family_reasons = list(errors[family])
         try:
             family_reasons.extend(audit_collection(family, records))
+            if family == "xiangqi-rule-variants":
+                family_reasons.extend(audit_c2_pair_impact(records, data_root)["reasons"])
         except Exception as exc:
             family_reasons.append(f"collection_validation_error:{type(exc).__name__}:{exc}")
         payloads = [(family, line, record, skip_search) for line, record in rows[family]]

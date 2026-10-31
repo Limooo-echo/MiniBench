@@ -1,6 +1,6 @@
 # 云服务器运行与断点恢复
 
-本说明针对 `MINIBENCH-FINAL` / `cloud-20261010` 分支。它合并 `mahjong-checkpoint-20261010` 的非象棋任务及评分系统，与本地新版象棋代码和四套固定分层抽出的 100 条提交题库；不包含旧实验结果。原本地仓库不受影响。**新增云端入口不会自动启动，也不会保存 API key。** 当前题号/抽样依据见 [`submission_manifest.json`](../data/xiangqi/submission_manifest.json)，记录约束见 [`schema.py`](../src/minibench/datasets/xiangqi/schema.py)。
+本说明针对 `MINIBENCH-FINAL` 的云端入口。D3/H2/M2各100条，C2为100个同局面配对、200条条件；不包含旧实验结果。**云端入口不会自动启动，也不会保存 API key。** 当前题号/抽样依据见 [`submission_manifest.json`](../data/xiangqi/submission_manifest.json)，记录约束见 [`schema.py`](../src/minibench/datasets/xiangqi/schema.py)。
 
 本地后续修改尚未提交时，GitHub分支不代表本机最新内容。以当前工作区导出的源码包为准；
 不要把本地保留且已被忽略的runs/output诊断证据打包或提交。
@@ -54,7 +54,7 @@ python -B scripts/audit_xiangqi_release.py --technical --validation-report outpu
 树文件哈希和认证的最短步数，不把题内参考PV或旧depth-3对手证书冒充最短解集。
 `certify_xiangqi_c2.py` 是旧depth-3策略条件的认证工具，不是新版最短树的认证入口。
 仅作为候选诊断保留，必须显式选择工作目录输出，禁止写入正式`data/xiangqi`。
-新版验证与解法树边界见 [象棋协议](xiangqi-shortest-protocol.md)。验证器搜索预算耗尽是未知，
+新版验证与解法树边界见 [象棋协议](#象棋逐题标签与历史交互)。验证器搜索预算耗尽是未知，
 不能把它当作题目无解；正式题库不接受未完成的树。
 
 ## 3. 配置账号、原生思考与 Agent
@@ -129,7 +129,7 @@ bash scripts/cloud_run.sh config/cloud/xiangqi-pilot.yaml runs/cloud-pilot-8 --w
 
 8 路结束后查看 `summary.json` 的均值、median、p95 和 usage，以及整轮 wall time。先确认完整输出、图片能力、超时/限流情况，再复制配置把 workers 和该账号 max_in_flight 调成 16，使用**新的目录**跑同一名单；不要直接改已冻结 plan。CLI `--workers 16` 只改调度并发，不会自动提高账号 max_in_flight。
 
-`config/cloud/xiangqi-all-agents.yaml` 运行九 Agent 的完整提交题库：D3/H2/C2/M2 各100条；H2两组、M2仅中文图片，总计4,500个条件（900 + 1,800 + 900 + 900）。C2为50个场景的标准/变体配对，共100条；不是每个场景重复四次。规范YAML的limit=100表示运行已固定的全部100条，不是从旧250条中取前100。各Agent使用同一名单，D3/M2同局面对照，不重新随机抽题。`evaluation_samples/formal`保存四库的相同100条完整名单；smoke名单才是小样本探针。
+`config/cloud/xiangqi-all-agents.yaml` 运行九Agent的完整提交题库：D3/H2/M2各100条，C2标准100条＋同局面变体100条；H2两组、M2仅中文图片，总计5,400个条件（900＋1,800＋1,800＋900）。C2每个局面只分配一种规则，不重复四次。正式C2的limit=200，其余任务limit=100，均表示运行已冻结的全部提交记录。各Agent使用同一名单；D3/M2同局面对照，不重新随机抽题。`evaluation_samples/formal`保存完整名单；smoke仍为C2三个配对场景、其余各六题的30条件探针。
 
 ## 5. 保存、暂停与恢复
 
@@ -177,11 +177,25 @@ SIGINT/SIGTERM 会取消新请求、尽量关闭在途流并保存已有内容�
 python -B -m minibench.cloud plot --output runs/cloud-pilot-8
 ```
 
-未完成条件显示N/A/覆盖数，不补零。D3展示将杀率/合法率；H2展示最短步数内将杀率、合法率、CP loss；C2对应展示最短步数内将杀率、合法率、CPE loss；M2展示一步将杀率/合法率/识图准确率。900秒超时与非法回答计入失败，原因分别保留；两者都不赋予臆造的CP/CPE loss。基础设施错误仍是缺失。
+当前主输出为[分任务/分组标签](#象棋逐题标签与历史交互)，质量按0–1、资源按实际数值，未知或不适用为NA；H2/C2已停用loss评分。900秒超时与非法回答计入失败，原因分别保留；两者都不赋予臆造的CP/CPE loss。基础设施错误仍是缺失。
 
-M2在同一次回答中返回move和初始棋盘的pieces坐标表，识图准确率按正确类型/阵营/坐标数除以真实与预测非空格的并集计算。漏子、错色、错类型和多报棋子均扣分；缺失或畸形识别表为0。D3也输出同样的坐标表但不计识图成绩，作为同题文字对照；M2仅运行图片，不再额外增加文字组。这个协议不能与过去只答走法的成绩直接混合。
+M2在同一次回答中返回move和初始棋盘的pieces坐标表，识图准确率按正确类型/阵营/坐标数除以真实与预测非空格的并集计算。漏子、错色、错类型和多报棋子均扣分；缺失或畸形识别表为0。D3也输出同样的坐标表作为同题文字对照，原始将杀成绩不变；两组额外报告“转录全对且合法时的将杀率”和“严格联合成功率”，采用相同门槛。M2仅运行图片，不再额外增加文字组。这个协议不能与过去只答走法的成绩直接混合。
 
-H2 的 Pikafish CP 与 C2 规则感知 CPE 分开图，不作统一单位排名。H2 的 mate 分值使用 sentinel 换算，可出现远大于普通局面分的 loss，不应解读为同尺度真实棋子价值差。
+条件指标及分子、分母、有效样本数随原生/API、网页和云端结果保存，图表同样标明对应分母。
+条件分母为0或旧结果证据不足时显示N/A，不补零、不删除识图失败题，也不覆盖原始将杀结果。
+完整定义见[象棋评测协议](#象棋逐题标签与历史交互)。
+
+H2/C2额外报告“全程合法时的最短步数内将杀率”，由逐步合法性证据计算，
+不以四舍五入后的平均合法率代替。合法走完但未将杀仍为条件组失败；
+超时、格式错误和棋规非法不能进入全程合法组，基础设施错误不作模型失败。
+分母为0或旧结果证据不足时为N/A，保留实际分子、分母和未知数；
+详见[全程合法条件指标](#象棋逐题标签与历史交互)。
+
+新实验不再生成H2 CP/C2 CPE主评分图；旧实验中的两种单位仍不可混合解释。
+
+H2的`by_mode`分别保存当前棋盘和单轮滞后棋盘复原组的全部成绩及资源统计；C2的`by_condition`分别保存标准/变体两组，`by_ruleset`另保留三种规则明细。基础设施故障不计模型失败，但已经产生的消耗仍属于对应组。
+云端`summary.json`的`by_experiment_agent_condition_resources`使用真实请求账本，计入实际重试和失败，不重复计费重放；`by_experiment_condition_resources`为各Agent合计。原生结果的`metrics`是保存对局的逻辑汇总。
+`cloud plot`额外导出`charts/condition-metrics.csv`和JSON，将两组的将杀率、合法率、条件将杀率、分任务标签、token、耗时和费用并排列出。存在物理账本时优先采用物理token/费用。耗时明确区分模型请求累计与已保存对局累计，两者均不是并行任务的墙钟总时长。未知用量和未配置单价保持N/A，不写0元。
 
 云端统计图采用可移植英文字体标签，避免棋子专用的中文子集字体缺字；中文棋盘图片不变。指标 key 和本节中文解释一一对应。
 
@@ -216,12 +230,12 @@ python -B scripts/maintenance/cleanup_xiangqi_m2_images.py --suite-dir runs/clou
 该工具放在 `scripts/maintenance/`，属于实验结束后的维护工具，不改变当前评测源码指纹，
 因此新增它不会单独阻止已冻结实验续跑。它核验保存的计划和结果，不重新调用评测器或 API。
 
-## 7. 新代码职责
+## 7. 代码职责
 
 - `src/minibench/cloud.py`：选题冻结、进程调度、原生评测调用、校验断点、结果汇总。
 - `src/minibench/core/rate_limit.py`：共享账号并发/RPM与估算 token 预算，包括续跑前用量恢复。
 - `src/minibench/core/streaming.py`：SSE 保存、成功调用重放、错误脱敏、H2 引擎重放。
-- `src/minibench/visualization/xiangqi_suite.py`：象棋分任务/分组对比图，不合并 CP/CPE。
+- `src/minibench/visualization/xiangqi_suite.py`：象棋分任务/分组标签对比图及独立诊断。
 - `scripts/cloud_bootstrap.sh` / `cloud_pikafish.sh` / `cloud_run.sh`：环境安装、固定引擎构建、运行与自动导图。
 - `config/cloud`：可提交的空密钥模板；`local*.yaml` 为忽略的私有配置。
 - `tests/test_cloud*.py`：仅模拟接口和离线测试，不需真实 key、不扣用户额度。
@@ -231,7 +245,50 @@ python -B scripts/maintenance/cleanup_xiangqi_m2_images.py --suite-dir runs/clou
 ## 8. 必须保留的学术与发布边界
 
 1. H2/C2新版题库使用有界全宽AND/OR验证的最短步数与完整最短策略树，不把有限深度Pikafish或depth-3参考PV当作数学证明。正式库只接受已完成的树；预算耗尽是未知。认证范围是当前棋规实现与有界合法对弈，未实现官方长将长捉的完整历史裁决，不能无条件外推。
-2. H2/C2各100条，分别按最短2–3步和4–5步各50条组织；标准/变体分别认证。同局面变规则后可能跨档。树外击败有限深度兜底对手，只能证明这局赢了，不能据此说树外走法在所有防守下必胜。总攻方落子数不得超过认证最短步数n；树外不重置计数，每步检查将死，未将死则在n步用尽时失败，不另设扩展窗口。
-3. D3/M2完全同题，不能当成200个独立局面。C2为50个配对场景，标准50条、车17条、马17条、兵16条。不同题库可能共享父局面或由中间局面派生，需按来源分组分析；认证筛选和人为等量难度设计不代表父池总体权重。公开数据存在训练污染可能，应披露。
+2. H2的100题和C2标准组的100题均按最短2–3步、4–5步各50题组织；C2另有同局面100条变体条件，分别认证真实步数，允许难度分布改变。树外击败兜底对手，只能证明这局赢了，不能据此说树外走法在所有防守下必胜。总攻方落子数不得超过认证最短步数n；树外不重置计数，每步检查将死，未将死则在n步用尽时失败，不另设扩展窗口。
+3. D3/M2完全同题，不能当成200个独立局面。C2为100个配对场景，标准100条、变体同局面100条，三种规则的真实数量见生成报告。不同题库可能共享父局面或由中间局面派生，需按来源分组分析；认证筛选和人为等量难度设计不代表父池总体权重。公开数据存在训练污染可能，应披露。
 4. 顶级 MiniBench 许可证尚未确定，不擅自填 MIT/Apache。CCPD 的 CC-BY-4.0、字体 OFL、ZeroEval Apache 及外部 Pikafish GPL 声明分别保留。用户已确认许可证待定；上传代码不等于外部使用者已取得所有复用许可。
 5. 离线通过只能说明当前覆盖范围内未发现错误，不承诺永无 bug，也不证明服务商端的模型身份/思考/图片支持。实际云端性能与 API 兼容性需由付费 pilot 测得。
+
+象棋普通入口也已复用云端SSE落盘客户端：配置provider.extra_body.stream=true。每段内容保存于calls/attempts，只有完整最终JSON才评分；连接断开不自动重试。固定引擎指纹不匹配会在创建Agent之前失败，避免先消耗模型额度。
+
+原生及冒烟运行的接口错误收尾状态见[象棋评测协议](#运行完成状态)。
+
+## 象棋逐题标签与历史交互
+
+| 任务/组别 | 每题 `labels` 的键 |
+| --- | --- |
+| D3 文字 | `mate, legal, tokens, money, time` |
+| H2 full-state | `mate, legal, solution_tree_prefix_rate, tokens, money, time` |
+| H2 move-history-only | `mate, legal, recognition_exact, mate_given_recognition_and_legal, solution_tree_prefix_rate, tokens, money, time` |
+| C2 standard / variant | `mate, legal, solution_tree_prefix_rate, tokens, money, time` |
+| M2 中文图片 | `mate, legal, recognition_exact, mate_given_recognition_and_legal, tokens, money, time` |
+
+`mate` 为认证最短总攻方步数内严格将死的0/1结果，D3/M2限一步；`legal` 为整局每次Agent决策均合法的0/1结果。
+`recognition_exact` 要求M2整盘识别全对，或H2历史组每轮当前棋盘复原均全对。
+`mate_given_recognition_and_legal` 仅在复原/识别全对且合法时保留将杀0/1，否则为NA；汇总保存实际分子、有效分母和未知数，分母为0记NA。
+严格联合成功率以全部可评分样本为分母，要求识别/复原全对、合法并将杀；条件将杀率只以满足门槛者为分母，两者不可混用。
+H2/C2另保存全程合法条件下的将杀率；合法走满步数但未将杀仍为条件组失败，不能以平均合法率直接除将杀率。
+
+`solution_tree_prefix_rate` 为首次偏离之前连续树内攻方落子数k除以认证最短步数n；首次第x次决策偏离时为(x−1)/n，尚未落子的回合不计入，汇总取逐题宏平均。
+`tokens` 为经校验的所有调用总量，已包含在completion的思考token不重复相加；`money` 依实际配置单价估算，学校接口未配置则NA；`time` 为该题墙钟秒数，包含模型与本地执行，其总和不是并行整轮墙钟耗时。
+基础设施错误的质量标签为NA；非法、格式错误与900秒最终走法超时属于已声明的模型失败。未知和不适用使用JSON字符串`"NA"`，各组资源分别统计，不以零替代未知值。
+
+H2历史组首轮输入实际初始棋盘；第t≥2轮只输入第t−1轮攻方落子前的真实棋盘，以及该轮双方实际走法。
+模型依次应用两着，输出自己本轮落子前的`pieces`和新`move`；程序先以真实当前棋盘核对复原，再按真实棋盘判断新走法合法性。
+每次请求只有system和本轮user，不携带完整历史聊天，也不提供真实当前棋盘。这衡量单轮状态更新与复原，不是长期记忆。
+H2标准组也输出棋子表以保持回答负担一致，其转录结果只作诊断；D3/M2同样采用一致回答格式。
+
+D3/M2的100个同题局面按结构代理难度分为easy34/medium33/hard33：选择压力、非将杀将军着迷惑度、棋子数量的组合权重为50%/30%/20%，依据原250题池百分位分层，未宣称经过模型实测校准。
+C2每个局面仅分配一种变体，与标准条件分别认证；车不能落d/e/f列、马不蹩腿、过河兵卒可退，均对双方生效。配对规则影响及来源见`data/xiangqi/rule_variants/generation_report.json`和来源清单。
+
+最短杀证明采用有界全宽AND/OR搜索与迭代加深，生成器使用reference棋规后端，独立检查器使用生产VariantBoard。
+正式树保留局部最短攻击和全部最优拖延防守，证明阶段检查全部合法防守；该树不等同于所有弱防守或总n步内的全部成功线路。
+独立检查重新核实最短下界、全部最优首着、节点距离与应保留的分支；预算耗尽为unknown，不能标通过。
+复核入口为`scripts/verify_xiangqi_solution_trees.py`；数据完整性入口为`scripts/validate_xiangqi_data.py`。
+
+### 运行完成状态
+
+原生入口保存全部逐题结果后，只有没有结构性错误和引擎诊断时才记`run_status=completed`。
+若存在`status=error`或非空`diagnostics`，状态为`completed_with_errors`，同时保存错误计数，不能因函数正常返回就宣称成功。
+独立冒烟脚本会将错误/缺失标为失败，并继续后续任务；有明确模型失败但无基础设施问题的任务仍可正常完成工程测试。

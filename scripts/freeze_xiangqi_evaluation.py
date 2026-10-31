@@ -28,14 +28,17 @@ def main():
     parser.add_argument("--replace",action="store_true")
     args=parser.parse_args()
     datasets={key:load_records(ROOT/f"data/xiangqi/{folder}/tasks.jsonl") for key,(folder,_) in TASKS.items()}
-    if len({len(rows) for rows in datasets.values()}) != 1 or len(datasets["d3"]) not in (100, 250):
-        raise ValueError("complete 100-record submitted families or 250-record parent pools required")
+    counts = {key:len(rows) for key, rows in datasets.items()}
+    if counts not in ({"d3":100,"h2":100,"c2":200,"m2":100},
+                       {"d3":100,"h2":100,"c2":100,"m2":100},
+                       {"d3":250,"h2":250,"c2":250,"m2":250}):
+        raise ValueError("submitted D3/H2/M2=100 and C2=200 rows, or a supported archived corpus, required")
     if any(row.get("release_id") != RELEASE_ID for rows in datasets.values() for row in rows):
         raise ValueError("all families must pass the new-release generators first")
     provenance=json.loads((ROOT/"data/xiangqi/provenance.json").read_text(encoding="utf-8"))
     engine=provenance["engine"]
     manifest={"release_id":RELEASE_ID,"protocol_version":PROTOCOL_VERSION,"samples":{}}
-    for size,seed,count,c2count in (("smoke",20260909,6,3),("formal",42,100,50)):
+    for size,seed,count,c2count in (("smoke",20260909,6,3),("formal",42,100,len(datasets["c2"])//2)):
         selected={"d3":sample_records(datasets["d3"],count=count,seed=seed,strategy="stratified"),
                   "h2":sample_records(datasets["h2"],count=count,seed=seed,strategy="stratified"),
                   "c2":sample_records(datasets["c2"],count=c2count,seed=seed,strategy="paired-stratified")}
@@ -71,10 +74,10 @@ def main():
                 # Canonical submitted corpora are already stratified 100-row
                 # selections; full runs do not draw another sample.
                 config["task"].pop("selection", None)
-                config["task"]["limit"] = 100
+                config["task"]["limit"] = len(rows)
             if key == "m2":
                 config["evaluation"]["input_modes"] = ["chinese-piece-image"]
-            config["run"]["run_name"]=f"xiangqi_{key}_direct_{'submitted100' if size == 'formal' else size}_r1"
+            config["run"]["run_name"]=f"xiangqi_{key}_direct_{'submitted'+str(len(rows)) if size == 'formal' else size}_r1"
             config["run"]["on_existing"]="error"
             destination=config_path if size=="formal" else ROOT/f"config/experiments/xiangqi_smoke/{key}.yaml"
             write(destination,yaml.safe_dump(config,sort_keys=False,allow_unicode=True),True)

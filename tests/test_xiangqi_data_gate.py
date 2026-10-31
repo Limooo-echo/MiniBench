@@ -161,6 +161,7 @@ class FrozenXiangqiSampleTests(unittest.TestCase):
                 path.write_text(json.dumps({"id": key, "fen": key, "family": family}) + "\n")
             with patch("scripts.validate_xiangqi_data.calibrate_cchess", return_value={"valid": True}), \
                  patch("scripts.validate_xiangqi_data.audit_collection", return_value=[]), \
+                 patch("scripts.validate_xiangqi_data.audit_c2_pair_impact", return_value={"valid": True, "reasons": []}), \
                  patch("scripts.validate_xiangqi_data.audit_sampling", return_value={"valid": True, "reasons": []}), \
                  patch("scripts.validate_xiangqi_data._audit_payload", return_value={"valid": True}), \
                  patch("scripts.validate_xiangqi_data.audit_m2_mapping", return_value=[]),                  patch("scripts.validate_xiangqi_data.audit_c2_sources", return_value={"valid": True, "reasons": [], "inputs": {}}):

@@ -1,6 +1,6 @@
 {
   "contamination_policy": "CCPD is public. Exact training-data contamination cannot be established locally; disclose this limitation and the provider policy for every model.",
-  "corpus_name": "MiniBench shortest paired100 release 2026-10-19",
+  "corpus_name": "MiniBench shortest release with C2 100 paired positions 2026-10-28",
   "engine": {
     "Hash_MB": 128,
     "Threads": 1,
@@ -20,8 +20,8 @@
     "release_tag": "Pikafish-2026-09-06"
   },
   "generation_command": {
-    "c2": "python scripts/prepare_xiangqi_shortest_release.py --parent <immutable-parent-pool> --out <reviewed-candidate-work-dir> --publish --pikafish-path <engine>",
-    "c2_source_policy": "50 certified standard/focus pairs, all three focus rules; exclude active-rule mate-in-one and uncertified sources.",
+    "c2": "python scripts/expand_xiangqi_c2_pairs.py prepare/prove/select/origins/stage; python scripts/verify_xiangqi_solution_trees.py --data-root <staging>; python scripts/expand_xiangqi_c2_pairs.py publish --work <reviewed-work>",
+    "c2_source_policy": "100 distinct standard/focus pairs; old MiniBench pools plus traced legal intermediates; new sources reanalysed depth16/20; each condition independently re-proved; no shared PV requirement",
     "d3": "Structural annotation inherited from the immutable 250-row parent pool; certified 100-row stratified selection is recorded in submission_manifest.json. Candidate annotation cannot overwrite the submitted release.",
     "freeze_selection": "python scripts/freeze_xiangqi_evaluation.py",
     "h2": "python scripts/prepare_xiangqi_shortest_release.py --parent <immutable-parent-pool> --out <reviewed-candidate-work-dir> --publish --pikafish-path <engine>",
@@ -77,7 +77,7 @@
   },
   "submission": {
     "manifest": "submission_manifest.json",
-    "sha256": "377345b79aca9b858495800b22f179b43ccf5a32e7ac826976992c0944e6cd43"
+    "sha256": "469707f15fdfd8e3ab27b461720b97a335df92bb2e06120bf12ef29cb62a2ef2"
   },
   "validation": {
     "publish_on_disagreement": false,

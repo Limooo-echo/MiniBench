@@ -1,9 +1,8 @@
-"""Multi-ply checkmate evaluation under temporary Xiangqi rules.
+"""Bounded C2 games under temporary rules, with seven-dimensional labels.
 
-C2 is a complete bounded game, not a one-action best-move task. The agent and
-the fixed depth-search opponent obey the same rule card. Move loss is measured
-with the same rule-aware search in centipawn-equivalent units; it is explicitly
-not a Pikafish centipawn score.
+Both players obey the active rule card. Certified trees supply replies; the
+rule-aware depth-three search is used only for off-tree opponent replies.
+Multimove loss is not evaluated. Board transcription is not required for C2.
 """
 from __future__ import annotations
 
@@ -19,6 +18,10 @@ from minibench.datasets.xiangqi.deadline import (
     FINAL_MOVE_TIMEOUT_SECONDS, FinalMoveTimeout, call_agent_move, validate_move_timeout,
 )
 from minibench.datasets.xiangqi.solution_tree import TreeSession, summarize_tree_metrics
+from minibench.datasets.xiangqi.outcome_labels import task_outcome_labels, summarize_task_outcomes, write_outcome_files
+from minibench.datasets.xiangqi.tree_prefix_metrics import (
+    tree_prefix_fields, summarize_tree_prefix, tree_prefix_summary_line,
+)
 from minibench.datasets.xiangqi.runtime import (
     PROTOCOL_VERSION,
     StrictJSONObjectError,
@@ -38,6 +41,9 @@ from minibench.datasets.xiangqi.variants.mate_search import (
     score_moves_cpe,
 )
 from minibench.datasets.xiangqi.variants.rules import Rule
+from minibench.datasets.xiangqi.legal_episode_metrics import (
+    episode_legality_fields, summarize_legal_episodes, legal_episode_summary_line,
+)
 
 
 SYSTEM_PROMPT = """You are playing a multi-move Chinese Xiangqi checkmate task under a temporary rule card.
@@ -148,6 +154,15 @@ class RuleVariantResult:
     protocol_version: str = PROTOCOL_VERSION
     mate_within_shortest_steps: bool | None = None
     solution_tree_metadata: dict[str, Any] = field(default_factory=dict)
+    outcome_labels: dict[str, Any] = field(default_factory=dict)
+    solution_tree_prefix_rate: float | None = None
+    solution_tree_prefix_metrics: dict[str, Any] = field(default_factory=dict)
+    all_agent_moves_legal: bool | None = None
+    agent_decision_count: int | None = None
+    legal_agent_decision_count: int | None = None
+    invalid_agent_decision_count: int | None = None
+    unknown_agent_decision_count: int | None = None
+    legal_episode_metrics_version: str | None = None
 
 
 def evaluate_rule_variant_task(
@@ -211,19 +226,6 @@ def evaluate_rule_variant_task(
                 )
                 break
 
-            analysis = score_moves_cpe(
-                board,
-                side,
-                depth=search_depth,
-                perspective_side=agent_side,
-            )
-            if not analysis:
-                raise RuntimeError(
-                    "rule-aware search returned no move for a non-terminal position"
-                )
-            values = {item.move.to_uci(): item.value for item in analysis}
-            optimal_uci = analysis[0].move.to_uci() if analysis else None
-            optimal_value = analysis[0].value if analysis else None
             is_agent = side == agent_side
 
             if is_agent:
@@ -233,30 +235,11 @@ def evaluate_rule_variant_task(
                 stage = "judge"
                 generated_uci = _extract_uci(raw)
                 move = _move_by_uci(legal_moves, generated_uci)
-                chosen_value = values.get(generated_uci or "")
-                loss = (
-                    max(0.0, float(optimal_value) - float(chosen_value))
-                    if optimal_value is not None and chosen_value is not None
-                    else MATE_SCORE_CPE
-                    if move is not None
-                    else None
-                )
                 step = {
-                    "step_idx": step_index,
-                    "actor": "agent",
-                    "raw_output": raw,
-                    "uci": generated_uci or "PARSE_FAIL",
-                    "is_legal": move is not None,
-                    "optimal_uci": optimal_uci,
-                    "is_optimal": bool(
-                        optimal_value is not None
-                        and chosen_value is not None
-                        and abs(float(optimal_value) - float(chosen_value))
-                        <= VALUE_TOLERANCE_CPE
-                    ),
-                    "best_value_cpe": rounded(optimal_value),
-                    "chosen_value_cpe": rounded(chosen_value),
-                    "variant_loss": rounded(loss),
+                    "step_idx": step_index, "actor": "agent", "raw_output": raw,
+                    "uci": generated_uci or "PARSE_FAIL", "is_legal": move is not None,
+                    "optimal_uci": None, "is_optimal": None,
+                    "best_value_cpe": None, "chosen_value_cpe": None, "variant_loss": None,
                 }
                 steps.append(step)
                 if move is None:
@@ -271,25 +254,23 @@ def evaluate_rule_variant_task(
                     break
             else:
                 stage = "opponent_search"
-                if not analysis:
-                    raise RuntimeError("rule-aware opponent search returned no move")
                 tree_uci = session.opponent_move(board.board, side, step_index)
-                move = _move_by_uci(legal_moves, tree_uci) if tree_uci else analysis[0].move
+                if tree_uci:
+                    move = _move_by_uci(legal_moves, tree_uci)
+                else:
+                    analysis = score_moves_cpe(board, side, depth=search_depth,
+                                               perspective_side=agent_side)
+                    if not analysis:
+                        raise RuntimeError("rule-aware opponent search returned no move")
+                    move = analysis[0].move
                 if move is None:
                     raise ValueError("Tree opponent returned an illegal move")
-                raw = ""
                 step = {
-                    "step_idx": step_index,
-                    "actor": "depth-opponent",
+                    "step_idx": step_index, "actor": "depth-opponent",
                     "opponent_source": "certified-tree" if tree_uci else "depth3-fallback",
-                    "raw_output": raw,
-                    "uci": move.to_uci(),
-                    "is_legal": True,
-                    "optimal_uci": optimal_uci,
-                    "is_optimal": abs(values[move.to_uci()]-analysis[0].value)<=VALUE_TOLERANCE_CPE,
-                    "best_value_cpe": rounded(analysis[0].value),
-                    "chosen_value_cpe": rounded(values[move.to_uci()]),
-                    "variant_loss": None,
+                    "raw_output": "", "uci": move.to_uci(), "is_legal": True,
+                    "optimal_uci": None, "is_optimal": None,
+                    "best_value_cpe": None, "chosen_value_cpe": None, "variant_loss": None,
                 }
                 steps.append(step)
 
@@ -365,7 +346,8 @@ def evaluate_rule_variant_task(
     )
     if mate_success and not prescribed:
         reasons.append("checkmate_after_reference_horizon")
-    return RuleVariantResult(
+    tree_scores = session.scores(mate_success, checkmate_ply)
+    result = RuleVariantResult(
         id=task["id"],
         scenario_id=task.get("scenario_id", task["id"]),
         ruleset=task["ruleset"],
@@ -386,8 +368,13 @@ def evaluate_rule_variant_task(
         metrics=finish_task_metrics(agent, start),
         termination_reason=reasons[-1],
         protocol_version=PROTOCOL_VERSION,
-        **session.scores(mate_success, checkmate_ply),
+        **tree_scores,
+        **tree_prefix_fields(steps, tree_scores["solution_tree_metadata"],
+                             status=status, termination_reason=reasons[-1]),
+        **episode_legality_fields(steps, status=status, termination_reason=reasons[-1]),
     )
+    result.outcome_labels = task_outcome_labels(result, task="c2")
+    return result
 
 
 def evaluate_rule_variant_tasks(
@@ -455,37 +442,49 @@ def summarize_rule_variants(results: list[RuleVariantResult]) -> dict[str, Any]:
     valid = [result for result in results if result.status != "error"]
 
     def group(rows: list[RuleVariantResult]) -> dict[str, Any]:
+        valid_rows = [result for result in rows if result.status != "error"]
         return {
-            "mate_rate": mean_or_none(result.success for result in rows),
+            **status_counts(rows),
+            "mate_rate": mean_or_none(result.success for result in valid_rows),
             "mate_within_prescribed_rate": mean_or_none(
-                result.mate_within_prescribed_steps for result in rows
+                result.mate_within_prescribed_steps for result in valid_rows
             ),
-            "legality_rate": mean_or_none(result.legality_rate for result in rows),
-            **summarize_tree_metrics(rows),
+            "legality_rate": mean_or_none(result.legality_rate for result in valid_rows),
+            **summarize_tree_metrics(valid_rows),
+            **{"outcome_labels_summary": summarize_task_outcomes(rows, task="c2")},
+            **summarize_tree_prefix(rows),
+            **summarize_legal_episodes(rows),
             "avg_variant_loss": mean_or_none(
-                (result.avg_variant_loss for result in rows), 1
+                (result.avg_variant_loss for result in valid_rows), 1
             ),
+            # Failed infrastructure requests can still consume money and time.
+            "metrics": summarize_metrics(rows),
         }
 
     summary = {
         **status_counts(results),
         "unique_scenarios": len({result.scenario_id for result in results}),
         "primary_metric": "mate_within_shortest_rate",
-        "opponent_policy": "shortest strategy DAG when enabled; deterministic rule-aware depth3 fallback/CPE",
-        "variant_loss_unit": LOSS_UNIT,
-        **group(valid),
+        "opponent_policy": "shortest strategy DAG when enabled; deterministic rule-aware depth3 fallback; loss disabled",
+        "loss_evaluation": "disabled",
+        "variant_loss_unit": None,
+        **group(results),
         "paired_rule_effects": _paired_effects(valid),
         "metrics": summarize_metrics(results),
     }
     summary["by_ruleset"] = {
-        ruleset: group([result for result in valid if result.ruleset == ruleset])
+        ruleset: group([result for result in results if result.ruleset == ruleset])
         for ruleset in sorted({result.ruleset for result in results})
     }
     summary["by_difficulty"] = {
         difficulty: group(
-            [result for result in valid if result.difficulty == difficulty]
+            [result for result in results if result.difficulty == difficulty]
         )
         for difficulty in sorted({result.difficulty for result in results})
+    }
+    summary["by_condition"] = {
+        "standard": group([result for result in results if result.ruleset == "standard"]),
+        "variant": group([result for result in results if result.ruleset != "standard"]),
     }
     return summary
 
@@ -510,21 +509,6 @@ def write_rule_variants_run(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    lines = [
-        "Xiangqi Rule-Variant Multi-Ply Checkmate Evaluation",
-        f"Total: {summary['total']} Missing: {summary['missing']}",
-        f"Mate within shortest: {display(summary['mate_within_shortest_rate'], '.1%')}",
-        f"Legality: {display(summary['legality_rate'], '.1%')}",
-        f"Average variant loss: {display(summary['avg_variant_loss'])}",
-        f"Loss unit: {LOSS_UNIT}",
-    ]
-    for ruleset, values in summary["by_ruleset"].items():
-        lines.append(
-            f"{ruleset}: mate_shortest={display(values['mate_within_shortest_rate'], '.1%')} "
-            f"legal={display(values['legality_rate'], '.1%')} "
-            f"variant_loss={display(values['avg_variant_loss'])}"
-        )
-    from minibench.datasets.xiangqi.resources import resource_summary_lines
-    lines.extend(resource_summary_lines(summary["metrics"]))
-    (run_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_outcome_files(run_dir, results, summary, task="c2", recognition_applicable=False,
+                        multimove=True, groups=summary["by_condition"])
     return run_dir

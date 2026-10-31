@@ -117,7 +117,7 @@ experiments:
   dimension: R
   dataset:
     path: ../../data/xiangqi/rule_variants/tasks.jsonl
-    sha256: 460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c
+    sha256: f5f5acb9cdf9d66802ca574ffe740fe44607dc83f468c05da7b6da1aca77259f
   protocol:
     version: xiangqi-shortest-tree-strict-n-v2
     release_id: xiangqi-2026-09-19-r1
@@ -131,7 +131,7 @@ experiments:
   runs: []
   selection:
     path: ../../data/xiangqi/evaluation_samples/formal/c2.jsonl
-    sha256: 460653dc345dd7328019c3d3ef5228e9d807e527d2ae61e6530323248ab1127c
+    sha256: f5f5acb9cdf9d66802ca574ffe740fe44607dc83f468c05da7b6da1aca77259f
 - id: xiangqi-history
   family: xiangqi_history
   dimension: H

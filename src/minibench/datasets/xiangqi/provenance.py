@@ -123,7 +123,9 @@ def audit_xiangqi_release(manifest_path: str | Path, *, validation_report: str |
             for family, rows in records_by_family.items():
                 entry = selection["datasets"][keys[family]]
                 actual = hashlib.sha256((repository_root / FAMILY_PATHS[family]).read_bytes()).hexdigest()
-                if (len(rows) != 100 or entry["sha256"] != actual
+                expected_count = entry.get("record_count", 100)
+                allowed_counts = {100, 200} if family == "xiangqi-rule-variants" else {100}
+                if (expected_count not in allowed_counts or len(rows) != expected_count or entry["sha256"] != actual
                         or entry["task_ids"] != [r["id"] for r in rows]):
                     gate_problems.append(f"submitted_selection_changed:{family}")
         except (OSError, ValueError, KeyError, TypeError):
