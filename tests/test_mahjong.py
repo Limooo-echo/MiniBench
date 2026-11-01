@@ -126,6 +126,63 @@ def visible_wait_task():
 
 
 class MahjongTests(unittest.TestCase):
+    def test_legality_is_per_answer_and_independent_of_correctness(self):
+        from dataclasses import replace
+
+        wait = replace(wait_task(), tags=("easy", "task:winning_tiles"))
+        discard = mahjong_task_from_dict({"id": "legal-discard", "goal": "max_wait_discard",
+            "hand": list(wait.hand) + ["9s"], "tags": ["easy", "task:max_wait_discard"]})
+        waits = [
+            ({"winning_tiles": ["N"]}, True),
+            ({"winning_tiles": ["E"]}, True),
+            ({"winning_tiles": ["E", "E"]}, True),
+            ({"winning_tiles": ["E", "9z"]}, False),
+            ({"winning_tiles": ["E", None]}, False),
+            ({}, False), ({"winning_tiles": "E"}, False),
+            ({"winning_tiles": []}, True),
+            ({"winning_tiles": ["1z"]}, True),
+            ({"winning_tiles": ["E"], "notes": "extra"}, True),
+            ("not JSON", False),
+        ]
+        discards = [
+            ({"discard": "9s"}, True), ({"discard": "1m"}, True),
+            ({"discard": "N"}, False), ({"discard": "9z"}, False),
+            ({"discard": None}, False), ({"discard": []}, False),
+            ({"winning_tiles": ["E"]}, False), ({"discard": "1z"}, True),
+            ({"discard": "9s", "notes": "extra"}, True),
+            ({"discard": "9s", "winning_tiles": ["9z"], "live_winning_copies": {"9z": 100}}, True),
+        ]
+        cases = waits + discards
+
+        class Answers:
+            def __init__(self):
+                self.outputs = iter(value for value, _ in cases)
+
+            def generate(self, prompt, context):
+                value = next(self.outputs)
+                return value if isinstance(value, str) else json.dumps(value)
+
+        results = evaluate_mahjong_tasks([wait] * len(waits) + [discard] * len(discards), Answers())
+        self.assertEqual([r.is_legal for r in results], [legal for _, legal in cases])
+        self.assertFalse(results[0].success)
+        self.assertTrue(results[1].success)
+        self.assertFalse(results[2].success)
+        self.assertFalse(results[len(waits) + 1].success)
+        summary = summarize_mahjong(results)
+        self.assertEqual(summary["legality_rate"], sum(legal for _, legal in cases) / len(cases))
+        self.assertEqual(summary["by_tag"]["easy"]["legality_rate"], summary["legality_rate"])
+        self.assertEqual(summary["by_task_type"]["easy/winning_tiles"]["legality_rate"],
+                         sum(legal for _, legal in waits) / len(waits))
+        self.assertEqual(summary["by_task_type"]["easy/max_wait_discard"]["legality_rate"],
+                         sum(legal for _, legal in discards) / len(discards))
+        self.assertIsNone(summarize_mahjong([])["legality_rate"])
+        self.assertNotIn("by_input_mode", summary)
+        with tempfile.TemporaryDirectory() as tmp:
+            run = write_mahjong_run(results, tmp, "legality")
+            records = [json.loads(line) for line in (run / "predictions.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([r["is_legal"] for r in records], [legal for _, legal in cases])
+            self.assertIn("legality_rate=", (run / "summary.txt").read_text(encoding="utf-8"))
+
     def test_cli_accepts_cot_agent_for_static_mahjong(self):
         args = build_parser().parse_args(["evaluate-mahjong", "--agent", "cot"])
 

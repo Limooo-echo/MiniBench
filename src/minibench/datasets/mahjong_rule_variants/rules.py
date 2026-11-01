@@ -2,41 +2,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from itertools import combinations, product
+from itertools import product
 
 from minibench.datasets.mahjong.api import (
     calculate_shanten,
+    index_to_tile,
     normalize_tiles,
+    tile_to_index,
     tiles_to_34_array,
+    winning_tiles,
 )
 
 
 STANDARD_RULES = "standard"
 RED_DRAGON_WILDCARD = "red_dragon_wildcard"
-CYCLIC_ONE_TILE_SUBSTITUTION = "cyclic_one_tile_substitution"
+CYCLIC_ODD_TILE_SUBSTITUTION = "cyclic_odd_tile_substitution"
 
 MODIFIED_RULES = (
     RED_DRAGON_WILDCARD,
-    CYCLIC_ONE_TILE_SUBSTITUTION,
+    CYCLIC_ODD_TILE_SUBSTITUTION,
 )
-RULE_COMBINATIONS = tuple(
-    combination
-    for size in range(1, len(MODIFIED_RULES) + 1)
-    for combination in combinations(MODIFIED_RULES, size)
-)
-RULE_CHANNELS = tuple("+".join(combination) for combination in RULE_COMBINATIONS)
+RULE_CHANNELS = MODIFIED_RULES
 
 RED_DRAGON_INDEX = 33
-ONE_MAN_INDEX = 0
-ONE_PIN_INDEX = 9
-ONE_SOU_INDEX = 18
 TERMINAL_AND_HONOR_INDICES = frozenset([0, 8, 9, 17, 18, 26, *range(27, 34)])
 
 
 @dataclass(frozen=True)
 class VariantRules:
     red_dragon_is_wildcard: bool = False
-    cyclic_one_tile_substitution: bool = False
+    cyclic_odd_tile_substitution: bool = False
 
 
 def channel_for_rules(rules: list[str] | tuple[str, ...]) -> str:
@@ -44,6 +39,8 @@ def channel_for_rules(rules: list[str] | tuple[str, ...]) -> str:
     unknown = selected - set(MODIFIED_RULES)
     if unknown:
         raise ValueError(f"unknown Mahjong rule(s): {', '.join(sorted(unknown))}")
+    if len(selected) > 1:
+        raise ValueError("combined Mahjong rule channels have been removed; select one rule")
     if not selected:
         return STANDARD_RULES
     return "+".join(rule for rule in MODIFIED_RULES if rule in selected)
@@ -66,8 +63,8 @@ def rules_for_channel(channel: str) -> VariantRules:
     active_rules = set(active_rules_for_channel(channel))
     return VariantRules(
         red_dragon_is_wildcard=RED_DRAGON_WILDCARD in active_rules,
-        cyclic_one_tile_substitution=(
-            CYCLIC_ONE_TILE_SUBSTITUTION in active_rules
+        cyclic_odd_tile_substitution=(
+            CYCLIC_ODD_TILE_SUBSTITUTION in active_rules
         ),
     )
 
@@ -89,6 +86,63 @@ def is_standard_winning_hand(tiles: list[str] | tuple[str, ...]) -> bool:
     return _is_winning_counts(tiles_to_34_array(normalized), VariantRules())
 
 
+def rule_variant_winning_tiles(
+    tiles: list[str] | tuple[str, ...], channel: str,
+) -> tuple[str, ...]:
+    """Structural waits, named and copy-limited by the printed physical tile."""
+    hand = tuple(sorted(normalize_tiles(tiles), key=tile_to_index))
+    if len(hand) != 13:
+        raise ValueError("winning_tiles requires exactly 13 tiles")
+    rules_for_channel(channel)
+    return _cached_winning_tiles(hand, channel)
+
+
+@lru_cache(maxsize=32768)
+def _cached_winning_tiles(hand: tuple[str, ...], channel: str) -> tuple[str, ...]:
+    if channel == STANDARD_RULES:
+        return winning_tiles(hand)
+    counts = tiles_to_34_array(hand)
+    rules = rules_for_channel(channel)
+    waits = []
+    for index in range(34):
+        if counts[index] == 4:
+            continue
+        counts[index] += 1
+        if _cached_winning_counts(tuple(counts), rules):
+            waits.append(index_to_tile(index))
+        counts[index] -= 1
+    return tuple(waits)
+
+
+@lru_cache(maxsize=131072)
+def _cached_winning_counts(counts: tuple[int, ...], rules: VariantRules) -> bool:
+    return _is_winning_counts(list(counts), rules)
+
+
+def rule_variant_waits_by_discard(
+    tiles: list[str] | tuple[str, ...], channel: str,
+) -> dict[str, tuple[str, ...]]:
+    hand = list(normalize_tiles(tiles))
+    if len(hand) != 14:
+        raise ValueError("max_wait_discard requires exactly 14 tiles")
+    waits: dict[str, tuple[str, ...]] = {}
+    for discard in sorted(set(hand), key=tile_to_index):
+        remaining = list(hand)
+        remaining.remove(discard)
+        winning = rule_variant_winning_tiles(remaining, channel)
+        if winning:
+            waits[discard] = winning
+    return waits
+
+
+def rule_variant_max_wait_discards(
+    tiles: list[str] | tuple[str, ...], channel: str,
+) -> tuple[str, ...]:
+    waits = rule_variant_waits_by_discard(tiles, channel)
+    maximum = max((len(value) for value in waits.values()), default=0)
+    return tuple(discard for discard, value in waits.items() if len(value) == maximum)
+
+
 def calculate_rule_variant_shanten(
     tiles: list[str] | tuple[str, ...],
     channel: str,
@@ -99,18 +153,16 @@ def calculate_rule_variant_shanten(
         raise ValueError("rule-variant shanten requires a 13-tile hand")
     rules = rules_for_channel(channel)
     if not rules.red_dragon_is_wildcard:
-        if not rules.cyclic_one_tile_substitution:
+        if not rules.cyclic_odd_tile_substitution:
             return calculate_shanten(normalized)
         translated = {
-            "1s": "1m",
-            "1m": "1p",
-            "1p": "1s",
+            f"{rank}{source}": f"{rank}{target}"
+            for rank in (1, 3, 5, 7, 9)
+            for source, target in (("s", "m"), ("m", "p"), ("p", "s"))
         }
         return calculate_shanten(tuple(translated.get(tile, tile) for tile in normalized))
 
     counts = tiles_to_34_array(normalized)
-    if rules.cyclic_one_tile_substitution:
-        _apply_cyclic_one_tile_substitution(counts)
     wildcards = counts[RED_DRAGON_INDEX]
     counts[RED_DRAGON_INDEX] = 0
     return _wildcard_shanten(tuple(counts), wildcards)
@@ -171,8 +223,8 @@ def _maximum_regular_matches(counts: tuple[int, ...]) -> int:
 
 def _is_winning_counts(counts: list[int], rules: VariantRules) -> bool:
     working = list(counts)
-    if rules.cyclic_one_tile_substitution:
-        _apply_cyclic_one_tile_substitution(working)
+    if rules.cyclic_odd_tile_substitution:
+        _apply_cyclic_odd_tile_substitution(working)
 
     wildcards = 0
     if rules.red_dragon_is_wildcard:
@@ -192,13 +244,10 @@ def _is_winning_counts(counts: list[int], rules: VariantRules) -> bool:
     )
 
 
-def _apply_cyclic_one_tile_substitution(counts: list[int]) -> None:
-    one_man = counts[ONE_MAN_INDEX]
-    one_pin = counts[ONE_PIN_INDEX]
-    one_sou = counts[ONE_SOU_INDEX]
-    counts[ONE_MAN_INDEX] = one_sou
-    counts[ONE_PIN_INDEX] = one_man
-    counts[ONE_SOU_INDEX] = one_pin
+def _apply_cyclic_odd_tile_substitution(counts: list[int]) -> None:
+    for rank_index in (0, 2, 4, 6, 8):
+        man, pin, sou = rank_index, rank_index + 9, rank_index + 18
+        counts[man], counts[pin], counts[sou] = counts[sou], counts[man], counts[pin]
 
 
 def _is_standard_shape(

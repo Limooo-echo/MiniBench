@@ -129,11 +129,7 @@ def select_tasks(config, pilot_count=None):
     if family == "mahjong_rule_variants":
         tasks = _select_mahjong_rule_configuration(tasks, config.get("evaluation", {}))
     if tc.get("limit") is not None:
-        if family == "mahjong_rule_variants":
-            sources = list(dict.fromkeys(t.source_task_id for t in tasks))[:tc["limit"]]
-            tasks = [t for t in tasks if t.source_task_id in sources]
-        else:
-            tasks = tasks[:tc["limit"]]
+        tasks = tasks[:tc["limit"]]
     if pilot_count and len(tasks) > pilot_count:
         if family.startswith("xiangqi-"):
             strategy = "paired-stratified" if family == "xiangqi-rule-variants" else "stratified"

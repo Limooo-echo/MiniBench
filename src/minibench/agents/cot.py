@@ -143,8 +143,9 @@ class CoTAgent(RuntimeBackedAgent, Agent):
             messages,
             transform=lambda prompt: (
                 "\n\n".join((prompt, "Reasoning or draft answer:\n" + reasoning,
-                    "Convert the action to exactly one JSON object using the schema "
-                    "requested for this conversation."))
+                    "Convert the current turn's answer to exactly one JSON object, "
+                    "including all required fields in the schema requested for "
+                    "this conversation."))
                 if self.config.prompt_version == "v1"
                 else finalize_prompt(prompt, reasoning, version=self.config.prompt_version)
             ),

@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from http.client import IncompleteRead
 import json
 import os
 import socket
@@ -137,6 +138,28 @@ class OpenAICompatibleClient:
         self._token_usage = empty_token_usage()
         self._completion_traces: list[dict[str, Any]] | None = None
         self.allow_truncated_content = False
+        self.allow_truncated_reasoning = False
+
+    @contextmanager
+    def thinking_mode(
+        self, enabled: bool, *, allow_truncated_reasoning: bool = False,
+    ) -> Iterator[None]:
+        """Scope native-thinking options to one phase without changing other calls."""
+        previous_body = self.extra_body
+        previous_content = self.allow_truncated_content
+        previous_reasoning = self.allow_truncated_reasoning
+        self.extra_body = deepcopy(previous_body)
+        self.extra_body["thinking"] = {"type": "enabled" if enabled else "disabled"}
+        if not enabled:
+            self.extra_body.pop("reasoning_effort", None)
+        self.allow_truncated_content = enabled or previous_content
+        self.allow_truncated_reasoning = allow_truncated_reasoning
+        try:
+            yield
+        finally:
+            self.extra_body = previous_body
+            self.allow_truncated_content = previous_content
+            self.allow_truncated_reasoning = previous_reasoning
 
     @contextmanager
     def capture_completion_traces(self) -> Iterator[list[dict[str, Any]]]:
@@ -336,6 +359,11 @@ class OpenAICompatibleClient:
                     self._sleep_before_retry(retry_index + 1)
                     continue
                 raise RuntimeError(f"{self.name} request timed out: {exc}") from exc
+            except IncompleteRead as exc:
+                if retry_index < self.max_retries:
+                    self._sleep_before_retry(retry_index + 1)
+                    continue
+                raise RuntimeError(f"{self.name} request returned an incomplete response: {exc}") from exc
         raise AssertionError("retry loop terminated without returning or raising")
 
     def _complete_request_once(
@@ -391,7 +419,13 @@ class OpenAICompatibleClient:
                     "requested output size."
                 )
 
-            if not content.strip():
+            has_partial_reasoning = (
+                self.allow_truncated_reasoning
+                and finish_reason == "length"
+                and bool(_message_reasoning(message))
+            )
+            if (not content.strip() and not has_partial_reasoning
+                    and not (self.allow_truncated_content and finish_reason == "length")):
                 message_keys = ", ".join(sorted(str(key) for key in message.keys()))
                 raise RuntimeError(
                     "OpenAI-compatible response had empty message content "

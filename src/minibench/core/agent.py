@@ -146,6 +146,7 @@ class ReasoningConfig:
     beam_width: int = 2
     max_search_nodes: int | None = None
     max_subproblems: int = 4
+    native_thinking_max_tokens: int | None = None
 
     def __post_init__(self) -> None:
         if self.samples < 1:
@@ -162,6 +163,7 @@ class ReasoningConfig:
             ("max_llm_calls", self.max_llm_calls),
             ("max_total_tokens", self.max_total_tokens),
             ("max_search_nodes", self.max_search_nodes),
+            ("native_thinking_max_tokens", self.native_thinking_max_tokens),
         ):
             if value is not None and (
                 isinstance(value, bool) or not isinstance(value, int) or value < 1

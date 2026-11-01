@@ -6,13 +6,10 @@ from unittest.mock import patch
 
 from minibench.cli import build_parser
 from minibench.datasets.mahjong.dataset import mahjong_task_from_dict
-from minibench.datasets.mahjong_rule_variants.dataset import MahjongRuleVariantTask
 
 
 class OfflineMahjongAgent:
     def generate(self, prompt, task):
-        if task.family == "mahjong_rule_variants":
-            return json.dumps({"action": "tsumo"})
         answer = {"winning_tiles": ["E"]}
         if task.task_id == "smoke-visual":
             answer.update(
@@ -52,24 +49,6 @@ def static_wait_task():
     )
 
 
-def wildcard_rule_task():
-    return MahjongRuleVariantTask(
-        id="smoke-rule--red_dragon_wildcard",
-        source_task_id="smoke-rule",
-        channel="red_dragon_wildcard",
-        seed=1,
-        initial_hand=(
-            "1m", "2m", "3m", "4p", "5p", "6p", "7s",
-            "8s", "9s", "E", "E", "E", "N",
-        ),
-        wall=("N",),
-        max_draws=1,
-        round_wind="E",
-        seat_wind="E",
-        tags=("mahjong", "solo-draw-discard", "rule:red_dragon_wildcard"),
-    )
-
-
 class MahjongCliOfflineSmokeTests(unittest.TestCase):
     def test_readme_static_command_runs_offline(self):
         with tempfile.TemporaryDirectory() as tmpdir, patch(
@@ -90,30 +69,25 @@ class MahjongCliOfflineSmokeTests(unittest.TestCase):
             )
             self.assertEqual(args.func(args), 0)
 
-    def test_readme_rule_and_history_commands_run_offline(self):
-        for observation_mode in ("full-hand", "history-only"):
-            with tempfile.TemporaryDirectory() as tmpdir, patch(
-                "minibench.datasets.mahjong_rule_variants.dataset."
-                "load_mahjong_rule_variant_tasks",
-                return_value=[wildcard_rule_task()],
-            ), patch(
-                "minibench.cli._make_cli_agent",
-                return_value=OfflineMahjongAgent(),
-            ):
-                args = build_parser().parse_args(
-                    [
-                        "evaluate-mahjong-rules",
-                        "--rule-channel",
-                        "red_dragon_wildcard",
-                        "--observation-mode",
-                        observation_mode,
-                        "--output-dir",
-                        tmpdir,
-                        "--run-name",
-                        f"{observation_mode}-smoke",
-                    ]
-                )
-                self.assertEqual(args.func(args), 0)
+    def test_readme_independent_odd_rule_command_runs_offline(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data = Path(tmpdir) / "odd.jsonl"
+            data.write_text(json.dumps({
+                "id": "odd", "goal": "winning_tiles", "channel": "cyclic_odd_tile_substitution",
+                "hand": "1s 2m 3s 4p 5m 6p 7p 8s 9p E E E N".split(),
+            }) + "\n", encoding="utf-8")
+            predictions = Path(tmpdir) / "answers.jsonl"
+            predictions.write_text(json.dumps({"task_id": "odd",
+                "raw_output": '{"winning_tiles":["N"]}'}) + "\n", encoding="utf-8")
+            output = Path(tmpdir) / "runs"
+            args = build_parser().parse_args([
+                "evaluate-mahjong-rules", "--rule-channel", "cyclic_odd_tile_substitution",
+                "--mahjong-rule-tasks", str(data), "--predictions", str(predictions),
+                "--output-dir", str(output), "--run-name", "static-rule-smoke",
+            ])
+            self.assertEqual(args.func(args), 0)
+            summary = json.loads((output / "static-rule-smoke/results.json").read_text(encoding="utf-8"))
+            self.assertEqual((summary["total"], summary["success"]), (1, 1))
 
     def test_readme_visual_command_runs_image_only_offline(self):
         with tempfile.TemporaryDirectory() as tmpdir:

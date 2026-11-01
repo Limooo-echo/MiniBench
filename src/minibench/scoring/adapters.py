@@ -281,6 +281,46 @@ def _mahjong(record: dict, task: dict | None, dimension: str) -> dict:
     return _unavailable(record, "missing_or_unsupported_mahjong_goal", y)
 
 
+def _mahjong_rule_static(record: dict, task: dict | None) -> dict:
+    from minibench.datasets.mahjong.api import normalize_tiles
+    from minibench.datasets.mahjong.evaluation import extract_mahjong_answer
+    from minibench.datasets.mahjong_rule_variants.dataset import MahjongRuleVariantTask
+    from minibench.datasets.mahjong_rule_variants.evaluation import validate_mahjong_rule_variant_answer
+    from minibench.datasets.mahjong_rule_variants.rules import (
+        rule_variant_winning_tiles, rule_variant_waits_by_discard,
+    )
+    if task is None or not isinstance(task.get("channel"), str):
+        return _unavailable(record, "missing_original_static_rule_task")
+    raw = record.get("raw_output")
+    parsed = extract_mahjong_answer(raw) if isinstance(raw, str) else record.get("parsed_answer")
+    if not isinstance(parsed, dict):
+        return (_invalid(record, "invalid_answer_json") if isinstance(raw, str)
+                else _unavailable(record, "missing_static_answer_log"))
+    instance = MahjongRuleVariantTask(
+        id=task["id"], source_task_id=task.get("source_task_id", task["id"]),
+        goal=task["goal"], hand=normalize_tiles(task["hand"]), tags=tuple(task.get("tags", ())),
+        channel=task["channel"],
+    )
+    y = float(validate_mahjong_rule_variant_answer(instance, parsed)[0])
+    if instance.goal == "winning_tiles":
+        predicted = parsed.get("winning_tiles")
+        if not isinstance(predicted, list) or not all(isinstance(t, str) for t in predicted):
+            return _invalid(record, "invalid_winning_tiles")
+        truth = set(rule_variant_winning_tiles(instance.hand, instance.channel))
+        p = _counter_f1(Counter(set(predicted)), Counter(truth))
+        return _result(record, y, p, evidence={"method": "winning_tile_set_f1",
+                       "expected": sorted(truth), "channel": instance.channel})
+    discard = parsed.get("discard")
+    if not isinstance(discard, str) or discard not in instance.hand:
+        return _invalid(record, "invalid_discard")
+    waits = rule_variant_waits_by_discard(instance.hand, instance.channel)
+    best = max((len(w) for w in waits.values()), default=0)
+    chosen = len(waits.get(discard, ()))
+    return _result(record, y, chosen / best if best else 0.0, evidence={
+        "method": "max_wait_discard_utility_ratio", "chosen_utility": chosen,
+        "best_utility": best, "channel": instance.channel, "zero_denominator": best == 0})
+
+
 def _mahjong_episode(record: dict, task: dict | None, family: str) -> dict:
     from minibench.datasets.mahjong_solo.dataset import mahjong_solo_task_from_dict
     from minibench.datasets.mahjong_solo.oracle import score_episode
@@ -288,13 +328,16 @@ def _mahjong_episode(record: dict, task: dict | None, family: str) -> dict:
     y = _outcome(record)
     if task is None or not isinstance(record.get("raw_outputs"), list):
         return _unavailable(record, "missing_original_task_or_complete_action_log", y)
-    channel = task.get("channel") if family == "mahjong_rule_variants" else STANDARD_RULES
-    if not isinstance(channel, str):
-        return _unavailable(record, "missing_active_rule_channel", y)
-    scored = score_episode(mahjong_solo_task_from_dict(task), record["raw_outputs"], channel=channel)
+    scored = score_episode(
+        mahjong_solo_task_from_dict(task), record["raw_outputs"], channel=STANDARD_RULES,
+        observation_mode=record.get("observation_mode", "full-hand"),
+        allow_current_hand="hand_reconstruction_steps" in record,
+        max_action_attempts=record.get("max_action_attempts", 3),
+        include_process_score=False,
+    )
     if not scored["complete"]:
         return _unavailable(record, "incomplete_action_log", y)
-    return _result(record, float(scored["success"]), scored["process_score"], evidence=scored)
+    return _result(record, float(scored["success"]), 0.0, evidence=scored)
 
 
 def score_record(family: str, dimension: str, record: dict, task: dict | None, *, mode: str) -> dict:
@@ -316,7 +359,9 @@ def score_record(family: str, dimension: str, record: dict, task: dict | None, *
             result = _one_stroke(record, task, dimension)
         elif family == "mahjong":
             result = _mahjong(record, task, dimension)
-        elif family in {"mahjong_solo", "mahjong_rule_variants"}:
+        elif family == "mahjong_rule_variants":
+            result = _mahjong_rule_static(record, task)
+        elif family == "mahjong_solo":
             result = _mahjong_episode(record, task, family)
         elif family in {"xiangqi_mate_in_one", "xiangqi_history"}:
             y = _outcome(record, "goal_achieved")

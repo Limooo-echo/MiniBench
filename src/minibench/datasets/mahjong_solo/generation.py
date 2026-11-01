@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace
 import json
 from pathlib import Path
 import random
@@ -18,19 +19,25 @@ from minibench.datasets.mahjong_solo.dataset import (
     default_mahjong_solo_tasks_path,
     task_to_record,
 )
+GENERATOR_VERSION = "solo-10-rounds-v1"
+
+
 def generate_mahjong_solo_tasks(
     *,
     output: str | Path | None = None,
-    count: int = 50,
+    count: int = 100,
     seed: int = 20260702,
     prefix: str = "mj-solo",
-    max_draws: int = 18,
-    require_oracle_win: bool = False,
-    max_initial_shanten: int | None = None,
-    min_initial_ukeire: int = 0,
-    max_oracle_win_turn: int | None = None,
-    greedy_simulations: int = 0,
-    min_greedy_win_rate: float = 0.0,
+    max_draws: int = 10,
+    require_oracle_win: bool = True,
+    min_initial_shanten: int = 1,
+    max_initial_shanten: int | None = 2,
+    balance_initial_shanten: bool = True,
+    min_initial_ukeire: int = 12,
+    min_oracle_win_turn: int | None = 6,
+    max_oracle_win_turn: int | None = 10,
+    greedy_simulations: int = 10,
+    min_greedy_win_rate: float = 0.8,
     max_attempts: int | None = None,
     overwrite: bool = False,
 ) -> dict[str, Any]:
@@ -38,8 +45,14 @@ def generate_mahjong_solo_tasks(
         raise ValueError("count must be positive")
     if max_draws <= 0:
         raise ValueError("max_draws must be positive")
+    if min_initial_shanten < 0:
+        raise ValueError("min_initial_shanten must be non-negative")
     if max_initial_shanten is not None and max_initial_shanten < 0:
         raise ValueError("max_initial_shanten must be non-negative")
+    if max_initial_shanten is not None and min_initial_shanten > max_initial_shanten:
+        raise ValueError("min_initial_shanten cannot exceed max_initial_shanten")
+    if balance_initial_shanten and max_initial_shanten is None:
+        raise ValueError("balance_initial_shanten requires max_initial_shanten")
     if min_initial_ukeire < 0:
         raise ValueError("min_initial_ukeire must be non-negative")
     if max_oracle_win_turn is not None:
@@ -47,6 +60,11 @@ def generate_mahjong_solo_tasks(
             raise ValueError("max_oracle_win_turn must be positive")
         if max_oracle_win_turn > max_draws:
             raise ValueError("max_oracle_win_turn cannot exceed max_draws")
+    if min_oracle_win_turn is not None:
+        if min_oracle_win_turn <= 0:
+            raise ValueError("min_oracle_win_turn must be positive")
+        if min_oracle_win_turn > (max_oracle_win_turn or max_draws):
+            raise ValueError("min_oracle_win_turn cannot exceed the oracle win horizon")
     if greedy_simulations < 0:
         raise ValueError("greedy_simulations must be non-negative")
     if not 0.0 <= min_greedy_win_rate <= 1.0:
@@ -62,27 +80,45 @@ def generate_mahjong_solo_tasks(
     rng = random.Random(seed)
     filtered = (
         require_oracle_win
+        or min_initial_shanten > 0
         or max_initial_shanten is not None
         or min_initial_ukeire > 0
         or max_oracle_win_turn is not None
+        or min_oracle_win_turn is not None
         or greedy_simulations > 0
     )
     attempts_limit = max_attempts or count * (1000 if filtered else 5)
     tasks: list[MahjongSoloTask] = []
     attempts = 0
     oracle_wins = 0
+    accepted_by_shanten: Counter[int] = Counter()
+    quotas = None
+    if balance_initial_shanten:
+        assert max_initial_shanten is not None
+        levels = list(range(min_initial_shanten, max_initial_shanten + 1))
+        base, remainder = divmod(count, len(levels))
+        quotas = {level: base + int(index < remainder) for index, level in enumerate(levels)}
+    seen_seeds: set[int] = set()
 
     while len(tasks) < count and attempts < attempts_limit:
         attempts += 1
         task_seed = rng.randrange(1, 2**31)
+        if task_seed in seen_seeds:
+            continue
         candidate = _random_task(
             task_id=f"{prefix}-{len(tasks) + 1:03d}",
             task_seed=task_seed,
             max_draws=max_draws,
         )
-        initial_shanten, initial_ukeire = initial_hand_metrics(candidate.initial_hand)
+        # Reject the common distant hands before enumerating their effective draws.
+        initial_shanten = calculate_shanten(candidate.initial_hand)
+        if initial_shanten < min_initial_shanten:
+            continue
         if max_initial_shanten is not None and initial_shanten > max_initial_shanten:
             continue
+        if quotas is not None and accepted_by_shanten[initial_shanten] >= quotas[initial_shanten]:
+            continue
+        _, initial_ukeire = initial_hand_metrics(candidate.initial_hand)
         if initial_ukeire < min_initial_ukeire:
             continue
 
@@ -91,6 +127,10 @@ def generate_mahjong_solo_tasks(
         if oracle_won:
             oracle_wins += 1
         if require_oracle_win and not oracle_won:
+            continue
+        if min_oracle_win_turn is not None and (
+            win_turn is None or win_turn < min_oracle_win_turn
+        ):
             continue
         if max_oracle_win_turn is not None and (
             win_turn is None or win_turn > max_oracle_win_turn
@@ -107,6 +147,8 @@ def generate_mahjong_solo_tasks(
                 continue
         tags = [
             *candidate.tags,
+            f"generator:{GENERATOR_VERSION}",
+            f"generation-seed:{seed}",
             "oracle:win" if oracle_won else "oracle:no-win",
             f"initial-shanten:{initial_shanten}",
             f"initial-ukeire:{initial_ukeire}",
@@ -133,11 +175,21 @@ def generate_mahjong_solo_tasks(
             )
         )
 
+        accepted_by_shanten[initial_shanten] += 1
+        seen_seeds.add(task_seed)
+
     if len(tasks) < count:
         raise RuntimeError(
             f"only generated {len(tasks)} tasks after {attempts} attempts; "
-            "increase --max-attempts or relax the fairness filters"
+            "increase --max-attempts; the generation criteria were not relaxed"
         )
+
+    if quotas is not None:
+        groups = {level: [task for task in tasks if f"initial-shanten:{level}" in task.tags]
+                  for level in quotas}
+        tasks = [groups[level][index] for index in range(max(quotas.values()))
+                 for level in quotas if index < len(groups[level])]
+        tasks = [replace(task, id=f"{prefix}-{index:03d}") for index, task in enumerate(tasks, 1)]
 
     with output_path.open("w", encoding="utf-8") as handle:
         for task in tasks:
@@ -150,8 +202,13 @@ def generate_mahjong_solo_tasks(
         "max_draws": max_draws,
         "attempts": attempts,
         "require_oracle_win": require_oracle_win,
+        "generator_version": GENERATOR_VERSION,
+        "min_initial_shanten": min_initial_shanten,
         "max_initial_shanten": max_initial_shanten,
+        "balance_initial_shanten": balance_initial_shanten,
+        "by_initial_shanten": dict(sorted(accepted_by_shanten.items())),
         "min_initial_ukeire": min_initial_ukeire,
+        "min_oracle_win_turn": min_oracle_win_turn,
         "max_oracle_win_turn": max_oracle_win_turn,
         "greedy_simulations": greedy_simulations,
         "min_greedy_win_rate": min_greedy_win_rate,

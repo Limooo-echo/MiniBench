@@ -6,16 +6,9 @@ import unittest
 
 from minibench.datasets.mahjong.api import index_to_tile
 from minibench.datasets.mahjong_rule_variants.rules import (
-    CYCLIC_ONE_TILE_SUBSTITUTION,
-    MODIFIED_RULES,
     RED_DRAGON_WILDCARD,
     calculate_rule_variant_shanten,
-    channel_for_rules,
     is_rule_variant_winning_hand,
-)
-from minibench.datasets.mahjong_rule_variants.evaluation import (
-    evaluate_mahjong_rule_variant_task,
-    summarize_mahjong_rule_variants,
 )
 from minibench.datasets.mahjong_solo.evaluation import (
     evaluate_mahjong_solo_task,
@@ -24,7 +17,6 @@ from minibench.datasets.mahjong_solo.evaluation import (
 from minibench.datasets.mahjong_solo.shanten_strategy import (
     mean_episode_shanten_discard_rate,
 )
-from tests.test_mahjong_rule_variants import make_task
 from tests.test_mahjong_solo import (
     MessageSequenceMahjongAgent,
     SequenceMahjongAgent,
@@ -33,27 +25,6 @@ from tests.test_mahjong_solo import (
 
 
 class MahjongShantenStrategyTests(unittest.TestCase):
-    def test_rule_channels_apply_live_ukeire_tiebreak_under_selected_rules(self):
-        for channel in (
-            RED_DRAGON_WILDCARD,
-            CYCLIC_ONE_TILE_SUBSTITUTION,
-            channel_for_rules(MODIFIED_RULES),
-        ):
-            task = make_task(
-                channel,
-                "2p 3p 4p 5p 6p 7p 7s 8s 9s 2m 3m 4m 5m".split(),
-                ["E"],
-            )
-            # E leaves six ordinary winning copies; 2m/5m leave three.
-            # Under the wildcard rule, C adds four copies to both choices.
-            for discard, expected_rate in (("E", 1.0), ("2m", 0.0)):
-                with self.subTest(channel=channel, discard=discard):
-                    result = evaluate_mahjong_rule_variant_task(
-                        task, SequenceMahjongAgent([{"action": "discard", "tile": discard}])
-                    )
-                    self.assertEqual(result.shanten_optimal_steps[0]["optimal_discards"], ["E"])
-                    self.assertEqual(result.shanten_optimal_discard_rate, expected_rate)
-
     def test_live_ukeire_deducts_prior_discards_and_preserves_all_best_ties(self):
         task = replace(
             delayed_tsumo_task(),
@@ -130,7 +101,7 @@ class MahjongShantenStrategyTests(unittest.TestCase):
             ),
         )
         self.assertTrue(good.success)
-        self.assertTrue(retried.success)
+        self.assertFalse(retried.success)
         self.assertEqual(good.shanten_optimal_discard_rate, 1.0)
         self.assertEqual(retried.shanten_optimal_discard_rate, 0.0)
         self.assertEqual(good.shanten_assessed_step_count, 1)
@@ -151,37 +122,10 @@ class MahjongShantenStrategyTests(unittest.TestCase):
         self.assertEqual(result.shanten_optimal_discard_rate, 1.0)
         self.assertNotIn("optimal_discards", json.dumps(agent.conversations))
 
-    def test_all_rule_channels_score_using_their_own_shanten(self):
-        for channel in (
-            RED_DRAGON_WILDCARD,
-            CYCLIC_ONE_TILE_SUBSTITUTION,
-            channel_for_rules(MODIFIED_RULES),
-        ):
-            with self.subTest(channel=channel):
-                task = make_task(
-                    channel,
-                    "1m 2m 3m 4p 5p 6p 7s 8s 9s E E E N".split(),
-                    ["9m"],
-                )
-                result = evaluate_mahjong_rule_variant_task(
-                    task, SequenceMahjongAgent([{"action": "discard", "tile": "9m"}])
-                )
-                self.assertEqual(result.shanten_optimal_discard_rate, 1.0)
-                self.assertIn("9m", result.shanten_optimal_steps[0]["optimal_discards"])
-                summary = summarize_mahjong_rule_variants([result])
-                self.assertEqual(summary["shanten_optimal_discard_rate"], 1.0)
-                self.assertEqual(
-                    summary["by_channel"][channel]["shanten_optimal_discard_rate"],
-                    1.0,
-                )
-
     def test_wildcard_shanten_zero_matches_actual_waits(self):
         physical_tiles = [index_to_tile(index) for index in range(34) for _ in range(4)]
         randomizer = random.Random(71)
-        for channel in (
-            RED_DRAGON_WILDCARD,
-            channel_for_rules(MODIFIED_RULES),
-        ):
+        for channel in (RED_DRAGON_WILDCARD,):
             for _ in range(100):
                 randomizer.shuffle(physical_tiles)
                 hand = physical_tiles[:13]

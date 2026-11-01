@@ -5,7 +5,7 @@ import random
 import unittest
 
 from minibench.datasets.mahjong_rule_variants.rules import (
-    RULE_CHANNELS, STANDARD_RULES, CYCLIC_ONE_TILE_SUBSTITUTION,
+    RULE_CHANNELS, STANDARD_RULES, CYCLIC_ODD_TILE_SUBSTITUTION,
     is_rule_variant_winning_hand,
 )
 from minibench.datasets.mahjong_solo.dataset import mahjong_solo_task_from_dict
@@ -85,15 +85,15 @@ class MahjongOracleTests(unittest.TestCase):
         self.assertEqual(result["steps"][1]["optimal_actions"], [])
         self.assertEqual(result["process_score"], 0)
 
-    def test_invalid_attempts_count_and_success_overrides_process(self):
+    def test_offline_replay_validates_success_without_legacy_process_credit(self):
         outputs = ["not json", json.dumps({"action": "discard", "tile": "9s"}),
                    json.dumps({"action": "tsumo"})]
         record = {"success": False, "raw_outputs": outputs}
         task = {"id": "oracle", "initial_hand": HAND, "wall": ["9s", "E"], "max_draws": 2}
         result = score_record("mahjong_solo", "H", record, task, mode="history-only")
-        self.assertEqual((result["y"], result["p"]), (1, 2 / 3))
-        self.assertEqual(result["evidence"]["total_steps"], 3)
-        self.assertEqual([step["draw_number"] for step in result["evidence"]["steps"]], [1, 1, 2])
+        self.assertEqual((result["y"], result["p"]), (1, 0))
+        self.assertEqual(result["evidence"]["method"], "binary_original_goal")
+        self.assertNotIn("process_score", result["evidence"])
 
     def test_failure_process_is_membership_ratio_without_heuristic_credit(self):
         outputs = [json.dumps({"action": "discard", "tile": "9s"}),
@@ -108,15 +108,15 @@ class MahjongOracleTests(unittest.TestCase):
         self.assertEqual((result["process_score"], result["total_steps"]), (0, 0))
 
     def test_variant_adapter_uses_active_rules_and_recomputes_outcome(self):
-        hand = "1s 2m 3m 2p 3p 4p 5s 6s 7s E E E N".split()
-        task = {"id": "rule", "initial_hand": hand, "wall": ["N"], "max_draws": 1,
-                "channel": CYCLIC_ONE_TILE_SUBSTITUTION}
+        hand = "1s 2m 3s 4p 5m 6p 7p 8s 9p E E E N".split()
+        task = {"id": "rule", "goal": "winning_tiles", "hand": hand,
+                "channel": CYCLIC_ODD_TILE_SUBSTITUTION}
         result = score_record("mahjong_rule_variants", "R", {"success": False,
-            "raw_outputs": [json.dumps({"action": "tsumo"})]}, task, mode="full-hand")
+            "raw_output": json.dumps({"winning_tiles": ["N"]})}, task, mode="text")
         self.assertEqual((result["y"], result["p"]), (1, 1))
         task["channel"] = STANDARD_RULES
         result = score_record("mahjong_rule_variants", "R", {"success": True,
-            "raw_outputs": [json.dumps({"action": "tsumo"})] * 3}, task, mode="full-hand")
+            "raw_output": json.dumps({"winning_tiles": ["N"]})}, task, mode="text")
         self.assertEqual((result["y"], result["p"]), (0, 0))
 
     def test_wall_information_is_not_mutated(self):

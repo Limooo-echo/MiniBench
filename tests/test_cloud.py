@@ -215,13 +215,13 @@ class CloudPlanTests(unittest.TestCase):
             raw["pilot_count"] = 1
             raw["experiments"] = [
                 {"id": name, "config": f"config/experiments/{name}.yaml", "account": "qwen"}
-                for name in ["one_stroke_multimodal", "mahjong_multimodal", "mahjong_rule_variants", "zebra"]
+                for name in ["one_stroke_multimodal", "mahjong_multimodal", "zebra"]
             ]
             cfg.write_text(yaml.safe_dump(raw))
             suite = root / "other"
             plan = cloud.prepare(cfg, suite)
             cloud.verify_plan(suite)
-            self.assertEqual(plan["planned_jobs"], 4)
+            self.assertEqual(plan["planned_jobs"], 3)
             for name in ["one_stroke_multimodal", "mahjong_multimodal"]:
                 exp = plan["experiments"][name]
                 tasks = cloud.get_task_family_spec(exp["family"]).load_tasks(suite / exp["source"])

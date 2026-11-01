@@ -56,6 +56,7 @@ class MahjongInstanceResult:
     metrics: dict[str, object]
     reasoning_trace: dict[str, Any] | None = None
     completion_traces: list[dict[str, Any]] = field(default_factory=list)
+    is_legal: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +111,9 @@ def run_mahjong_generation(agent: Agent, callback: Callable[[], str]) -> str:
         stage = run.stages[-1] if run.stages else None
         # A malformed submitted answer is a model error, not an API failure.
         # Internal stage-contract errors are not submitted task actions.
-        if stage is not None and stage.stage_name.endswith((".final", ".refine")):
+        if stage is not None and stage.stage_name.endswith(
+            (".final", ".refine", ".native_thinking", ".truncation_final")
+        ):
             if isinstance(exc.raw_output, str):
                 return exc.raw_output
         raise
@@ -255,6 +258,30 @@ def evaluate_mahjong_tasks(
             if on_result is not None:
                 on_result(result)
     return results
+
+
+def mahjong_answer_is_legal(task: MahjongTask, parsed_answer: dict[str, Any]) -> bool:
+    """Check the primary physical-tile answer, independently of correctness."""
+    if task.goal in {"tenpai_discard", "max_wait_discard", "max_ukeire_discard"}:
+        discard = parsed_answer.get("discard")
+        if not isinstance(discard, str):
+            return False
+        tile = _normalize_output_tile_or_none(discard)
+        return tile is not None and tile in task.hand
+    if task.goal == "winning_tiles":
+        tiles = parsed_answer.get("winning_tiles")
+        return isinstance(tiles, list) and all(
+            isinstance(tile, str) and _normalize_output_tile_or_none(tile) is not None
+            for tile in tiles
+        )
+    return False
+
+
+def mahjong_legality_rate(results: Sequence[Any]) -> float | None:
+    return _mean_optional(
+        getattr(result, "is_legal", None) for result in results
+        if getattr(result, "evaluation_status", "completed") == "completed"
+    )
 
 
 def validate_mahjong_answer(
@@ -485,15 +512,16 @@ def summarize_mahjong(
     if planned_total is not None and planned_total < total:
         raise ValueError("planned_total cannot be smaller than completed results")
     success_count = sum(1 for result in results if result.success)
-    by_tag: dict[str, dict[str, int | float]] = {}
+    by_tag: dict[str, dict[str, Any]] = {}
     for result in results:
         for tag in result.tags:
             item = by_tag.setdefault(tag, {"total": 0, "success": 0, "success_rate": 0.0})
             item["total"] = int(item["total"]) + 1
             item["success"] = int(item["success"]) + int(result.success)
-    for item in by_tag.values():
+    for tag, item in by_tag.items():
         item["success_rate"] = int(item["success"]) / int(item["total"])
-    by_task_type: dict[str, dict[str, int | float]] = {}
+        item["legality_rate"] = mahjong_legality_rate([r for r in results if tag in r.tags])
+    by_task_type: dict[str, dict[str, Any]] = {}
     for result in results:
         task_type = _summary_task_type(result.tags)
         item = by_task_type.setdefault(
@@ -502,8 +530,11 @@ def summarize_mahjong(
         )
         item["total"] = int(item["total"]) + 1
         item["success"] = int(item["success"]) + int(result.success)
-    for item in by_task_type.values():
+    for task_type, item in by_task_type.items():
         item["success_rate"] = int(item["success"]) / int(item["total"])
+        item["legality_rate"] = mahjong_legality_rate(
+            [r for r in results if _summary_task_type(r.tags) == task_type]
+        )
     visual_results = [
         result for result in results if result.expected_transcription is not None
     ]
@@ -524,6 +555,7 @@ def summarize_mahjong(
         "total": total,
         "success": success_count,
         "success_rate": success_count / total if total else 0.0,
+        "legality_rate": mahjong_legality_rate(results),
         "by_tag": by_tag,
         "by_task_type": by_task_type,
     }
@@ -569,6 +601,10 @@ def summarize_mahjong(
         )
         if paired.get("visual_gap"):
             summary["visual_gap"] = paired["visual_gap"]
+        for mode, item in summary["by_input_mode"].items():
+            item["legality_rate"] = mahjong_legality_rate(
+                [r for r in visual_results if r.input_mode == mode]
+            )
     summary["metrics"] = summarize_metrics(results)
     if planned_total is not None or run_status != "completed" or error is not None:
         planned = planned_total if planned_total is not None else total
@@ -617,6 +653,8 @@ def write_mahjong_run(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    legality = summary["legality_rate"]
+    legality_text = f"{legality:.3f}" if legality is not None else "null"
     (run_dir / "summary.txt").write_text(
         (
             f"run_status={summary['run_status']} "
@@ -628,6 +666,7 @@ def write_mahjong_run(
         )
         + f"total={summary['total']} success={summary['success']} "
         f"success_rate={summary['success_rate']:.3f}\n"
+        + f"legality_rate={legality_text}\n"
         + (f"error={error}\n" if error is not None else "")
         + summary_metrics_line(summary["metrics"]),
         encoding="utf-8",
@@ -675,6 +714,7 @@ def _make_result(
         raw_output=raw_output,
         parsed_answer=parsed_answer,
         expected_answer=expected_answer(task),
+        is_legal=mahjong_answer_is_legal(task, parsed_answer),
         reasons=reasons,
         source_task_id=task.id,
         input_mode=input_mode,

@@ -1,73 +1,48 @@
+"""The ordinary static task prompt, with explicit rule overrides only."""
 from __future__ import annotations
 
+from minibench.datasets.mahjong.prompting import MAHJONG_SYSTEM_PROMPT, build_mahjong_prompt
 from minibench.datasets.mahjong_rule_variants.dataset import MahjongRuleVariantTask
-from minibench.datasets.mahjong_solo.prompting import (
-    MAHJONG_SOLO_SYSTEM_PROMPT,
-    STANDARD_MAHJONG_RULE_TEXT,
-    build_shared_mahjong_draw_discard_prompt,
-)
 from minibench.datasets.mahjong_rule_variants.rules import (
-    CYCLIC_ONE_TILE_SUBSTITUTION,
-    RED_DRAGON_WILDCARD,
-    STANDARD_RULES,
-    active_rules_for_channel,
+    CYCLIC_ODD_TILE_SUBSTITUTION, RED_DRAGON_WILDCARD, active_rules_for_channel,
 )
 
-
-MAHJONG_RULE_VARIANT_SYSTEM_PROMPT = MAHJONG_SOLO_SYSTEM_PROMPT
-
-
+MAHJONG_RULE_VARIANT_SYSTEM_PROMPT = MAHJONG_SYSTEM_PROMPT
 RULE_TEXT = {
-    STANDARD_RULES: STANDARD_MAHJONG_RULE_TEXT,
     RED_DRAGON_WILDCARD: (
-        "Every red dragon C is a wildcard and may represent any one tile when "
-        "checking whether the 14-tile hand is complete."
+        "Every printed red dragon C is a wildcard. Each C independently represents "
+        "any one numbered or honor tile in any of the benchmark winning shapes, "
+        "including a sequence, triplet or pair. Multiple C tiles may be used together. "
+        "The four-copy limit applies to physical tiles, not wildcard representations."
     ),
-    CYCLIC_ONE_TILE_SUBSTITUTION: (
-        "When checking whether the 14-tile hand is complete, apply this mandatory "
-        "directional replacement to every printed one tile: 1s counts as 1m, 1m "
-        "counts as 1p, and 1p counts as 1s. All other tiles are unchanged, and "
-        "discard actions must still name the printed tile."
+    CYCLIC_ODD_TILE_SUBSTITUTION: (
+        "For every odd rank x in {1, 3, 5, 7, 9}, apply this mandatory, simultaneous "
+        "suit substitution exactly once when checking all winning shapes: xs counts "
+        "as xm, xm counts as xp, and xp counts as xs. Even-ranked tiles and honors "
+        "are unchanged. The original identity is not an optional alternative."
     ),
 }
 
 
-def build_mahjong_rule_variant_prompt(
-    task: MahjongRuleVariantTask,
-    *,
-    draw_number: int,
-    drawn_tile: str,
-    hand: list[str],
-    discards: list[str],
-    remaining_draws: int,
-    observation_mode: str = "full-hand",
-    prior_turns: tuple[tuple[str, str], ...] = (),
-    attempt_number: int = 1,
-    max_attempts: int = 3,
-    action_feedback: tuple[str, ...] = (),
-) -> str:
-    return build_shared_mahjong_draw_discard_prompt(
-        task,
-        draw_number=draw_number,
-        drawn_tile=drawn_tile,
-        hand=hand,
-        discards=discards,
-        remaining_draws=remaining_draws,
-        observation_mode=observation_mode,
-        prior_turns=prior_turns,
-        attempt_number=attempt_number,
-        max_attempts=max_attempts,
-        action_feedback=action_feedback,
-        rule_texts=rule_texts_for_channel(task.channel),
-    )
+def rule_texts_for_channel(channel: str) -> tuple[str, ...]:
+    return tuple(RULE_TEXT[rule] for rule in active_rules_for_channel(channel))
 
 
 def system_prompt_for_rule_channel(channel: str | None) -> str:
     return MAHJONG_RULE_VARIANT_SYSTEM_PROMPT
 
 
-def rule_texts_for_channel(channel: str) -> tuple[str, ...]:
-    active_rules = active_rules_for_channel(channel)
-    if not active_rules:
-        return (RULE_TEXT[STANDARD_RULES],)
-    return tuple(RULE_TEXT[rule] for rule in active_rules)
+def build_mahjong_rule_variant_prompt(task: MahjongRuleVariantTask) -> str:
+    # Keep the goal, notation and output schema identical to ordinary text tasks.
+    prompt = build_mahjong_prompt(task, input_mode="text")
+    rules = "\n".join((
+        "Rule modifications (override the ordinary tile identities where specified):",
+        *rule_texts_for_channel(task.channel),
+        "Use the modified identities only for shape checking. Count distinct winning "
+        "types by their printed physical codes. There are four physical copies of "
+        "each printed tile. Every discard and winning_tiles answer must name printed "
+        "physical tiles, never translated logical identities.",
+        "All benchmark winning shapes remain available; no other rules are changed.",
+        "",
+    ))
+    return prompt.replace("Hand: ", rules + "\nHand: ", 1)

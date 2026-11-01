@@ -9,6 +9,7 @@ class MahjongPromptTask(Protocol):
 
 
 MAHJONG_SOLO_OBSERVATION_MODES = ("full-hand", "history-only")
+MAHJONG_HISTORY_PROMPT_VERSIONS = ("v1",)
 
 
 STANDARD_MAHJONG_RULE_TEXT = (
@@ -32,6 +33,13 @@ MAHJONG_ACTION_FORMAT_LINES = (
 )
 
 
+MAHJONG_ACTION_ATTEMPT_POLICY = (
+    "Each draw allows exactly one submitted final action. An illegal tsumo, "
+    "illegal discard or invalid action JSON ends the game immediately as a failure. "
+    "No corrective submission is allowed."
+)
+
+
 MAHJONG_DISCARD_GUIDANCE = (
     "When discarding, consider the shanten number of the 13 tiles left after "
     "each legal discard under the selected rule configuration. Choose a "
@@ -47,6 +55,14 @@ MAHJONG_DISCARD_GUIDANCE = (
 )
 
 
+MAHJONG_TURN_DECISION_GUIDANCE = (
+    "First check whether the current 14 tiles form a complete legal winning "
+    "hand under the selected rules. If so, declare tsumo. Otherwise, choose a "
+    "legal discard minimizing post-discard shanten under the selected rules, "
+    "breaking ties by maximum live ukeire as defined at the start of this conversation."
+)
+
+
 def build_mahjong_solo_prompt(
     task: MahjongPromptTask,
     *,
@@ -58,7 +74,7 @@ def build_mahjong_solo_prompt(
     observation_mode: str = "full-hand",
     prior_turns: tuple[tuple[str, str], ...] = (),
     attempt_number: int = 1,
-    max_attempts: int = 3,
+    max_attempts: int = 1,
     action_feedback: tuple[str, ...] = (),
     rule_text: str = STANDARD_MAHJONG_RULE_TEXT,
 ) -> str:
@@ -78,6 +94,39 @@ def build_mahjong_solo_prompt(
     )
 
 
+def build_mahjong_solo_game_instructions(
+    *, max_draws: int,
+    rule_texts: tuple[str, ...] = (STANDARD_MAHJONG_RULE_TEXT,),
+) -> str:
+    """Fixed rules shared by both observation modes, without any deal or draw."""
+    if not rule_texts:
+        raise ValueError("rule_texts must contain at least one rule")
+    return "\n".join([
+        "Play a single-player closed-hand Mahjong draw-discard game.",
+        "Use exactly this selected rule configuration:",
+        *(f"- {rule}" for rule in rule_texts),
+        "Do not introduce any other rule change.",
+        f"The game allows at most {max_draws} draws and ends when you legally declare tsumo.",
+        "Tile notation: 1m-9m, 1p-9p, 1s-9s, E/S/W/N, P/F/C.",
+        "Only the previous turn's model-generated reasoning and submitted action "
+        "are carried into a new turn. Earlier observations and conversations are not replayed.",
+        "Preserve in your reasoning the concealed hand and cumulative discard "
+        "counts needed to continue on the next turn.",
+        "A new draw means the previous discard was accepted. Apply that discard "
+        "exactly once, then add the new drawn tile exactly once.",
+        "When a true 13-tile hand is provided, it is already the hand after the "
+        "previous accepted discard; do not subtract that discard again.",
+        "The first 14-tile observation already includes the first draw; do not add it again.",
+        MAHJONG_ACTION_ATTEMPT_POLICY,
+        "Future wall tiles are hidden.",
+        MAHJONG_DISCARD_GUIDANCE,
+        MAHJONG_TURN_DECISION_GUIDANCE,
+        "Verify that any discarded tile is present in the current concealed hand.",
+        *MAHJONG_ACTION_FORMAT_LINES,
+        "Do not include other fields. Return one legal action only.",
+    ])
+
+
 def build_mahjong_solo_history_turn_prompt(
     task: MahjongPromptTask,
     *,
@@ -86,21 +135,28 @@ def build_mahjong_solo_history_turn_prompt(
     previous_discard: str | None,
     remaining_draws: int,
     attempt_number: int = 1,
-    max_attempts: int = 3,
+    max_attempts: int = 1,
     action_feedback: tuple[str, ...] = (),
     rule_texts: tuple[str, ...] = (STANDARD_MAHJONG_RULE_TEXT,),
+    observation_mode: str = "history-only",
+    hand_before_draw: list[str] | None = None,
 ) -> str:
-    """Build one incremental user turn for the persistent history protocol."""
+    """Build the current observation; fixed rules are supplied separately."""
 
     if draw_number < 1:
         raise ValueError("draw_number must be positive")
+    if observation_mode not in MAHJONG_SOLO_OBSERVATION_MODES:
+        raise ValueError("observation_mode must be full-hand or history-only")
     if not rule_texts:
         raise ValueError("rule_texts must contain at least one rule")
     if draw_number == 1 and previous_discard is not None:
         raise ValueError("the first draw cannot have a previous discard")
     if draw_number > 1 and previous_discard is None and not action_feedback:
         raise ValueError("later draws require the previously accepted discard")
-
+    if observation_mode == "full-hand" and (
+        hand_before_draw is None or len(hand_before_draw) != 13
+    ):
+        raise ValueError("full-hand turns require the 13-tile hand before this draw")
     if action_feedback:
         return "\n".join(
             [
@@ -108,66 +164,24 @@ def build_mahjong_solo_history_turn_prompt(
                 "Rejection reason:",
                 *(f"- {feedback}" for feedback in action_feedback),
                 "No new tile was drawn; the concealed hand is unchanged.",
+                "Rejected actions did not change the hand. This is the same turn "
+                "and same draw, not another draw.",
                 f"Attempt {attempt_number} of {max_attempts} for the same turn.",
-                "Reconstruct the concealed hand from the conversation before "
-                "responding, and verify that any discarded tile is present.",
-                "If discarding, choose a tile minimizing post-discard shanten "
-                "under the selected rules, breaking ties by maximum live "
-                "ukeire as defined at the start of this conversation.",
-                *MAHJONG_ACTION_FORMAT_LINES,
-                "Return one legal action only.",
+                f"Current turn's draw (unchanged): {drawn_tile}",
             ]
         )
 
     lines: list[str] = []
     if draw_number == 1:
-        lines.extend(
-            [
-                "Begin a persistent multi-turn single-player closed-hand Mahjong game.",
-                "Maintain the concealed hand yourself across this conversation.",
-                "The current hand will not be restated after the initial deal.",
-                "Use ordinary closed-hand Mahjong tile-grouping logic under exactly "
-                "this selected rule configuration:",
-                *(f"- {rule_text}" for rule_text in rule_texts),
-            ]
+        lines.append(
+            f"Initial concealed hand (14 tiles): {' '.join((*task.initial_hand, drawn_tile))}"
         )
-        if len(rule_texts) > 1:
-            lines.append("All listed rule modifications apply simultaneously.")
-        lines.extend(
-            [
-                "Do not introduce any other rule change.",
-                "Declare tsumo if the 14 tiles after the draw are complete under "
-                "that configuration; otherwise discard one tile.",
-                MAHJONG_DISCARD_GUIDANCE,
-                "Future wall tiles are hidden.",
-                "Tile notation: 1m-9m, 1p-9p, 1s-9s, E/S/W/N, P/F/C.",
-                f"Initial concealed hand (13 tiles): {' '.join(task.initial_hand)}",
-                "This is the only time the initial hand is provided.",
-                "",
-            ]
+        lines.append("This hand already includes the first draw; do not add it again.")
+    elif observation_mode == "full-hand" and hand_before_draw is not None:
+        lines.append(
+            "Hand after previous accepted discard (13 tiles): " + " ".join(hand_before_draw)
         )
-    else:
-        lines.extend(
-            [
-                f"Your previous discard {previous_discard} was accepted.",
-                "Update the concealed hand from the conversation history.",
-                "If discarding, choose a tile minimizing post-discard shanten "
-                "under the selected rules, breaking ties by maximum live "
-                "ukeire as defined at the start of this conversation.",
-                "",
-            ]
-        )
-
-    lines.extend(
-        [
-            f"Turn {draw_number}: you draw {drawn_tile}.",
-            f"Remaining draws after this action: {remaining_draws}",
-            "Reconstruct the concealed hand from the conversation before "
-            "responding, and verify that any discarded tile is present.",
-            *MAHJONG_ACTION_FORMAT_LINES,
-            "Return one legal action only.",
-        ]
-    )
+    lines.append(f"You draw {drawn_tile}.")
     return "\n".join(lines)
 
 
@@ -205,6 +219,7 @@ def build_shared_mahjong_draw_discard_prompt(
     lines.extend(
         [
             "Do not introduce any other rule change.",
+            MAHJONG_ACTION_ATTEMPT_POLICY,
             "Declare tsumo if the current 14 tiles are complete under that configuration; "
             "otherwise discard one tile.",
             MAHJONG_DISCARD_GUIDANCE,

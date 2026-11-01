@@ -9,13 +9,6 @@ from minibench.datasets.mahjong.evaluation import (
     evaluate_mahjong_tasks,
     summarize_mahjong,
 )
-from minibench.datasets.mahjong_rule_variants.evaluation import (
-    evaluate_mahjong_rule_variant_tasks,
-    extract_mahjong_rule_variant_action,
-    summarize_mahjong_rule_variants,
-    write_mahjong_rule_variant_run,
-)
-from minibench.datasets.mahjong_rule_variants.rules import STANDARD_RULES
 from minibench.datasets.mahjong_solo.evaluation import (
     evaluate_mahjong_solo_tasks,
     extract_mahjong_solo_action,
@@ -23,7 +16,6 @@ from minibench.datasets.mahjong_solo.evaluation import (
     write_mahjong_solo_run,
 )
 from tests.test_mahjong_multimodal import OracleMahjongVisualAgent
-from tests.test_mahjong_rule_variants import make_task
 from tests.test_mahjong_solo import delayed_tsumo_task, tsumo_task
 
 
@@ -44,6 +36,9 @@ class SequenceOrErrorAgent:
     def generate_messages(self, messages, task, **kwargs):
         self.conversations.append([dict(message) for message in messages])
         return self._next()
+
+    def last_generation_trace(self):
+        return {"reasoning": "SCRIPTED_PREVIOUS_TURN_REASONING"}
 
 
 class MahjongEvaluationRegressions(unittest.TestCase):
@@ -91,26 +86,24 @@ class MahjongEvaluationRegressions(unittest.TestCase):
 
     def _families(self):
         solo = tsumo_task()
-        rules = make_task(STANDARD_RULES, list(solo.initial_hand), list(solo.wall))
         return (
             (solo, evaluate_mahjong_solo_tasks, summarize_mahjong_solo,
              write_mahjong_solo_run),
-            (rules, evaluate_mahjong_rule_variant_tasks,
-             summarize_mahjong_rule_variants, write_mahjong_rule_variant_run),
         )
 
     def test_api_errors_are_unknown_and_excluded_from_ability_denominators(self):
         for task, evaluate, summarize, _ in self._families():
             for mode in ("full-hand", "history-only"):
                 with self.subTest(family=evaluate.__name__, mode=mode):
+                    answer = {"action": "tsumo"}
                     agent = SequenceOrErrorAgent([
-                        RuntimeError("simulated HTTP 429"), {"action": "tsumo"}
+                        RuntimeError("simulated HTTP 429"), answer
                     ])
                     results = evaluate([task, task], agent, observation_mode=mode,
                                        show_progress=True)
                     failed = results[0]
                     self.assertIsNone(failed.success)
-                    self.assertIsNone(failed.score)
+                    self.assertFalse(hasattr(failed, "score"))
                     self.assertEqual(failed.evaluation_status, "api_error")
                     summary = summarize(results, planned_total=2)
                     self.assertEqual(summary["total"], 2)
@@ -122,6 +115,7 @@ class MahjongEvaluationRegressions(unittest.TestCase):
                     self.assertEqual(summary["success_rate"], 1.0)
                     self.assertEqual(summary["strict_first_attempt_success"], 1.0)
                     self.assertEqual(summary["run_status"], "completed_with_api_errors")
+                    self.assertNotIn("hand_reconstruction_episode_exact_rate", summary)
                     if "by_channel" in summary:
                         channel = summary["by_channel"][STANDARD_RULES]
                         self.assertEqual(channel["evaluated_total"], 1)
@@ -149,11 +143,8 @@ class MahjongEvaluationRegressions(unittest.TestCase):
 
     def test_partial_api_episode_does_not_bias_shanten_average(self):
         solo = delayed_tsumo_task()
-        rule = make_task(STANDARD_RULES, list(solo.initial_hand), list(solo.wall))
         for task, winning, evaluate, summarize in (
             (solo, tsumo_task(), evaluate_mahjong_solo_tasks, summarize_mahjong_solo),
-            (rule, self._families()[1][0], evaluate_mahjong_rule_variant_tasks,
-             summarize_mahjong_rule_variants),
         ):
             with self.subTest(family=evaluate.__name__):
                 results = evaluate([task, winning], SequenceOrErrorAgent([
@@ -165,7 +156,7 @@ class MahjongEvaluationRegressions(unittest.TestCase):
                 self.assertIsNone(summarize(results)["shanten_optimal_discard_rate"])
 
     def test_action_parsers_reject_undefined_fields(self):
-        for parse in (extract_mahjong_solo_action, extract_mahjong_rule_variant_action):
+        for parse in (extract_mahjong_solo_action,):
             for payload in (
                 {"action": "discard", "tile": "1m", "current_hand": ["1m"]},
                 {"action": "discard", "tile": "1m", "note": "MEMO"},
@@ -177,20 +168,19 @@ class MahjongEvaluationRegressions(unittest.TestCase):
 
     def test_rejected_notes_never_enter_the_next_history_call(self):
         solo = delayed_tsumo_task()
-        rule = make_task(STANDARD_RULES, list(solo.initial_hand), list(solo.wall))
         for task, evaluate in (
             (solo, evaluate_mahjong_solo_tasks),
-            (rule, evaluate_mahjong_rule_variant_tasks),
         ):
             with self.subTest(family=evaluate.__name__):
                 agent = SequenceOrErrorAgent([
                     {"action": "discard", "tile": "9s", "note": "MEMO"},
-                    {"action": "discard", "tile": "9s"},
                     {"action": "tsumo"},
                 ])
-                result = evaluate([task], agent, observation_mode="history-only")[0]
-                self.assertTrue(result.success)
-                self.assertEqual(result.discards, ["9s"])
+                results = evaluate([task, tsumo_task()], agent, observation_mode="history-only")
+                result = results[0]
+                self.assertFalse(result.success)
+                self.assertTrue(results[1].success)
+                self.assertEqual(result.discards, [])
                 self.assertEqual(len(result.action_errors), 1)
                 self.assertIn("MEMO", result.raw_outputs[0])
                 for conversation in agent.conversations[1:]:

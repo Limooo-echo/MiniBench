@@ -1,0 +1,200 @@
+{
+  "output": "data/mahjong_rule_variants/red_dragon_tasks.jsonl",
+  "diagnostics_path": "data/mahjong_rule_variants/red_dragon_tasks.generation.json",
+  "channel": "red_dragon_wildcard",
+  "generator_version": "static-red-single-c-uncapped-v1",
+  "count_per_type": 100,
+  "seed": 42,
+  "prefix": "mj-red",
+  "max_attempts_per_type": 100000,
+  "reference_sha256": "5d07b5fdd24800b9f9aff43395159a6cacc7a2ee6f52efa227bebc0018544f70",
+  "sampling": {
+    "proposal": "ordinary Easy randomized four-meld-plus-pair minus one tile; add a random legal physical tile for discard questions; redraw source hands with more than one C; if no C is present, replace one random position with C",
+    "c_count_target": "exactly 1 in the displayed hand; drawing another C remains legal",
+    "candidate_definition": "one single-C physical hand before any answer-based filter; does not count internal ordinary-constructor or single-C preparation retries",
+    "rejection_counts": "first failing filter only; mutually exclusive",
+    "coverage": "regular-hand-derived proposals, not uniform over all legal hands; oracle still checks regular, seven-pairs and thirteen-orphans wins",
+    "filters": "nonempty complete wait set without an answer-size cap; exactly one C in initial hand; newly enabled non-C wait; discard uniquely optimal, outside ordinary optima and retaining C",
+    "quotas": null
+  },
+  "by_task_type": {
+    "winning_tiles": {
+      "attempts": 100,
+      "accepted": 100,
+      "acceptance_rate": 1.0,
+      "rejections": {},
+      "before_filter": {
+        "c_count": {
+          "1": 100
+        },
+        "honor_count": {
+          "1": 43,
+          "2": 4,
+          "3": 16,
+          "4": 26,
+          "5": 5,
+          "6": 5,
+          "7": 1
+        },
+        "quad_group_count": {
+          "0": 90,
+          "1": 10
+        },
+        "answer_size": {
+          "3": 7,
+          "4": 28,
+          "5": 23,
+          "6": 12,
+          "7": 19,
+          "8": 7,
+          "9": 2,
+          "33": 1,
+          "34": 1
+        }
+      },
+      "after_filter": {
+        "c_count": {
+          "1": 100
+        },
+        "honor_count": {
+          "1": 43,
+          "2": 4,
+          "3": 16,
+          "4": 26,
+          "5": 5,
+          "6": 5,
+          "7": 1
+        },
+        "quad_group_count": {
+          "0": 90,
+          "1": 10
+        },
+        "answer_size": {
+          "3": 7,
+          "4": 28,
+          "5": 23,
+          "6": 12,
+          "7": 19,
+          "8": 7,
+          "9": 2,
+          "33": 1,
+          "34": 1
+        }
+      },
+      "concentration": {
+        "c_count": {
+          "largest_bin": 1,
+          "share": 1.0
+        },
+        "honor_count": {
+          "largest_bin": 1,
+          "share": 0.43
+        },
+        "quad_group_count": {
+          "largest_bin": 0,
+          "share": 0.9
+        },
+        "answer_size": {
+          "largest_bin": 4,
+          "share": 0.28
+        }
+      },
+      "warnings": [
+        "c_count: >=90% of accepted samples in bin 1; inspect selection bias (no balancing applied)",
+        "quad_group_count: >=90% of accepted samples in bin 0; inspect selection bias (no balancing applied)"
+      ]
+    },
+    "max_wait_discard": {
+      "attempts": 132,
+      "accepted": 100,
+      "acceptance_rate": 0.7575757575757576,
+      "rejections": {
+        "red discard must be uniquely optimal": 24,
+        "variant optimum is also an ordinary optimum": 8
+      },
+      "before_filter": {
+        "c_count": {
+          "1": 132
+        },
+        "honor_count": {
+          "1": 58,
+          "2": 18,
+          "3": 17,
+          "4": 23,
+          "5": 8,
+          "6": 5,
+          "7": 2,
+          "8": 1
+        },
+        "quad_group_count": {
+          "0": 111,
+          "1": 20,
+          "2": 1
+        },
+        "answer_size": {
+          "3": 2,
+          "4": 30,
+          "5": 30,
+          "6": 18,
+          "7": 33,
+          "8": 10,
+          "31": 1,
+          "33": 2,
+          "34": 6
+        }
+      },
+      "after_filter": {
+        "c_count": {
+          "1": 100
+        },
+        "honor_count": {
+          "1": 43,
+          "2": 17,
+          "3": 11,
+          "4": 17,
+          "5": 8,
+          "6": 2,
+          "7": 2
+        },
+        "quad_group_count": {
+          "0": 83,
+          "1": 16,
+          "2": 1
+        },
+        "answer_size": {
+          "3": 1,
+          "4": 23,
+          "5": 24,
+          "6": 16,
+          "7": 27,
+          "8": 8,
+          "34": 1
+        }
+      },
+      "concentration": {
+        "c_count": {
+          "largest_bin": 1,
+          "share": 1.0
+        },
+        "honor_count": {
+          "largest_bin": 1,
+          "share": 0.43
+        },
+        "quad_group_count": {
+          "largest_bin": 0,
+          "share": 0.83
+        },
+        "answer_size": {
+          "largest_bin": 7,
+          "share": 0.27
+        }
+      },
+      "warnings": [
+        "c_count: >=90% of accepted samples in bin 1; inspect selection bias (no balancing applied)"
+      ]
+    }
+  },
+  "status": "completed",
+  "count": 200,
+  "dataset_written": true
+}

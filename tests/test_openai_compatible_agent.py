@@ -1,4 +1,5 @@
 import io
+from http.client import IncompleteRead
 import json
 import socket
 from unittest.mock import patch
@@ -412,6 +413,37 @@ class OpenAICompatibleAgentTests(unittest.TestCase):
 
                 self.assertEqual(output, '{"ok":true}')
                 self.assertEqual(urlopen.call_count, 2)
+
+    def test_incomplete_response_is_retried_and_exhaustion_is_a_request_error(self):
+        class TruncatedHTTPResponse(FakeHTTPResponse):
+            def read(self):
+                raise IncompleteRead(b"x" * 4090)
+
+        for recovers in (True, False):
+            with self.subTest(recovers=recovers):
+                client = OpenAICompatibleClient(
+                    model="test-model", base_url="https://example.com/v1",
+                    api_key_env="TEST_KEY", max_retries=1,
+                    retry_initial_backoff_seconds=0.0,
+                    retry_max_backoff_seconds=0.0,
+                )
+                response = {"choices": [{"message": {"content": '{"ok":true}'}}]}
+                effects = [TruncatedHTTPResponse(None),
+                           FakeHTTPResponse(response) if recovers else TruncatedHTTPResponse(None)]
+                with patch.dict("os.environ", {"TEST_KEY": "test-only"}), patch(
+                    "urllib.request.urlopen", side_effect=effects,
+                ) as http:
+                    if recovers:
+                        self.assertEqual(client.complete_messages([
+                            {"role": "user", "content": "Question?"},
+                        ]), '{"ok":true}')
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "incomplete response"):
+                            client.complete_messages([{"role": "user", "content": "Question?"}])
+                self.assertEqual(http.call_count, 2)
+                metrics = client.metrics_snapshot()
+                self.assertEqual(metrics["llm_calls"], 2)
+                self.assertEqual(metrics["usage_missing_calls"], 2)
 
     def test_retry_after_is_respected_and_capped(self):
         agent = OpenAICompatibleAgent(

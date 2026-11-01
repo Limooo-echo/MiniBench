@@ -42,7 +42,7 @@ TOT_AGENT_FIELDS = frozenset(
 )
 AGENT_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "passthrough": BASE_AGENT_FIELDS,
-    "direct": RUNTIME_AGENT_FIELDS | {"final_temperature"},
+    "direct": RUNTIME_AGENT_FIELDS | {"final_temperature", "native_thinking_max_tokens"},
     "cot": RUNTIME_AGENT_FIELDS | REASONING_AGENT_FIELDS,
     "self-consistency": RUNTIME_AGENT_FIELDS | SAMPLED_REASONING_AGENT_FIELDS,
     "best-of-n": (
@@ -61,6 +61,7 @@ OPTIONAL_POSITIVE_INTEGER_FIELDS = frozenset(
         "max_llm_calls",
         "max_total_tokens",
         "max_search_nodes",
+        "native_thinking_max_tokens",
     }
 )
 POSITIVE_INTEGER_FIELDS = frozenset(
@@ -208,6 +209,16 @@ def validate_experiment_config(
         from minibench.datasets.xiangqi.runtime import validate_evaluation_config
 
         validate_evaluation_config(family, raw.get("evaluation", {}))
+
+    if family == "mahjong_solo":
+        evaluation = raw.get("evaluation", {})
+        if not isinstance(evaluation, dict):
+            raise ValueError(f"{source}: evaluation must be a mapping")
+        if "history_prompt_version" in evaluation:
+            if evaluation["history_prompt_version"] != "v1":
+                raise ValueError(f"{source}: evaluation.history_prompt_version must be v1; hand-reporting v2 was removed")
+            if evaluation.get("observation_mode", "full-hand") != "history-only":
+                raise ValueError(f"{source}: evaluation.history_prompt_version requires history-only")
 
     if family == "one_stroke":
         from minibench.factory.experiments import _one_stroke_selected_modes

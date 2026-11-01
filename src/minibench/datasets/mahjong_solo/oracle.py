@@ -23,11 +23,15 @@ from minibench.datasets.mahjong_rule_variants.rules import (
 def _winning_subset(pool: tuple[int, ...], required: int, channel: str) -> bool:
     """Does the pool contain a legal winning hand using the final drawn tile?"""
     rules = rules_for_channel(channel)
-    if rules.cyclic_one_tile_substitution:
+    if rules.cyclic_odd_tile_substitution:
         translated = list(pool)
-        translated[0], translated[9], translated[18] = pool[18], pool[0], pool[9]
+        for rank in (0, 2, 4, 6, 8):
+            translated[rank], translated[rank + 9], translated[rank + 18] = (
+                pool[rank + 18], pool[rank], pool[rank + 9]
+            )
         pool = tuple(translated)
-        required = {18: 0, 0: 9, 9: 18}.get(required, required)
+        if required < 27 and required % 9 in (0, 2, 4, 6, 8):
+            required = (required + 9) % 27
     wildcard = 33 if rules.red_dragon_is_wildcard else None
     wilds = pool[33] if wildcard is not None else 0
     real = list(pool)
@@ -156,17 +160,28 @@ def optimal_actions(hand: list[str], remaining_wall: tuple[str, ...], *,
 
 
 def score_episode(task: Any, raw_outputs: list[str], *,
-                  channel: str = STANDARD_RULES) -> dict[str, Any]:
+                  channel: str = STANDARD_RULES,
+                  observation_mode: str = "full-hand",
+                  allow_current_hand: bool | None = None,
+                  max_action_attempts: int = 3,
+                  include_process_score: bool = True) -> dict[str, Any]:
     """Replay submitted attempts; invalid attempts count as incorrect steps.
 
     Legal discards advance the wall.  Invalid responses retain the current
-    state, respecting the runner's three-attempt protocol.  A legal tsumo is
+    state, respecting the recorded action-attempt limit.  A legal tsumo is
     also a decision step.  No unavailable future response is invented.
+    ``allow_current_hand=None`` preserves legacy saved-history replay; the
+    current action-only runner explicitly disables that retired output field.
+    Logs without a recorded attempt limit retain the legacy three-attempt rule.
+    Current offline evaluation disables legacy process scoring and only replays
+    whether the submitted actions legally achieve the original goal.
     """
     from minibench.datasets.mahjong.api import normalize_tile
     from minibench.datasets.mahjong_solo.evaluation import (
-        MAX_ACTION_ATTEMPTS, extract_mahjong_solo_action,
+        extract_mahjong_solo_action,
     )
+    if type(max_action_attempts) is not int or max_action_attempts < 1:
+        raise ValueError("max_action_attempts must be a positive integer")
     if not isinstance(raw_outputs, list) or not all(isinstance(x, str) for x in raw_outputs):
         raise ValueError("raw_outputs must contain the complete submitted action log")
     hand = list(task.initial_hand)
@@ -182,9 +197,13 @@ def score_episode(task: Any, raw_outputs: list[str], *,
             raise ValueError("action log continues after the episode ended")
         if attempt == 0:
             hand.append(wall[draw_index])
-            optimum = optimal_actions(hand, wall[draw_index + 1:], channel=channel)
+            if include_process_score:
+                optimum = optimal_actions(hand, wall[draw_index + 1:], channel=channel)
         attempt += 1
-        parsed = extract_mahjong_solo_action(raw)
+        parsed = extract_mahjong_solo_action(
+            raw, allow_current_hand=(observation_mode == "history-only"
+                                     if allow_current_hand is None else allow_current_hand),
+        )
         action = parsed
         legal = False
         if parsed is not None and parsed.get("action") == "tsumo":
@@ -200,17 +219,21 @@ def score_episode(task: Any, raw_outputs: list[str], *,
                 tile = None
             action = {"action": "discard", "tile": tile}
             legal = tile in hand
-        correct = legal and action in optimum["actions"]
-        steps.append({"draw_number": draw_index + 1, "attempt": attempt,
-                      "chosen_action": action, "correct": bool(correct), "legal": legal,
-                      "optimal_actions": optimum["actions"],
-                      "earliest_win_in_draws": optimum["earliest_win_in_draws"]})
+        if include_process_score:
+            correct = legal and action in optimum["actions"]
+            steps.append({"draw_number": draw_index + 1, "attempt": attempt,
+                          "chosen_action": action, "correct": bool(correct), "legal": legal,
+                          "optimal_actions": optimum["actions"],
+                          "earliest_win_in_draws": optimum["earliest_win_in_draws"]})
         if legal and action["action"] == "discard":
             hand.remove(action["tile"])
             draw_index += 1
             attempt = 0
-        elif not legal and attempt >= MAX_ACTION_ATTEMPTS:
+        elif not legal and attempt >= max_action_attempts:
             terminal = True
+    if not include_process_score:
+        return {"success": success, "complete": terminal or draw_index >= len(wall),
+                "method": "binary_original_goal"}
     correct_steps = sum(step["correct"] for step in steps)
     total_steps = len(steps)
     return {"success": success, "process_score": correct_steps / total_steps if total_steps else 0.0,

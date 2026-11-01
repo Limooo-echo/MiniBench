@@ -37,7 +37,7 @@ def mahjong_solo_task_from_dict(raw: dict[str, Any]) -> MahjongSoloTask:
     if not isinstance(seed, int):
         raise ValueError(f"{raw['id']}: seed must be an integer")
 
-    max_draws = raw.get("max_draws", 18)
+    max_draws = raw.get("max_draws", 10)
     if not isinstance(max_draws, int) or max_draws <= 0:
         raise ValueError(f"{raw['id']}: max_draws must be a positive integer")
 

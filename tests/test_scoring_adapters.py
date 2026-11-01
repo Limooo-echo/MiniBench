@@ -22,6 +22,25 @@ HAND = ["1m", "1m", "1m", "2m", "3m", "4m", "2p", "3p", "4p", "2s", "3s", "4s", 
 
 
 class ScoringAdapterTests(unittest.TestCase):
+    def test_mahjong_solo_replays_only_binary_outcome_without_process_credit(self):
+        task = {"id": "binary-solo", "initial_hand": HAND,
+                "wall": ["9s", "E"], "max_draws": 2}
+        first = '{"action":"discard","tile":"9s"}'
+        for mode in ("full-hand", "history-only"):
+            for final, expected in (( '{"action":"tsumo"}', 1.0),
+                                    ('{"action":"discard","tile":"E"}', 0.0)):
+                with self.subTest(mode=mode, success=expected):
+                    result = self.score("mahjong_solo", {
+                        "success": not bool(expected), "process_score": 0.9,
+                        "raw_outputs": [first, final], "max_action_attempts": 1,
+                        "observation_mode": mode,
+                    }, task, "H", mode)
+                    self.assertEqual((result["y"], result["p"], result["status"]),
+                                     (expected, 0.0, "ok"))
+                    self.assertEqual(result["evidence"]["method"], "binary_original_goal")
+                    self.assertNotIn("process_score", result["evidence"])
+                    self.assertNotIn("optimal_actions", json.dumps(result["evidence"]))
+
     def score(self, family, record, task=None, dimension="D", mode="single"):
         return score_record(family, dimension, record, task, mode=mode)
 

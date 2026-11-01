@@ -3,24 +3,22 @@ task:
   path: data/mahjong/tasks.jsonl
   limit: null
   task_ids: []
-
 agent:
-  name: cot
+  name: direct
   prompt_version: v1
   max_format_repairs: 0
-  reasoning_temperature: 0.0
+  native_thinking_max_tokens: 7168
+  max_tokens: 1024
   final_temperature: 0.0
-  max_reasoning_tokens: 1024
-
 provider:
-  name: qwen
-  model: qwen3.8-max
+  name: deepseek
+  model: deepseek-flash
   json_mode: true
   max_tokens: 1024
   timeout: 300
   extra_body:
-    enable_thinking: false
-
+    thinking:
+      type: enabled
 run:
   output_dir: runs
-  run_name: mahjong-cot-new-qwen-100-per-type
+  run_name: mahjong-static-direct-thinking-flash-7168-1024

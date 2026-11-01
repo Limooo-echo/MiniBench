@@ -181,12 +181,12 @@ experiments:
   family: mahjong_rule_variants
   dimension: R
   dataset:
-    path: ../../data/mahjong_solo/tasks_win.jsonl
-    sha256: df407fa4e767c585da7381aff32f363f0829bbf27f7f0d2b56e8cd792751014a
+    path: ../../data/mahjong_rule_variants/cyclic_odd_tasks.jsonl
+    # Generate the independent odd-rule dataset, then freeze its actual SHA-256.
+    sha256: REPLACE_AFTER_ODD_RULE_GENERATION
   protocol:
     version: existing-task-protocol-v1
     evaluation:
-      observation_mode: full-hand
       show_progress: true
   runs: []
 - id: mahjong-history

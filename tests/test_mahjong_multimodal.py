@@ -107,6 +107,72 @@ class MahjongMultimodalTests(unittest.TestCase):
         cls.static_tasks = load_mahjong_tasks("data/mahjong/tasks.jsonl")
         cls.tasks = load_mahjong_tasks("data/mahjong/visual_tasks.jsonl")
 
+    def test_legality_uses_real_hand_and_ignores_transcription_and_auxiliary_answers(self):
+        from minibench.datasets.mahjong.api import index_to_tile
+
+        wait = next(t for t in self.tasks if t.goal == "winning_tiles" and not t.visible_tiles)
+        visible_wait = next(t for t in self.tasks if t.goal == "winning_tiles" and t.visible_tiles)
+        discard = next(t for t in self.tasks if t.goal == "max_ukeire_discard")
+        absent = next(index_to_tile(i) for i in range(34) if index_to_tile(i) not in discard.hand)
+        correct_waits = expected_answer(wait)["winning_tiles"]
+        selected_discard = expected_answer(discard)["discard"]
+        outputs = [
+            {"hand": ["9z"], "winning_tiles": correct_waits},
+            {"hand": list(visible_wait.hand), "visible_tiles": list(visible_wait.visible_tiles),
+             "winning_tiles": expected_answer(visible_wait)["winning_tiles"],
+             "live_winning_copies": {"9z": 100}},
+            {"hand": ["9z"], "visible_tiles": [], "discard": selected_discard,
+             "winning_tiles": ["9z"], "live_winning_copies": {"9z": 100}},
+            {"hand": [absent, *discard.hand[1:]], "visible_tiles": list(discard.visible_tiles),
+             "discard": absent, "winning_tiles": [], "live_winning_copies": {}},
+            {"hand": list(wait.hand), "winning_tiles": ["9z"]},
+        ]
+
+        class Answers:
+            def __init__(self):
+                self.outputs = iter(outputs)
+
+            def generate_multimodal(self, prompt, context, *, images):
+                return json.dumps(next(self.outputs))
+
+        tasks = [wait, visible_wait, discard,
+                 replace(discard, id=f"{discard.id}-absent-discard"),
+                 replace(wait, id=f"{wait.id}-invalid-wait")]
+        results = evaluate_mahjong_tasks(tasks, Answers(), input_modes=("image",))
+        self.assertEqual([r.is_legal for r in results], [True, True, True, False, False])
+        self.assertTrue(results[0].success)
+        self.assertFalse(results[0].transcription_exact)
+        self.assertFalse(results[1].success)
+        self.assertFalse(results[2].success)
+        self.assertFalse(results[3].success)
+        self.assertTrue(results[4].transcription_exact)
+        summary = summarize_mahjong(results)
+        self.assertEqual(summary["legality_rate"], 3 / 5)
+        self.assertEqual(summary["by_input_mode"]["image"]["legality_rate"], 3 / 5)
+        self.assertEqual(summary["by_task_type"]["max_ukeire_discard/visible:12"]["legality_rate"], 0.5)
+        self.assertEqual(summary["by_task_type"]["winning_tiles/visible:12"]["legality_rate"], 1.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            run = write_mahjong_run(results, tmp, "image-legality")
+            saved = [json.loads(line) for line in (run / "predictions.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([r["is_legal"] for r in saved], [True, True, True, False, False])
+            self.assertTrue(all("transcription_exact" in r for r in saved))
+
+    def test_legality_is_grouped_by_actual_input_mode(self):
+        task = next(t for t in self.tasks if t.goal == "winning_tiles" and not t.visible_tiles)
+
+        class Answers:
+            def generate(self, prompt, context):
+                return '{"winning_tiles":["9z"]}'
+
+            def generate_multimodal(self, prompt, context, *, images):
+                return json.dumps({"winning_tiles": expected_answer(task)["winning_tiles"], "hand": []})
+
+        results = evaluate_mahjong_tasks([task], Answers(), input_modes=("text", "image"))
+        summary = summarize_mahjong(results)
+        self.assertEqual(summary["legality_rate"], 0.5)
+        self.assertEqual(summary["by_input_mode"]["text"]["legality_rate"], 0.0)
+        self.assertEqual(summary["by_input_mode"]["image"]["legality_rate"], 1.0)
+
     def test_visual_dataset_is_an_exact_six_hundred_task_static_mirror(self):
         self.assertEqual(len(self.static_tasks), 600)
         self.assertEqual(len(self.tasks), 600)

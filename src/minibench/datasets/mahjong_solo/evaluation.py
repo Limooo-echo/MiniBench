@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 import re
@@ -27,9 +27,10 @@ from minibench.datasets.mahjong.evaluation import (
 )
 from minibench.datasets.mahjong_solo.dataset import MahjongSoloTask
 from minibench.datasets.mahjong_solo.prompting import (
+    MAHJONG_HISTORY_PROMPT_VERSIONS,
     MAHJONG_SOLO_OBSERVATION_MODES,
+    build_mahjong_solo_game_instructions,
     build_mahjong_solo_history_turn_prompt,
-    build_mahjong_solo_prompt,
 )
 from minibench.datasets.mahjong_solo.shanten_strategy import (
     evaluate_shanten_discard_strategy,
@@ -38,7 +39,7 @@ from minibench.datasets.mahjong_solo.shanten_strategy import (
 from minibench.datasets.mahjong_rule_variants.rules import STANDARD_RULES
 
 
-MAX_ACTION_ATTEMPTS = 3
+MAX_ACTION_ATTEMPTS = 1
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,6 @@ class MahjongSoloInstanceResult:
     task_id: str
     observation_mode: str
     success: bool | None
-    score: float | None
     draws: list[str]
     discards: list[str]
     raw_outputs: list[str]
@@ -65,10 +65,12 @@ class MahjongSoloInstanceResult:
     tags: tuple[str, ...]
     metrics: dict[str, object]
     evaluation_status: str = "completed"
-    process_score: float | None = None
-    correct_steps: int = 0
-    total_steps: int = 0
-    step_scores: list[dict[str, Any]] = field(default_factory=list)
+    max_action_attempts: int = MAX_ACTION_ATTEMPTS
+
+
+@dataclass(frozen=True)
+class MahjongHistoryActionInstanceResult(MahjongSoloInstanceResult):
+    history_prompt_version: str = "v1"
 
 
 def generate_mahjong_history_action(
@@ -76,7 +78,7 @@ def generate_mahjong_history_action(
     messages: tuple[ChatMessage, ...],
     task_context: Any,
 ) -> str:
-    """Generate one scored Mahjong action from a persistent chat history."""
+    """Generate one scored action from the supplied turn context."""
 
     phase_generate = getattr(agent, "generate_messages_for_phase", None)
     if callable(phase_generate):
@@ -97,7 +99,7 @@ def generate_mahjong_history_action(
             raise TypeError("Agent message generation must return a string")
         return output
     raise ValueError(
-        "Mahjong history-only evaluation requires an agent with "
+        "Mahjong multi-turn draw-discard evaluation requires an agent with "
         "generate_messages_for_phase() or generate_messages(); use "
         "openai-compatible, direct, cot, or a message-aware test agent"
     )
@@ -108,6 +110,7 @@ def evaluate_mahjong_solo_tasks(
     agent: Agent,
     *,
     observation_mode: str = "full-hand",
+    history_prompt_version: str = "v1",
     show_progress: bool = False,
     on_result: Callable[[list[MahjongSoloInstanceResult]], None] | None = None,
 ) -> list[MahjongSoloInstanceResult]:
@@ -116,6 +119,8 @@ def evaluate_mahjong_solo_tasks(
             "observation_mode must be one of: "
             + ", ".join(MAHJONG_SOLO_OBSERVATION_MODES)
         )
+    if history_prompt_version not in MAHJONG_HISTORY_PROMPT_VERSIONS:
+        raise ValueError("history_prompt_version must be v1; the hand-reporting v2 has been removed")
     results: list[MahjongSoloInstanceResult] = []
     total = len(tasks)
     if show_progress:
@@ -125,6 +130,7 @@ def evaluate_mahjong_solo_tasks(
             task,
             agent,
             observation_mode=observation_mode,
+            history_prompt_version=history_prompt_version,
         )
         results.append(result)
         if on_result is not None:
@@ -145,12 +151,15 @@ def evaluate_mahjong_solo_task(
     agent: Agent,
     *,
     observation_mode: str = "full-hand",
+    history_prompt_version: str = "v1",
 ) -> MahjongSoloInstanceResult:
     if observation_mode not in MAHJONG_SOLO_OBSERVATION_MODES:
         raise ValueError(
             "observation_mode must be one of: "
             + ", ".join(MAHJONG_SOLO_OBSERVATION_MODES)
         )
+    if history_prompt_version not in MAHJONG_HISTORY_PROMPT_VERSIONS:
+        raise ValueError("history_prompt_version must be v1; the hand-reporting v2 has been removed")
     metrics_start = start_task_metrics(agent)
     public_context = MahjongPublicTaskContext(
         task_id=task.id,
@@ -162,7 +171,12 @@ def evaluate_mahjong_solo_task(
     raw_outputs: list[str] = []
     first_attempt_outputs: list[str | None] = []
     reasoning_traces: list[dict[str, Any] | None] = []
-    conversation: list[ChatMessage] = []
+    instructions: ChatMessage = {
+        "role": "system",
+        "content": build_mahjong_solo_game_instructions(max_draws=task.max_draws),
+    }
+    conversation: list[ChatMessage] = [instructions]
+    previous_turn_memory: str | None = None
     agent_actions: list[dict[str, Any]] = []
     action_errors: list[dict[str, Any]] = []
     prior_turns: list[tuple[str, str]] = []
@@ -170,6 +184,15 @@ def evaluate_mahjong_solo_task(
     win_score: dict[str, Any] | None = None
 
     for draw_number, drawn_tile in enumerate(task.wall[: task.max_draws], start=1):
+        if draw_number > 1 and previous_turn_memory is None:
+            raise ValueError(
+                "The previous-turn reasoning protocol requires saved reasoning text. "
+                "Use an agent with accessible reasoning traces, such as cot; "
+                "action-only replies cannot carry the concealed hand to the next turn."
+            )
+        messages: list[ChatMessage] = [instructions]
+        if previous_turn_memory is not None:
+            messages.append({"role": "assistant", "content": previous_turn_memory})
         hand.append(drawn_tile)
         draws.append(drawn_tile)
         first_attempt_outputs.append(None)
@@ -180,43 +203,26 @@ def evaluate_mahjong_solo_task(
         last_error = "action_attempts_exhausted"
 
         for attempt_number in range(1, MAX_ACTION_ATTEMPTS + 1):
-            if observation_mode == "history-only":
-                prompt = build_mahjong_solo_history_turn_prompt(
-                    task,
-                    draw_number=draw_number,
-                    drawn_tile=drawn_tile,
-                    previous_discard=(prior_turns[-1][1] if prior_turns else None),
-                    remaining_draws=task.max_draws - draw_number,
-                    attempt_number=attempt_number,
-                    max_attempts=MAX_ACTION_ATTEMPTS,
-                    action_feedback=tuple(action_feedback),
-                )
-                conversation.append({"role": "user", "content": prompt})
-            else:
-                prompt = build_mahjong_solo_prompt(
-                    task,
-                    draw_number=draw_number,
-                    drawn_tile=drawn_tile,
-                    hand=hand,
-                    discards=discards,
-                    remaining_draws=task.max_draws - draw_number,
-                    observation_mode=observation_mode,
-                    prior_turns=tuple(prior_turns),
-                    attempt_number=attempt_number,
-                    max_attempts=MAX_ACTION_ATTEMPTS,
-                    action_feedback=tuple(action_feedback),
-                )
+            prompt = build_mahjong_solo_history_turn_prompt(
+                task,
+                observation_mode=observation_mode,
+                hand_before_draw=hand[:-1] if observation_mode == "full-hand" else None,
+                draw_number=draw_number,
+                drawn_tile=drawn_tile,
+                previous_discard=(prior_turns[-1][1] if prior_turns else None),
+                remaining_draws=task.max_draws - draw_number,
+                attempt_number=attempt_number,
+                max_attempts=MAX_ACTION_ATTEMPTS,
+                action_feedback=tuple(action_feedback),
+            )
+            conversation.append({"role": "user", "content": prompt})
+            messages.append({"role": "user", "content": prompt})
             try:
-                if observation_mode == "history-only":
-                    raw_output = generate_mahjong_history_action(
-                        agent,
-                        tuple(conversation),
-                        public_context,
-                    )
-                else:
-                    raw_output = run_mahjong_generation(
-                        agent, lambda: agent.generate(prompt, public_context)
-                    )
+                raw_output = generate_mahjong_history_action(
+                    agent,
+                    tuple(messages),
+                    public_context,
+                )
             except RuntimeError as exc:
                 error_detail = str(exc)
                 action_errors.append(
@@ -231,6 +237,7 @@ def evaluate_mahjong_solo_task(
                 return _make_result(
                     task,
                     observation_mode=observation_mode,
+                    history_prompt_version=history_prompt_version,
                     success=False,
                     draws=draws,
                     discards=discards,
@@ -248,12 +255,15 @@ def evaluate_mahjong_solo_task(
             raw_outputs.append(raw_output)
             if attempt_number == 1:
                 first_attempt_outputs[-1] = raw_output
-            reasoning_traces.append(_read_generation_trace(agent))
+            trace = _read_generation_trace(agent)
+            reasoning_traces.append(trace)
             action = extract_mahjong_solo_action(raw_output)
-            if observation_mode == "history-only":
-                conversation.append({
-                    "role": "assistant", "content": _action_history_content(action)
-                })
+            memory = _turn_reasoning_memory(trace, action)
+            reply: ChatMessage = {
+                "role": "assistant", "content": memory or _action_history_content(action),
+            }
+            conversation.append(reply)
+            messages.append(reply)
 
             if action is None:
                 last_error = "no_json_action_extracted"
@@ -267,6 +277,7 @@ def evaluate_mahjong_solo_task(
                         return _make_result(
                             task,
                             observation_mode=observation_mode,
+                            history_prompt_version=history_prompt_version,
                             success=True,
                             draws=draws,
                             discards=discards,
@@ -300,6 +311,7 @@ def evaluate_mahjong_solo_task(
                                 hand.remove(discard)
                                 discards.append(discard)
                                 prior_turns.append((drawn_tile, discard))
+                                previous_turn_memory = memory
                                 turn_completed = True
                                 break
 
@@ -322,6 +334,7 @@ def evaluate_mahjong_solo_task(
     return _make_result(
         task,
         observation_mode=observation_mode,
+        history_prompt_version=history_prompt_version,
         success=False,
         draws=draws,
         discards=discards,
@@ -338,7 +351,9 @@ def evaluate_mahjong_solo_task(
     )
 
 
-def extract_mahjong_solo_action(output: str) -> dict[str, Any] | None:
+def extract_mahjong_solo_action(
+    output: str, *, allow_current_hand: bool = False,
+) -> dict[str, Any] | None:
     payload = _parse_json_object(output)
     if payload is None:
         return None
@@ -347,6 +362,8 @@ def extract_mahjong_solo_action(output: str) -> dict[str, Any] | None:
         return None
     action = action.strip().lower()
     allowed_fields = {"action"} if action == "tsumo" else {"action", "tile"}
+    if allow_current_hand:
+        allowed_fields.add("current_hand")
     if set(payload) - allowed_fields:
         return None
     parsed: dict[str, Any] = {"action": action}
@@ -372,6 +389,33 @@ def _action_history_content(action: dict[str, Any] | None) -> str:
             else:
                 return json.dumps({"action": "discard", "tile": tile})
     return "{}"
+
+
+def _turn_reasoning_memory(
+    trace: dict[str, Any] | None, action: dict[str, Any] | None,
+) -> str | None:
+    """Carry model outputs only, never captured request prompts or true states."""
+    if trace is None:
+        return None
+    parts: list[str] = []
+    for stage in trace.get("stages", []):
+        reasoning = stage.get("reasoning")
+        if isinstance(reasoning, str) and reasoning.strip():
+            parts.append(reasoning)
+        name = str(stage.get("stage_name", ""))
+        output = stage.get("output")
+        if (not name.endswith((".final", ".refine", ".native_thinking", ".truncation_final"))
+                and isinstance(output, str) and output.strip()):
+            parts.append(output)
+    if not parts:
+        parts = [trace[key] for key in ("reasoning", "plan", "solution", "draft", "critique")
+                 if isinstance(trace.get(key), str) and trace[key].strip()]
+    if not parts:
+        return None
+    return "\n\n".join([
+        "Previous turn's model-generated reasoning:", *parts,
+        "Previous submitted action:", _action_history_content(action),
+    ])
 
 
 def _valid_evaluation_results(results: list[Any]) -> list[Any]:
@@ -504,12 +548,15 @@ def summarize_mahjong_solo(
         ),
         "success": success_count,
         "success_rate": success_count / evaluated_total if evaluated_total else None,
-        **_summarize_process_scores(valid_results),
         "illegal_tsumo_total": illegal_tsumo_total,
         "shanten_optimal_discard_rate": mean_episode_shanten_discard_rate(valid_results),
         **_summarize_action_retry_metrics(results),
         "metrics": summarize_metrics(results),
     }
+    versions = {result.history_prompt_version for result in results
+                if isinstance(result, MahjongHistoryActionInstanceResult)}
+    if versions:
+        summary["history_prompt_version"] = next(iter(versions)) if len(versions) == 1 else "mixed"
     if error is not None:
         summary["error"] = error
     return summary
@@ -565,6 +612,7 @@ def _make_result(
     task: MahjongSoloTask,
     *,
     observation_mode: str,
+    history_prompt_version: str = "v1",
     success: bool,
     draws: list[str],
     discards: list[str],
@@ -580,7 +628,6 @@ def _make_result(
     metrics: dict[str, object],
 ) -> MahjongSoloInstanceResult:
     api_error = any(item.get("error") == "agent_request_error" for item in action_errors)
-    process = _episode_process_fields(task, raw_outputs, api_error, STANDARD_RULES)
     strategy = evaluate_shanten_discard_strategy(
         task.initial_hand,
         draws,
@@ -590,12 +637,13 @@ def _make_result(
         is_winning_hand,
         extract_mahjong_solo_action,
     )
-    return MahjongSoloInstanceResult(
+    result_type = (MahjongHistoryActionInstanceResult if observation_mode == "history-only"
+                   else MahjongSoloInstanceResult)
+    return result_type(
         task_id=task.id,
         observation_mode=observation_mode,
+        **({"history_prompt_version": history_prompt_version} if observation_mode == "history-only" else {}),
         success=None if api_error else success,
-        score=None if api_error else (1.0 if success else process["process_score"]),
-        **process,
         evaluation_status="api_error" if api_error else "completed",
         draws=list(draws),
         discards=list(discards),
@@ -616,29 +664,6 @@ def _make_result(
 
 def _read_generation_trace(agent: Agent) -> dict[str, Any] | None:
     return read_mahjong_generation_trace(agent)
-
-
-def _episode_process_fields(
-    task: Any, raw_outputs: list[str], api_error: bool, channel: str,
-) -> dict[str, Any]:
-    if api_error:
-        return {"process_score": None, "correct_steps": 0, "total_steps": 0,
-                "step_scores": []}
-    from minibench.datasets.mahjong_solo.oracle import score_episode
-    process = score_episode(task, raw_outputs, channel=channel)
-    return {"process_score": process["process_score"],
-            "correct_steps": process["correct_steps"],
-            "total_steps": process["total_steps"], "step_scores": process["steps"]}
-
-
-def _summarize_process_scores(results: list[Any]) -> dict[str, float | None]:
-    results = _valid_evaluation_results(results)
-    return {
-        "average_score": (sum(item.score for item in results) / len(results)
-                          if results else None),
-        "average_process_score": (sum(item.process_score for item in results) / len(results)
-                                  if results else None),
-    }
 
 
 def _score_tsumo(

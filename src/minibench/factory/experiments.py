@@ -228,7 +228,7 @@ def _mahjong_rule_variants_spec() -> TaskFamilySpec:
     )
 
     return TaskFamilySpec(
-        default_path=Path("data/mahjong_solo/tasks_win.jsonl"),
+        default_path=Path("data/mahjong_rule_variants/cyclic_odd_tasks.jsonl"),
         load_tasks=load_mahjong_rule_variant_tasks,
         evaluate_tasks=evaluate_mahjong_rule_variant_tasks,
         summarize=summarize_mahjong_rule_variants,
@@ -282,14 +282,7 @@ def run_family_experiment(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]
         tasks = _select_mahjong_rule_configuration(tasks, evaluation_config)
     limit = task_config.get("limit")
     if limit is not None:
-        if family == "mahjong_rule_variants":
-            source_ids = list(dict.fromkeys(task.source_task_id for task in tasks))
-            selected_source_ids = set(source_ids[: int(limit)])
-            tasks = [
-                task for task in tasks if task.source_task_id in selected_source_ids
-            ]
-        else:
-            tasks = tasks[: int(limit)]
+        tasks = tasks[: int(limit)]
 
     run_config = config["run"]
     if family == "zebra":
@@ -707,6 +700,10 @@ def _select_mahjong_rule_configuration(
         selected = [task for task in tasks if task.channel in wanted_channels]
         if not selected:
             raise ValueError("Mahjong rule configuration selected no tasks")
+        missing_channels = wanted_channels - {task.channel for task in selected}
+        if missing_channels:
+            raise ValueError("Mahjong rule dataset missing requested channel(s): "
+                             + ", ".join(sorted(missing_channels)))
         return selected
     if configured_rules is not None:
         if isinstance(configured_rules, str):
@@ -830,14 +827,16 @@ def _evaluate(
             tasks,
             agent,
             observation_mode=evaluation_config.get("observation_mode", "full-hand"),
+            history_prompt_version=evaluation_config.get("history_prompt_version", "v1"),
             show_progress=bool(evaluation_config.get("show_progress", False)),
             on_result=on_result,
         )
     if family == "mahjong_rule_variants":
+        if "observation_mode" in evaluation_config:
+            raise ValueError("static Mahjong rule tasks do not use evaluation.observation_mode")
         return spec.evaluate_tasks(
             tasks,
             agent,
-            observation_mode=evaluation_config.get("observation_mode", "full-hand"),
             show_progress=bool(evaluation_config.get("show_progress", False)),
             on_result=on_result,
         )
@@ -1931,7 +1930,7 @@ def _run_checkpointed_mahjong_experiment(
     completed_results: list[Any] = []
 
     def checkpoint(payload: Any) -> None:
-        if family == "mahjong":
+        if family in {"mahjong", "mahjong_rule_variants"}:
             completed_results.append(payload)
         else:
             completed_results[:] = payload

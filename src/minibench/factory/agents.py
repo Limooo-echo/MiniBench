@@ -144,6 +144,7 @@ def make_agent(
     max_retries: int = 0,
     retry_initial_backoff_seconds: float = 1.0,
     retry_max_backoff_seconds: float = 30.0,
+    native_thinking_max_tokens: int | None = None,
 ) -> Agent:
     name = canonical_agent_name(name)
     if predictions:
@@ -194,6 +195,7 @@ def make_agent(
         beam_width=beam_width,
         max_search_nodes=max_search_nodes,
         max_subproblems=max_subproblems,
+        native_thinking_max_tokens=native_thinking_max_tokens,
     )
     return REASONING_AGENTS[name](client, config)
 
@@ -230,6 +232,7 @@ def make_agent_from_config(
         reasoning_temperature=float(agent_config.get("reasoning_temperature", 0.7)),
         final_temperature=float(agent_config.get("final_temperature", 0.0)),
         max_reasoning_tokens=int(agent_config.get("max_reasoning_tokens", 512)),
+        native_thinking_max_tokens=_optional_int(agent_config, "native_thinking_max_tokens"),
         prompt_version=str(agent_config.get("prompt_version", "v2")),
         trace=str(agent_config.get("trace", "summary")),
         max_llm_calls=_optional_int(agent_config, "max_llm_calls"),

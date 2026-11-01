@@ -27,7 +27,7 @@ bash scripts/cloud_run.sh config/cloud/xiangqi-pilot.yaml runs/cloud-pilot-8 --w
 minibench score-suite --manifest config/scoring/manifest.example.yaml --weights config/scoring/weights.yaml --output outputs/my-scoring-report
 ```
 
-示例清单固定了原题文件及 SHA-256，`runs` 留空，运行后会如实报告缺失覆盖。填入已保存的逐题结果及其原始配置来源后再发布正式比较；不要用当前配置推断旧实验。输出目录须为空或尚不存在。
+示例清单用原题文件及 SHA-256 固定题库，`runs` 留空；麻将静态改规则使用独立奇数转换题库，须生成后固定其真实 SHA-256，不能沿用旧配对或摸打题库的哈希。填入已保存的逐题结果及其原始配置来源后再发布正式比较；不要用当前配置推断旧实验。输出目录须为空或尚不存在。
 
 评分版本 2.0.0 使用 `s = Y + (1 - Y) × P`，过程分不放缩，每题每条件运行一次，维度内任务等权。连续麻将按给定牌墙逐步计算最早和牌动作集，过程分为命中步数 / 总动作步数；麻将图像题与文字题使用相同目标和过程分标准。旧缩放或人工权重配置需要更新。
 
@@ -390,7 +390,7 @@ CoT/ToT 等 phase-aware 包装器会在中间轮使用轻量消息调用，只�
 
 ### 4.4 麻将
 
-合并兼容说明：当前麻将 CoT 配置显式使用 `prompt_version: v1`，沿用本地已验证的内部推理提示词及 history-only 的 current-turn 包装；推理阶段不要求只输出任务 JSON。`samples` 已移除（新配置校验不接受 CoT 中无效的采样参数），原有温度和 token 上限保持不变。麻将评测使用原有三次动作尝试，关闭 runtime 的额外格式修复，避免首次回答指标被隐式修复改变；内部阶段输出按轮保存。非空截断推理仍进入 final，并保留 `finish_reason`。
+麻将五份实验配置统一使用 `direct`、`prompt_version: v1`、DeepSeek官方调用名 `deepseek-flash`（V4.1 Flash）并开启thinking。`agent.native_thinking_max_tokens: 7168` 控制首次请求的完成预算，包含该次思考与答案；若因长度截断且未形成有效JSON，使用保留的 `agent.max_tokens: 1024` 关闭thinking收尾一次；已得到有效JSON时直接返回。两次逻辑调用最多分配8192完成token，不是服务端原生的“思考7168＋强制答案1024”保证。收尾仍截断或格式错误记作答失败；真正网络／服务失败仍记API未知。普通Solo／History-only每轮只允许一次最终动作，收尾不是环境反馈后的动作重答；静态及图片每题只提交一次答案。格式修复关闭，保存原生思考、阶段输出和 `finish_reason`。
 
 main 的新 ToT 是 beam/BFS 搜索，使用 `prompt_version: v2` 及 `max_depth`、`branching_factor`、`beam_width`，不再是旧版三个候选再选择；旧 ToT 成绩不能当成新版 ToT 成绩混合汇总。要切换为新 ToT，请同时修改 `name` 和 `prompt_version`，并使用新的实验目录。
 
@@ -398,11 +398,62 @@ main 的新 ToT 是 beam/BFS 搜索，使用 `prompt_version: v2` 及 `max_depth
 | --- | --- |
 | `mahjong.yaml` | 静态牌型文本推理 |
 | `mahjong_solo.yaml` | 标准规则下的 full-hand 单人摸弃决策 |
-| `mahjong_rule_variants.yaml` | 全手牌规则适应，默认扩展全部规则通道 |
+| `mahjong_rule_variants.yaml` | 两份独立规则题库共400题，分别运行奇数牌转换与红中万能牌的听牌、最优弃牌题 |
 | `mahjong_history_only.yaml` | 标准规则下的在线多轮 history-only 决策 |
-| `mahjong_multimodal.yaml` | 静态 600 题的一一对应图片版本，仅运行 image，默认 Qwen |
+| `mahjong_multimodal.yaml` | 静态 600 题的一一对应图片版本，仅运行 image，默认 DeepSeek Flash |
 
-当前静态麻将六个子题组各 100 道（共 600 道），多模态逐题镜像。Solo、history-only 和改规则共用 100 道摸打源题，每个改规则通道各 100 道。原有静态 90 道、摸打 15 道的题目和 ID 均保留；新增题使用现有生成器，随机种子为 `20261011`。摸打仍使用 50 轮上限，初始向听不超过 2、初始进张至少 12、参考策略 18 轮内胡牌，并要求 10 次并列弃牌随机模拟的胡牌率至少 0.8。题目筛选、提示词和评分逻辑不变。
+
+当前普通静态麻将六个子题组各 100 道（共 600 道），多模态逐题镜像。普通 Solo、history-only 共用 100 道摸打源题，新生成协议为最多10轮，胡牌提前结束，首次非法动作或格式错误立即结束整题。运行下方命令后，原50轮题库会被10轮题库原地替换；未重新生成时，旧题库仍保留其记录的轮数。旧实验结果保留；改规则不使用单人摸打题。
+
+普通 Solo 和 History-only 现在使用同一套上一轮推理上下文协议：每次新摸牌时，只保留固定规则、上一轮模型生成的推理文本与最终动作，以及本轮观察；不重放更早的原始对话、初始手牌或逐轮摸弃记录。第一轮两者都获得包含首摸的真实14张手牌。此后 History-only 的正常观察只有新摸牌；Full-hand 额外提供上一轮弃牌后的真实13张手牌。模型在推理文本中维护继续决策所需的手牌和累计弃牌计数，环境不会用真实手牌纠正 History-only 的记忆。两种模式每轮都只允许首次最终回答；非法自摸、非法弃牌或按现有解析规则判定的格式错误立即结束整题并记失败，不反馈后重答，也不继续摸牌。合法弃牌仍进入下一轮，沿用该次被接受动作对应的推理。API传输重试独立保留；传输最终失败仍记为未知结果并排除出能力评分。
+
+最终答案统一只包含动作：自摸使用 `{"action":"tsumo"}`，弃牌使用 `{"action":"discard","tile":"..."}`。显式报告 `current_hand` 的任务提示词 v2 已删除，新的运行不输出 `hand_reconstruction_*` 指标；旧实验文件保留。`evaluation.history_prompt_version` 可省略，显式设置时只接受 `v1`；它与 `agent.prompt_version` 独立。当前 `mahjong_history_only.yaml` 和 `mahjong_solo.yaml` 使用同一批100题、Direct原生思考7168预算及条件式1024收尾，并使用不同的新运行目录。只保留一个 History-only YAML，原 `mahjong_history_only_action_only.yaml` 已移除。
+
+该协议需要可读取的推理文本，例如 CoT 的内部推理、其他推理架构的内部阶段输出，或服务商返回的原生思考文本。仅提供动作而没有可保存推理的 Agent 无法维持这份跨轮记忆，会在下一轮明确报错；不会把缺少上下文的运行当作能力失败。完整阶段日志仍保存在结果中，但只有上一轮模型生成的内容会进入下一轮请求。新预测记录 `max_action_attempts: 1`；离线评分据此重放，没有该字段的旧记录继续按原来的三次动作尝试规则处理。已有成功率、首答合法率、非法动作率等指标保留；新协议下 `strict_first_attempt_success` 等于成功率，`retry_corrected_success` 为0。Solo／History-only不再计算或输出过程分及相关单题分数和平均分，保留独立的向听→进张匹配率和逐步候选集合；统一离线评分也只按是否胡牌计分。新配置使用带 `first-attempt` 的运行名，保留此前结果。
+
+10轮生成标准（`solo-10-rounds-v1`）：从完整136张牌随机洗牌，取前13张为初始手牌、之后10张为固定摸牌序列，不动态给Agent补牌。初始一向听、二向听各50题，排除零向听，初始有效进张至少12张（按剩余实体牌张数而非牌种数，不设上限）。生成用的确定性参考策略仍为最低向听数→并列最大有效进张→并列时按固定牌序；要求该参考轨迹在第6–10轮胡牌。同一手牌和牌山再做10次随机并列弃牌试验，至少8次在10轮内胡牌。它不保证所有策略均可成功、不会提前胡牌，也不代表LLM有80%正确率。两种初始难度交错排列，两个主实验YAML均运行100题。生成参考策略不变；新评测不再计算固定未来牌墙的最早胡牌过程分，只保留向听→进张匹配诊断。
+
+重新生成共用题库（默认即使用上述标准；只有凑齐全部题目后才覆盖）：
+
+```bash
+python -m minibench.cli generate-mahjong-solo \
+  --output data/mahjong_solo/tasks_win.jsonl \
+  --count 100 --seed 20260702 --overwrite
+```
+
+静态改规则的“三通道共用手牌”方案、叠加通道及 `generate-mahjong-rules` 旧生成命令已移除。两个规则使用独立题库：`cyclic_odd_tile_substitution` 将1/3/5/7/9强制同时按条→万→筒→条转换一次，偶数和字牌不变；`red_dragon_wildcard` 中每张红中可独立替代任意数牌或字牌，普通牌形、七对及十三幺都保留。两规则不共享手牌，也不叠加。 两者现由一份 `mahjong_rule_variants.yaml` 运行，`task.path`列出两份原JSONL，`evaluation.rule_channels`列出两个独立规则；原生成命令和题库文件不变，单独红中YAML已移除。
+
+先通过代码生成新的奇数转换题库，不会自动生成或覆盖正式数据：
+
+```bash
+python -m minibench.cli generate-mahjong-odd-rules \
+  --output data/mahjong_rule_variants/cyclic_odd_tasks.jsonl \
+  --reference-tasks data/mahjong/tasks.jsonl \
+  --count-per-type 100 --seed 42 --prefix mj-odd
+```
+
+生成器复用普通 Easy 的“四面子一对子→移除一张”听牌构造与原最大听牌弃牌筛选，再将奇数逻辑牌逆向改名（万→条、筒→万、条→筒）。不是直接转换已有题库。默认两类各100题，改名前后均须非清一色；展示手牌与参考题库及新题内部去重，忽略牌序。听牌答案必须异于忽略规则的普通答案；弃牌保持唯一最优，且普通规则最优集合不能包含它。原听牌数量和弃牌效用排序在等价改名中保留，不限制最多3种听牌。听牌输出完整 `winning_tiles`，弃牌输出一个 `discard`，均为原始物理牌码。JSONL 保存标准答案及 seed、版本、逻辑手牌、参考题库 SHA-256，供复现，不提供给 Agent。
+
+红中独立生成命令（默认两类各100题；首次建议用较小的 `--count-per-type` 检查分布）：
+
+```bash
+python -m minibench.cli generate-mahjong-red-rules \
+  --output data/mahjong_rule_variants/red_dragon_tasks.jsonl \
+  --reference-tasks data/mahjong/tasks.jsonl \
+  --count-per-type 100 --seed 42 --prefix mj-red
+```
+
+红中生成器从随机普通 Easy 听牌结构出发；弃牌候选额外加入一张随机合法物理牌。若原候选已有多张红中，则重新抽取；若没有红中，则随机替换一个位置为红中，保证展示手牌恰好1张C。生成版本为 `static-red-single-c-uncapped-v1`，仍为单C采样，但取消旧版最多3种听牌的筛选。它是普通牌形派生的候选分布，不是所有合法手牌的均匀采样，也不使用少数固定通过模板或配额补数。先完整枚举标准答案，再整题筛选：13张题完整听牌集合非空；14张题唯一最优弃牌后能够听牌，且仍保留这张C，两类题均不限制听牌种类数上限。该听牌集合必须含至少一种普通规则下不能胡的非红中牌；最优弃牌不能同时属于普通规则最优集合。初始恰好1张C只是题库约束，摸入另一张C仍可合法胡牌，完整答案必须保留这种进张；不削弱万能牌规则，不截断标准答案。
+
+生成命令同时打印并保存 `<题库名>.generation.json`，按题型报告尝试数、接受率、首个拒绝原因，以及筛选前后红中数、字牌数、四张同牌组数和答案规模分布。接受率低于1%、样本不足20或接受样本单个分布档占比≥90%时给出提示，不自动调整筛选条件。`--max-attempts` 是每种题型的候选上限；生成不足仍保存诊断、返回非零状态，但不写入或覆盖题库。已有题库或诊断默认均拒绝覆盖；只有显式 `--overwrite` 才允许重生成。严格筛选的弃牌题可能生成较慢，应先检查接受率和结构偏差再做正式实验。
+
+两规则结果均在 `by_channel.<规则>.by_task_type.<题型>.by_answer_size` 中按答案数量输出总数、实际评测数、成功数、成功率和API错误数；听牌题按完整听牌数分层，弃牌题按最优弃牌后的 `max_wait_count` 分层。总体成功率仍为主指标，只比较两规则都存在的规模档；不存在的档不补零，分层内API失败也不计作能力失败。取消红中答案数量上限不代表两规则的内在难度完全一致，奇数规则的题库和筛选保持不变。
+
+仅红中万能牌的听牌题另报补C辅助指标：逐题 `success_with_c_added`，在红中听牌汇总及答案数量分层中报告 `success_rate_with_c_added`。对原答案仅在缺少C时补入C，再与完整标准答案严格比较；原本正确的答案也计入，其他漏答、多答、重复、非法牌码、格式错误或额外字段仍判错。API失败的逐题指标为null，并排除出成功率分母。原 `success`、`score`、`success_rate`、原始输出与解析答案不变；奇数转换和弃牌题不输出该字段，旧实验文件不回写。
+
+普通静态、静态改规则和多模态题统一新增逐题 `is_legal`，以及总体和各分组的 `legality_rate`，按有效回答的整题合法性取平均。弃牌题只检查主字段 `discard`：必须是合法物理牌码且在真实手牌中；听牌题只检查 `winning_tiles`：必须是列表且每项都是合法牌码，空列表和重复合法牌码仍算合法。沿用原有牌码规范化；无法解析JSON、缺少主字段或主字段类型错误记不合法。漏答、多答、非最优弃牌、附带听牌或剩余张数错误、转录错误和额外字段不影响这项合法率，原正确率继续严格评分。图片题以真实手牌判断，改规则题以转换前的物理牌码判断；API失败排除出分母，没有有效回答时为null。Solo／History-only的指标不变，旧实验文件不回写。
+
+新格式每行只是一道独立题，不做跨通道展开。已有输出默认拒绝覆盖；筛选未完成不会写入半成品，也不允许覆盖参考题库。旧 `data/mahjong_rule_variants/tasks.jsonl` 和 `runs/` 原样保留作记录，旧题库格式仍被拒绝。普通静态和多模态的生成、提示词和评分不变；Solo/history-only使用上述10轮协议。
 
 ```bash
 minibench run-config config/experiments/mahjong.yaml
@@ -412,7 +463,7 @@ minibench run-config config/experiments/mahjong_history_only.yaml
 minibench run-config config/experiments/mahjong_multimodal.yaml
 ```
 
-麻将 history-only 只在第一轮提供初始手牌，后续只提供新摸牌和环境已接受的历史弃牌。由于每轮弃牌都是正式计分决策，每轮都以 `final` 阶段调用 agent；兼容仅实现旧 `generate_messages()` 接口的自定义 agent。
+麻将 History-only 只在第一轮提供初始手牌，后续从上一轮模型推理和动作继续，本轮正常输入只报告新摸牌。Full-hand 使用相同上下文结构，并额外提供真实13张手牌。由于每轮动作都是正式计分决策，每轮都以 `final` 阶段调用 Agent；仅实现旧 `generate_messages()` 的自定义 Agent 还需提供可读取的推理日志。
 
 麻将视觉图片来自仓库内牌面素材与确定性 Pillow 渲染器。视觉数据逐题复用静态麻将的 ID、手牌、公开牌、目标和标准答案，仅把牌码输入转换成图片。重新渲染使用：
 

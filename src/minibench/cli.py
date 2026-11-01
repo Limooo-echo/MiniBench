@@ -59,14 +59,6 @@ def _select_tasks(tasks: list[Any], task_ids: list[str] | None) -> list[Any]:
     return selected
 
 
-def _limit_mahjong_rule_sources(tasks: list[Any], limit: int | None) -> list[Any]:
-    if limit is None:
-        return tasks
-    source_ids = list(dict.fromkeys(task.source_task_id for task in tasks))
-    selected_source_ids = set(source_ids[:limit])
-    return [task for task in tasks if task.source_task_id in selected_source_ids]
-
-
 def _make_cli_agent(
     args: argparse.Namespace,
     *,
@@ -324,8 +316,11 @@ def _cmd_generate_mahjong_solo(args: argparse.Namespace) -> int:
             prefix=args.prefix,
             max_draws=args.max_draws,
             require_oracle_win=args.require_oracle_win,
+            min_initial_shanten=args.min_initial_shanten,
             max_initial_shanten=args.max_initial_shanten,
+            balance_initial_shanten=args.balance_initial_shanten,
             min_initial_ukeire=args.min_initial_ukeire,
+            min_oracle_win_turn=args.min_oracle_win_turn,
             max_oracle_win_turn=args.max_oracle_win_turn,
             greedy_simulations=args.greedy_simulations,
             min_greedy_win_rate=args.min_greedy_win_rate,
@@ -406,6 +401,35 @@ def _cmd_evaluate_mahjong_solo(args: argparse.Namespace) -> int:
     return 0 if summary["success"] == summary["total"] else 1
 
 
+def _cmd_generate_mahjong_odd_rules(args: argparse.Namespace) -> int:
+    from minibench.datasets.mahjong_rule_variants.generation import generate_mahjong_odd_rule_tasks
+
+    result = generate_mahjong_odd_rule_tasks(
+        output=args.output, reference_tasks=args.reference_tasks,
+        count_per_type=args.count_per_type, seed=args.seed, prefix=args.prefix,
+        max_attempts=args.max_attempts, overwrite=args.overwrite,
+    )
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _cmd_generate_mahjong_red_rules(args: argparse.Namespace) -> int:
+    from minibench.datasets.mahjong_rule_variants.red_generation import (
+        RedTaskGenerationError, generate_mahjong_red_rule_tasks,
+    )
+    try:
+        result = generate_mahjong_red_rule_tasks(
+            output=args.output, reference_tasks=args.reference_tasks,
+            count_per_type=args.count_per_type, seed=args.seed, prefix=args.prefix,
+            max_attempts=args.max_attempts, overwrite=args.overwrite,
+        )
+    except RedTaskGenerationError as exc:
+        print(json.dumps({**exc.report, "error": str(exc)}, indent=2, ensure_ascii=False))
+        return 1
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
 def _cmd_evaluate_mahjong_rules(args: argparse.Namespace) -> int:
     from minibench.datasets.mahjong_rule_variants.dataset import (
         load_mahjong_rule_variant_tasks,
@@ -421,31 +445,15 @@ def _cmd_evaluate_mahjong_rules(args: argparse.Namespace) -> int:
     from minibench.datasets.mahjong_rule_variants.rules import channel_for_rules
 
     tasks = load_mahjong_rule_variant_tasks(args.mahjong_rule_tasks)
-    if args.task_id:
-        wanted = set(args.task_id)
-        tasks = [
-            task
-            for task in tasks
-            if task.id in wanted or task.source_task_id in wanted
-        ]
-        found = {
-            requested
-            for requested in wanted
-            if any(
-                task.id == requested or task.source_task_id == requested
-                for task in tasks
-            )
-        }
-        missing = wanted - found
-        if missing:
-            raise SystemExit(f"unknown task id(s): {', '.join(sorted(missing))}")
+    tasks = _select_tasks(tasks, args.task_id)
 
     selected_rule_channel = args.rule_channel
     if args.rules:
         selected_rule_channel = channel_for_rules(tuple(args.rules))
     if selected_rule_channel:
         tasks = [task for task in tasks if task.channel == selected_rule_channel]
-    tasks = _limit_mahjong_rule_sources(tasks, args.limit)
+    if args.limit is not None:
+        tasks = tasks[:args.limit]
     if not tasks:
         raise SystemExit("mahjong rule evaluation selected no tasks")
 
@@ -453,8 +461,8 @@ def _cmd_evaluate_mahjong_rules(args: argparse.Namespace) -> int:
     planned_total = len(tasks)
     completed_results = []
 
-    def checkpoint(completed):
-        completed_results[:] = completed
+    def checkpoint(result):
+        completed_results.append(result)
         write_mahjong_rule_variant_run(
             completed_results,
             args.output_dir,
@@ -464,7 +472,9 @@ def _cmd_evaluate_mahjong_rules(args: argparse.Namespace) -> int:
         )
 
     try:
-        checkpoint([])
+        write_mahjong_rule_variant_run(
+            [], args.output_dir, run_name, planned_total=planned_total, run_status="running",
+        )
         agent = _make_cli_agent(
             args,
             system_prompt=system_prompt_for_rule_channel(selected_rule_channel),
@@ -472,7 +482,6 @@ def _cmd_evaluate_mahjong_rules(args: argparse.Namespace) -> int:
         results = evaluate_mahjong_rule_variant_tasks(
             tasks,
             agent,
-            observation_mode=args.observation_mode,
             show_progress=args.progress,
             on_result=checkpoint,
         )
@@ -874,43 +883,50 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data/mahjong_solo/tasks_win.jsonl"),
     )
-    generate_mahjong_solo.add_argument("--count", type=int, default=50)
+    generate_mahjong_solo.add_argument("--count", type=int, default=100)
     generate_mahjong_solo.add_argument("--seed", type=int, default=20260702)
     generate_mahjong_solo.add_argument("--prefix", default="mj-solo")
-    generate_mahjong_solo.add_argument("--max-draws", type=int, default=18)
+    generate_mahjong_solo.add_argument("--max-draws", type=int, default=10)
     generate_mahjong_solo.add_argument(
         "--require-oracle-win",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Keep only tasks that the local shanten/ukeire oracle can tsumo.",
     )
+    generate_mahjong_solo.add_argument("--min-initial-shanten", type=int, default=1)
     generate_mahjong_solo.add_argument(
         "--max-initial-shanten",
         type=int,
-        default=None,
+        default=2,
         help="Keep tasks whose random initial hand is at or below this shanten.",
+    )
+    generate_mahjong_solo.add_argument(
+        "--balance-initial-shanten", action=argparse.BooleanOptionalAction, default=True,
+        help="Balance and interleave tasks across the requested initial-shanten range.",
     )
     generate_mahjong_solo.add_argument(
         "--min-initial-ukeire",
         type=int,
-        default=0,
+        default=12,
         help="Keep tasks whose initial hand has at least this many effective tiles.",
     )
+    generate_mahjong_solo.add_argument("--min-oracle-win-turn", type=int, default=6)
     generate_mahjong_solo.add_argument(
         "--max-oracle-win-turn",
         type=int,
-        default=None,
+        default=10,
         help="Keep tasks whose hidden local oracle wins by this draw number.",
     )
     generate_mahjong_solo.add_argument(
         "--greedy-simulations",
         type=int,
-        default=0,
+        default=10,
         help="Randomly resolve tied greedy discards this many times per candidate.",
     )
     generate_mahjong_solo.add_argument(
         "--min-greedy-win-rate",
         type=float,
-        default=0.0,
+        default=0.8,
         help="Minimum win rate required across tied-discard simulations.",
     )
     generate_mahjong_solo.add_argument("--max-attempts", type=int, default=None)
@@ -949,8 +965,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["full-hand", "history-only"],
         default="full-hand",
         help=(
-            "full-hand shows the current hand; history-only shows the initial "
-            "deal and completed draw-discard history."
+            "Both modes retain only the previous turn's reasoning and action. "
+            "full-hand additionally shows the true 13-tile hand before each new draw."
         ),
     )
     evaluate_mahjong_solo.add_argument(
@@ -982,29 +998,58 @@ def build_parser() -> argparse.ArgumentParser:
     _add_run_args(evaluate_mahjong_solo)
     evaluate_mahjong_solo.set_defaults(func=_cmd_evaluate_mahjong_solo)
 
+    generate_mahjong_odd_rules = subparsers.add_parser(
+        "generate-mahjong-odd-rules",
+        help="Generate independent Easy odd-suit rule tasks by equivalent tile renaming.",
+    )
+    generate_mahjong_odd_rules.add_argument(
+        "--output", type=Path, default=Path("data/mahjong_rule_variants/cyclic_odd_tasks.jsonl"),
+    )
+    generate_mahjong_odd_rules.add_argument(
+        "--reference-tasks", type=Path, default=Path("data/mahjong/tasks.jsonl"),
+        help="Exclude displayed hands already present in this ordinary static dataset.",
+    )
+    generate_mahjong_odd_rules.add_argument("--count-per-type", type=int, default=100)
+    generate_mahjong_odd_rules.add_argument("--seed", type=int, default=42)
+    generate_mahjong_odd_rules.add_argument("--prefix", default="mj-odd")
+    generate_mahjong_odd_rules.add_argument("--max-attempts", type=int, default=100000)
+    generate_mahjong_odd_rules.add_argument("--overwrite", action="store_true")
+    generate_mahjong_odd_rules.set_defaults(func=_cmd_generate_mahjong_odd_rules)
+
+    generate_mahjong_red_rules = subparsers.add_parser(
+        "generate-mahjong-red-rules",
+        help="Generate independent single-C red-wildcard tasks without an answer-size cap.",
+    )
+    generate_mahjong_red_rules.add_argument(
+        "--output", type=Path, default=Path("data/mahjong_rule_variants/red_dragon_tasks.jsonl"),
+    )
+    generate_mahjong_red_rules.add_argument(
+        "--reference-tasks", type=Path, default=Path("data/mahjong/tasks.jsonl"),
+    )
+    generate_mahjong_red_rules.add_argument("--count-per-type", type=int, default=100)
+    generate_mahjong_red_rules.add_argument("--seed", type=int, default=42)
+    generate_mahjong_red_rules.add_argument("--prefix", default="mj-red")
+    generate_mahjong_red_rules.add_argument("--max-attempts", type=int, default=100000)
+    generate_mahjong_red_rules.add_argument("--overwrite", action="store_true")
+    generate_mahjong_red_rules.set_defaults(func=_cmd_generate_mahjong_red_rules)
+
     evaluate_mahjong_rules = subparsers.add_parser(
         "evaluate-mahjong-rules",
-        help="Run standard and modified Mahjong rule channels.",
+        help="Evaluate independent static odd-suit or red-wildcard Mahjong rule tasks.",
     )
     evaluate_mahjong_rules.add_argument(
         "--mahjong-rule-tasks",
         type=Path,
         default=None,
         help=(
-            "Path to base Mahjong solo tasks JSONL. Defaults to "
-            "data/mahjong_solo/tasks_win.jsonl."
+            "Path to independent rule tasks JSONL. Defaults to "
+            "data/mahjong_rule_variants/cyclic_odd_tasks.jsonl."
         ),
     )
     evaluate_mahjong_rules.add_argument(
         "--agent",
         choices=(*STATIC_GENERATIVE_AGENT_CHOICES, "openai-compatible"),
         default="passthrough",
-    )
-    evaluate_mahjong_rules.add_argument(
-        "--observation-mode",
-        choices=["full-hand", "history-only"],
-        default="full-hand",
-        help="Choose complete-hand or history-only observations.",
     )
     from minibench.datasets.mahjong_rule_variants.rules import (
         MODIFIED_RULES,
@@ -1016,14 +1061,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--rule-channel",
         choices=RULE_CHANNELS,
         default=None,
-        help="Evaluate one canonical rule channel; omit to run all eight.",
+        help="Select red-dragon wildcard or odd-rank suit substitution.",
     )
     rule_selection.add_argument(
         "--rule",
         dest="rules",
         action="append",
         choices=MODIFIED_RULES,
-        help="Repeat to select a two- or three-rule combination.",
+        help="Select one rule; combined rules are no longer supported.",
     )
     evaluate_mahjong_rules.add_argument(
         "--progress",

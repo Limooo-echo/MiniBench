@@ -30,7 +30,7 @@ CONDITIONS = {
     ("mahjong", "D"): ("mahjong", ("text",)),
     ("mahjong", "V"): ("mahjong", ("image",)),
     ("mahjong_solo", "H"): ("mahjong", ("history-only",)),
-    ("mahjong_rule_variants", "R"): ("mahjong", ("full-hand",)),
+    ("mahjong_rule_variants", "R"): ("mahjong", ("text",)),
 }
 
 
@@ -128,9 +128,9 @@ def _difficulty(task: dict, family: str) -> str:
 def _tasks(path: Path, family: str, dim: str) -> tuple[list[dict], list[dict]]:
     raw = read_jsonl(path)
     if family == "mahjong_rule_variants":
-        from minibench.datasets.mahjong_rule_variants.rules import RULE_CHANNELS
-        raw = [dict(t, id=f"{t['id']}--{channel}", source_task_id=t["id"], channel=channel)
-               for t in raw for channel in RULE_CHANNELS if channel != "standard"]
+        from dataclasses import asdict
+        from minibench.datasets.mahjong_rule_variants.dataset import load_mahjong_rule_variant_tasks
+        raw = [asdict(task) for task in load_mahjong_rule_variant_tasks(path)]
     selected, excluded = [], []
     for task in raw:
         if not isinstance(task.get("id"), str):
@@ -167,7 +167,7 @@ def _group(task: dict, family: str, dim: str) -> str:
     if family == "xiangqi_rule_variants":
         return str(task.get("ruleset") or object_hash(task["rules"]))
     if family == "mahjong_rule_variants":
-        return task["channel"]
+        return f"{task['channel']}/{task['goal']}"
     return "all"
 
 
@@ -196,7 +196,7 @@ def _record_mode(record: dict, family: str, dim: str) -> str | None:
     if family == "mahjong":
         return record.get("input_mode")
     if family == "mahjong_rule_variants":
-        return record.get("observation_mode")
+        return record.get("input_mode") if record.get("observation_mode") is None else None
     return "single"
 
 

@@ -1,34 +1,30 @@
 task:
   family: mahjong_solo
   path: data/mahjong_solo/tasks_win.jsonl
-  limit: null
+  limit: 100
   task_ids: []
-
 agent:
-  name: cot
+  name: direct
   prompt_version: v1
   max_format_repairs: 0
-  reasoning_temperature: 0.0
+  native_thinking_max_tokens: 7168
+  max_tokens: 1024
   final_temperature: 0.0
-  max_reasoning_tokens: 2048
-
 provider:
   name: deepseek
-  model: deepseek-v4-flash
+  model: deepseek-flash
   json_mode: true
-  max_tokens: 512
+  max_tokens: 1024
   timeout: 120
   max_retries: 3
   retry_initial_backoff_seconds: 1.0
   retry_max_backoff_seconds: 30.0
   extra_body:
     thinking:
-      type: disabled
-
+      type: enabled
 evaluation:
   observation_mode: history-only
   show_progress: true
-
 run:
   output_dir: runs
-  run_name: mahjong-history-only-cot-current-turn-v3-100
+  run_name: mahjong-history-only-10rounds-direct-thinking-flash-7168-1024
